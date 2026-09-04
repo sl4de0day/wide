@@ -1,0 +1,221 @@
+import { CircleAlert, Copy, Network, RefreshCw, TriangleAlert } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+import type { Diagnostic, ProjectScanFinding } from "@/lib/bridge";
+import { useT } from "@/lib/i18n";
+import { cn, basename, copyText } from "@/lib/utils";
+import { useDiagnostics } from "@/stores/diagnostics";
+import { useEditor } from "@/stores/editor";
+import { useProjectScan } from "@/stores/projectScan";
+import { useWorkspace } from "@/stores/workspace";
+
+type Tab = "problems" | "vulnerabilities";
+
+function certain(severity: Diagnostic["severity"]): boolean {
+  return severity === "error" || severity === "warning";
+}
+
+export function ProblemsPanel() {
+  const bySource = useDiagnostics((state) => state.bySource);
+  const tabs = useEditor((state) => state.tabs);
+  const revealAt = useEditor((state) => state.revealAt);
+  const root = useWorkspace((state) => state.root);
+  const t = useT();
+  const [tab, setTab] = useState<Tab>("problems");
+  const scanFindings = useProjectScan((state) => state.findings);
+  const scanning = useProjectScan((state) => state.scanning);
+
+  useEffect(() => {
+    if (root) void useDiagnostics.getState().scanProject(root);
+  }, [root]);
+
+  const { problems, vulns } = useMemo(() => {
+    const problems: Record<string, Diagnostic[]> = {};
+    const vulns: Record<string, Diagnostic[]> = {};
+    for (const [path, sources] of Object.entries(bySource)) {
+      const security = sources.security ?? [];
+      const rest = Object.entries(sources)
+        .filter(([source]) => source !== "security")
+        .flatMap(([, list]) => list ?? [])
+        .sort((a, b) => a.from - b.from);
+      if (rest.length) problems[path] = rest;
+      if (security.length) vulns[path] = security;
+    }
+    return { problems, vulns };
+  }, [bySource]);
+
+  const count = (group: Record<string, Diagnostic[]>) =>
+    Object.values(group).reduce((sum, list) => sum + list.length, 0);
+  const active = tab === "vulnerabilities" ? vulns : problems;
+  const entries = Object.entries(active).filter(([, list]) => list.length > 0);
+
+  const scanByFile = useMemo(() => {
+    const groups: Record<string, ProjectScanFinding[]> = {};
+    for (const finding of scanFindings) (groups[finding.file] ??= []).push(finding);
+    return Object.entries(groups);
+  }, [scanFindings]);
+
+  const lineFor = (path: string, from: number): number => {
+    const ft = tabs.find((item) => item.path === path);
+    if (ft?.kind !== "file") return 1;
+    let line = 1;
+    for (let i = 0; i < Math.min(from, ft.content.length); i += 1) if (ft.content[i] === "\n") line += 1;
+    return line;
+  };
+
+  const rowText = (path: string, d: Diagnostic) =>
+    `${basename(path)}:${lineFor(path, d.from)}  ${d.message.split("\n")[0]}`;
+  const scanRowText = (f: ProjectScanFinding) =>
+    `${basename(f.file)}:${f.line}  ${f.message.split("\n")[0]}` +
+    (f.relatedFile ? `  <- ${basename(f.relatedFile)}:${f.relatedLine}` : "");
+  const copy = (text: string) => void copyText(text);
+
+  const buildCopyRows = () =>
+    tab === "vulnerabilities"
+      ? [
+          ...scanFindings.map(scanRowText),
+          ...entries.flatMap(([path, list]) => list.map((d) => rowText(path, d))),
+        ]
+      : entries.flatMap(([path, list]) => list.map((d) => rowText(path, d)));
+  const copyAll = () => copy(buildCopyRows().join("\n"));
+
+  const hasRows = entries.length > 0 || (tab === "vulnerabilities" && scanFindings.length > 0);
+
+  const TabButton = ({ id, label, n }: { id: Tab; label: string; n: number }) => (
+    <button
+      type="button"
+      onClick={() => setTab(id)}
+      className={cn(
+        "flex items-center gap-1.5 px-3 py-1.5 text-[11px] transition-colors duration-100",
+        tab === id ? "border-b-2 border-accent text-fg-bright" : "text-fg-dim hover:text-fg",
+      )}
+    >
+      {label}
+      {n > 0 && <span className="rounded-sm bg-panel px-1 text-[10px] tabular-nums text-fg-faint">{n}</span>}
+    </button>
+  );
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center border-b border-line">
+        <TabButton id="problems" label={t("Problems")} n={count(problems)} />
+        <TabButton id="vulnerabilities" label={t("Vulnerabilities")} n={count(vulns) + scanFindings.length} />
+        <button
+          type="button"
+          onClick={copyAll}
+          disabled={!hasRows}
+          title={t("Copy all")}
+          className="ml-auto mr-2 flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-40"
+        >
+          <Copy className="size-3" strokeWidth={1.75} />
+          {t("Copy all")}
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto py-1">
+        {tab === "vulnerabilities" && (
+          <div className="mb-1 border-b border-line pb-1">
+            <div className="flex items-center gap-2 px-3 py-1.5">
+              <Network className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />
+              <span className="text-[11px] font-medium text-fg-muted">{t("Project scan (whole project)")}</span>
+              <span className="tabular-nums text-[10px] text-fg-faint">{scanFindings.length}</span>
+              {scanning && <RefreshCw className="ml-auto size-3 animate-spin text-fg-faint" strokeWidth={1.75} />}
+            </div>
+            {scanFindings.length === 0 ? (
+              <p className="px-3 pb-1 text-[11px] text-fg-faint">
+                {scanning ? t("Scanning…") : t("No findings in the project.")}
+              </p>
+            ) : (
+              scanByFile.map(([file, list]) => (
+                <div key={file}>
+                  <p className="flex items-center gap-2 px-3 text-[12px] text-fg-muted" style={{ height: "var(--h-row)" }} title={file}>
+                    <span className="truncate">{basename(file)}</span>
+                    <span className="ml-auto shrink-0 tabular-nums text-fg-faint">{list.length}</span>
+                  </p>
+                  {list.map((finding, index) => {
+                    const red = finding.severity !== "info";
+                    const Icon = red ? CircleAlert : TriangleAlert;
+                    return (
+                      <div key={`${file}:${index}`} className="group/row flex items-start hover:bg-hover">
+                        <button
+                          type="button"
+                          onClick={() => void revealAt(finding.file, finding.line)}
+                          title={finding.message}
+                          className="flex min-w-0 flex-1 items-start gap-2 py-1 pl-7 pr-1 text-left text-[12px]"
+                        >
+                          <Icon className={cn("mt-0.5 size-3 shrink-0", red ? "text-status-error" : "text-status-warn")} strokeWidth={2} />
+                          <span className="min-w-0 flex-1 truncate text-fg-dim">
+                            {finding.message.split("\n")[0]}
+                            {finding.relatedFile && (
+                              <span className="text-fg-faint">
+                                {" "}← {basename(finding.relatedFile)}:{finding.relatedLine}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copy(`${finding.file}:${finding.line}\n${finding.message}`)}
+                          title={t("Copy")}
+                          className="mr-2 mt-1 shrink-0 rounded-sm p-0.5 text-fg-faint opacity-0 transition-opacity duration-100 hover:text-fg group-hover/row:opacity-100"
+                        >
+                          <Copy className="size-3" strokeWidth={1.75} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+        {entries.length === 0 ? (
+          <p className="px-3 py-3 text-[12px] text-fg-faint">
+            {tab === "vulnerabilities" ? t("No vulnerabilities in the open files.") : t("No problems in the open files.")}
+          </p>
+        ) : (
+          entries.map(([path, list]) => (
+            <div key={path}>
+              <p
+                className="flex items-center gap-2 px-3 text-[12px] text-fg-muted"
+                style={{ height: "var(--h-row)" }}
+                title={path}
+              >
+                <span className="truncate">{basename(path)}</span>
+                <span className="ml-auto shrink-0 tabular-nums text-fg-faint">{list.length}</span>
+              </p>
+              {list.map((diagnostic, index) => {
+                const red = certain(diagnostic.severity);
+                const Icon = red ? CircleAlert : TriangleAlert;
+                return (
+                  <div key={`${path}:${index}`} className="group/row flex items-start hover:bg-hover">
+                    <button
+                      type="button"
+                      onClick={() => void revealAt(path, lineFor(path, diagnostic.from))}
+                      title={diagnostic.message}
+                      className="flex min-w-0 flex-1 items-start gap-2 py-1 pl-7 pr-1 text-left text-[12px]"
+                    >
+                      <Icon
+                        className={cn("mt-0.5 size-3 shrink-0", red ? "text-status-error" : "text-status-warn")}
+                        strokeWidth={2}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-fg-dim">{diagnostic.message.split("\n")[0]}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copy(`${path}:${lineFor(path, diagnostic.from)}\n${diagnostic.message}`)}
+                      title={t("Copy")}
+                      className="mr-2 mt-1 shrink-0 rounded-sm p-0.5 text-fg-faint opacity-0 transition-opacity duration-100 hover:text-fg group-hover/row:opacity-100"
+                    >
+                      <Copy className="size-3" strokeWidth={1.75} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}

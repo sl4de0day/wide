@@ -1,0 +1,666 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Social System Security Format  —  sssF
+#  Wide güvenlik ve denetim politikası
+#
+#  Bu dosya derlenir, uygulama ile birlikte çalışır ve canlı izlenir:
+#  kaydettiğin an yeniden derlenir. Derleme hata verirse son geçerli politika
+#  yürürlükte kalır — bozuk bir kural dosyası uygulamayı kilitlemez.
+#
+#  Sözdizimi:  # yorum,  "glob",  /regex/,  [ küme ]
+# ═══════════════════════════════════════════════════════════════════════════
+
+format sssF 1
+
+profile "wide" {
+  # enforce → deny gerçekten engeller
+  # audit   → hiçbir şey engellenmez, sadece kayda geçer (kuru çalışma)
+  # off     → yalnızca açık deny'ler loglanır
+  mode enforce
+
+  # Hiçbir kural eşleşmezse ne olacak. closed = reddet.
+  fail closed
+}
+
+# ─── Adlandırılmış kümeler ────────────────────────────────────────────────
+# Eğik çizgi içermeyen desenler dosya adına, içerenler projeye göreli yola
+# uygulanır.
+
+set secrets = [
+  ".env",
+  ".env.*",
+  "*.pem",
+  "*.key",
+  "*.p12",
+  "*.pfx",
+  "id_rsa",
+  "id_ed25519",
+  ".npmrc",
+  ".netrc",
+  "credentials.json",
+  "**/.aws/**",
+  "**/.ssh/**"
+]
+
+set vcs_internals = [ ".git/**", "**/.git/**" ]
+
+set build_output = [ "node_modules/**", "dist/**", "out/**", "target/**" ]
+
+# ─── Yetenekler ───────────────────────────────────────────────────────────
+# Kurallar kaynak sırasına göre değerlendirilir, ilk eşleşen kazanır.
+# Bu yüzden deny'ler her zaman allow'lardan önce yazılır.
+
+capability fs.read {
+  describe "Dosya okuma"
+
+  deny  when path matches secrets        reason "Gizli materyal okunamaz"
+  deny  when path matches vcs_internals  reason "VCS iç dosyaları"
+  allow when path inside project
+  # Proje açılmadan tek başına açılan dosya: yalnızca sistem seçiciden kişinin
+  # kendi seçtiği o dosya, bulunduğu klasör değil.
+  allow when path opened
+  deny  always                           reason "Proje dışı okuma"
+
+  audit on deny
+}
+
+capability fs.list {
+  describe "Dizin listeleme"
+
+  deny  when path matches vcs_internals  reason "VCS iç dosyaları"
+  allow when path inside project
+  deny  always                           reason "Proje dışı listeleme"
+
+  audit on deny
+}
+
+capability fs.write {
+  describe "Dosya yazma, taşıma, silme"
+
+  deny  when path matches secrets        reason "Gizli materyal üzerine yazılamaz"
+  deny  when path matches vcs_internals  reason "VCS iç dosyaları"
+  deny  when path matches build_output   reason "Üretilen çıktı elle yazılmaz"
+  allow when path inside project
+  # Tek başına açılan dosyanın kaydedilebilmesi için.
+  allow when path opened
+  deny  always                           reason "Proje dışı yazma"
+
+  # Kaçak bir döngünün diski doldurmasını engeller.
+  limit 120 per minute
+
+  audit always
+}
+
+capability fs.search {
+  describe "Proje içi metin arama"
+
+  allow when path inside project
+  deny  always reason "Proje dışı arama"
+
+  limit 60 per minute
+  audit on deny
+}
+
+capability workspace.open {
+  describe "Proje açma ve son projeler listesi"
+
+  # Hangi klasörün proje olarak açılacağı kullanıcının kararı; burada denetlenen
+  # şey erişim değil, kaydın tutulması. Açılan her proje denetim kaydına girer.
+  allow always
+
+  audit always
+}
+
+capability perf.read {
+  describe "Performans sayaçlarını okuma"
+
+  # Yalnızca sayaç okur, hiçbir şeye yazmaz. Saniyede iki kez çağrıldığı için
+  # denetim kaydı kapalı — açık olsaydı log'u tek başına bu doldururdu.
+  allow always
+
+  limit 240 per minute
+  audit never
+}
+
+capability index.query {
+  describe "Bellekteki quick-open indeksinde sorgu"
+
+  # Diske hiç dokunmaz: yalnızca zaten indekslenmiş yollar üzerinde çalışır.
+  # Bu yüzden yol denetimi yok — denetlenecek yol argümanı da yok.
+  allow always
+
+  # Tuş başına bir sorgu; sınır kaçak bir döngüye karşı, kullanıcıya karşı değil.
+  limit 600 per minute
+  audit never
+}
+
+capability shell.exec {
+  describe "Kabuk komutu çalıştırma"
+
+  deny when command matches /\brm\s+-[a-z]*[rf]/         reason "Özyinelemeli silme"
+  deny when command matches /\bmkfs\b|\bformat\s+[a-z]:/ reason "Disk biçimlendirme"
+  deny when command matches /\bdd\s+if=/                 reason "Ham blok yazma"
+  deny when command matches /:\s*\(\)\s*\{.*\}\s*;/      reason "Fork bombası"
+  deny when command matches /\bshutdown\b|\breboot\b/    reason "Sistem gücü"
+  deny when command matches /\bgit\s+push\s+.*--force/   reason "Zorlamalı push"
+  deny when command matches /\bcurl\b.*\|\s*(ba)?sh/     reason "İndir ve çalıştır"
+  deny when command matches /\bnpm\s+publish\b/          reason "Paket yayınlama"
+
+  allow always
+  audit always
+}
+
+capability terminal.spawn {
+  describe "PTY oturumu açma"
+
+  allow always
+  limit 12 per minute
+  audit always
+}
+
+capability toolscan.run {
+  describe "Güvenlik aracını bir kez çalıştırıp çıktısını toplama"
+
+  # Extensions'taki 'Run' formunun kurduğu komutu buffered çalıştırır; hız-sınırı
+  # + denetim, terminal.spawn ile aynı duruş.
+  allow always
+  limit 20 per minute
+  audit always
+}
+
+capability engine.serve {
+  describe "Projeyi yerel sunucuda çalıştırma ve varlıklarını tarama"
+
+  # Sunucu, işaret ettiği klasörü olduğu gibi yayınlar ve kimlik doğrulaması
+  # yoktur. Bu yüzden buradaki tek soru önemlidir: hangi klasör.
+  deny  when path matches secrets  reason "Gizli materyal yayınlanamaz"
+  allow when path inside project
+  deny  always                     reason "Proje dışı klasör sunulamaz"
+
+  limit 30 per minute
+  audit always
+}
+
+# Sunucuyu durdurmak bir klasöre dokunmaz, dolayısıyla engine.serve'in
+# "path inside project" kuralına takılacak bir yolu da yoktur — oraya bağlıyken
+# her çağrı son "deny always" kuralına düşüyor ve durdurma hiç çalışmıyordu.
+capability engine.control {
+  describe "Motoru durdurma"
+
+  allow always
+  limit 30 per minute
+  audit on deny
+}
+
+capability engine.inspect {
+  describe "Önizleme sayfasını inceleme ve içinde ifade değerlendirme"
+
+  allow always
+
+  # DOM ağacında gezinirken her satır bir vurgulama çağırır; sınır kullanıcıya
+  # değil, kaçak bir döngüye karşı.
+  limit 1200 per minute
+  audit on deny
+}
+
+capability tools.run {
+  describe "Kurulu bir aracın komutunu çalıştırma"
+
+  # Araç kodu üçüncü tarafındır ve kendi işleminde çalışır; oradaki her çağrı
+  # ayrıca tool.json'daki yetenek listesine ve resolveInProject'e takılır.
+  allow when path inside project
+  deny  always                     reason "Proje dışı araç çalıştırılamaz"
+
+  limit 60 per minute
+  audit always
+}
+
+capability tools.manage {
+  describe "Araçları listeleme ve yeni araç iskeleti oluşturma"
+  allow when path inside project
+  deny  always                     reason "Proje dışı araç klasörü"
+
+  audit on deny
+}
+
+# ─── Sürüm yönetimi (Codeberg eklentisi) ─────────────────────────
+# Bunlar çekirdeğin değil, kullanıcının kurduğu bir eklentinin yetenekleridir.
+# Eklenti kaldırıldığında arka uç zaten her çağrıyı reddeder; buradaki kurallar
+# kurulu olduğu sürece ne yapabileceğinin sınırıdır.
+
+capability vcs.read {
+  describe "Depo durumunu ve geçmişini okuma"
+
+  allow when path inside project
+  deny  always                     reason "Proje dışı depo"
+
+  # Panel her yenilemede sorar; izin verilen okumayı diske yazmak boşuna I/O.
+  audit on deny
+}
+
+capability vcs.write {
+  describe "Depoyu değiştirme (hazırlama, işleme, etiket, uzak adres)"
+
+  allow when path inside project
+  deny  always                     reason "Proje dışı depo"
+
+  limit 120 per minute
+  audit always
+}
+
+capability vcs.network {
+  describe "Codeberg ile eşitleme (push / pull)"
+
+  # Kod makineden çıkıyor. Hangi klasör olduğu önemli, ve her eşitleme kayda geçer.
+  deny  when path matches secrets  reason "Gizli materyal gönderilemez"
+  allow when path inside project
+  deny  always                     reason "Proje dışı depo"
+
+  limit 30 per minute
+  audit always
+}
+
+capability vcs.credential {
+  describe "Codeberg erişim jetonunu Git kimlik yöneticisine verme"
+
+  # Jeton Wide'da tutulmaz: alt sürecin stdin'ine yazılır, Git'in kimlik
+  # yöneticisi saklar. Bu bağlamaya bilerek HİÇBİR alan bağlanmaz — denetim
+  # kaydı yalnızca bağlanan alanları yazar, dolayısıyla jeton kayda giremez.
+  allow always
+
+  limit 10 per minute
+  audit always
+}
+
+capability extensions.provision {
+  describe "Dil sunucusunu ekosistemin paket yöneticisiyle kurma"
+
+  # Bu yetenek makineye paket kurar. Komut tamamen Wide'ın içindeki sabit
+  # tablodan gelir; yazılan hiçbir metin buraya ulaşmaz. Yine de her
+  # çalıştırma kayda geçer — kullanıcının makinesine bir şey kuran tek yol
+  # budur, ve neyin ne zaman kurulduğu sorulabilir olmalıdır.
+  allow always
+
+  # Bir kurulum dakikalar sürebilir; dakikada 20 fazlasıyla yeter.
+  limit 20 per minute
+  audit always
+}
+
+capability extensions.manage {
+  describe "İsteğe bağlı eklenti kurma ve kaldırma"
+
+  # Bir eklenti kurmak yetenek açar; açıldığı an kayda geçsin.
+  allow always
+
+  # Dakikada 30, 18 dil eklentisi varken fazla dardı: listeyi boşaltmak tek
+  # başına sınıra dayanıyor ve son birkaç kaldırma reddediliyordu. Bu bir
+  # küçük dosya yazmaktır; sınır fs.write ile aynı yerde.
+  limit 120 per minute
+  audit always
+}
+
+# ─── AI asistanı (eklenti) ────────────────────────────────────────
+# Asistanın dosyaya dokunan her adımı buradan geçer ve kayıtta öznesi "ai"
+# olarak durur — kişinin kendi okumasıyla karışmaz. Eklenti kaldırıldığında
+# arka uç zaten her çağrıyı reddeder; bunlar kurulu olduğu sürece sınırdır.
+
+capability ai.egress {
+  describe "Bulut sağlayıcısına istek gönderme"
+
+  # Yalnızca tanınan sağlayıcılar. Başka bir ad, sağlayıcı seçimi bozulmuş ya da
+  # bir model uydurmuş demektir; ikisi de geçmemeli.
+  #
+  # "local" burada çünkü tur bu kapıdan geçiyor; kendisi 127.0.0.1'e gider ve
+  # asıl sınırı ai.local koyar. "claude-code" ağa CLI üzerinden çıkar.
+  deny  when arg 0 matches /^(?!(gemini|deepseek|claude|claude-code|local)$)/  reason "Tanınmayan sağlayıcı"
+  allow always
+
+  limit 120 per minute
+  audit always
+}
+
+capability ai.credential {
+  describe "Sağlayıcı anahtarını saklama"
+
+  # Bu bağlamaya bilerek HİÇBİR alan bağlanmaz. Denetim kaydı yalnızca
+  # bağlanan alanları yazar, dolayısıyla anahtar kayda giremez.
+  allow always
+
+  limit 20 per minute
+  audit always
+}
+
+capability ai.read {
+  describe "Asistanın proje dosyalarını okuması"
+
+  deny  when path matches secrets        reason "Gizli materyal asistana verilmez"
+  deny  when path matches vcs_internals  reason "VCS iç dosyaları"
+  allow when path inside project
+  deny  always                           reason "Proje dışı okuma"
+
+  audit on deny
+}
+
+capability ai.write {
+  describe "Asistanın dosya değiştirmesi"
+
+  # Yazma editörün tamponuna uygulanır, diske değil — tek Ctrl+Z geri alır.
+  # Yine de her denemesi kayda geçer: kodu değiştiren tek şey budur.
+  deny  when path matches secrets        reason "Gizli materyal üzerine yazılamaz"
+  deny  when path matches vcs_internals  reason "VCS iç dosyaları"
+  deny  when path matches build_output   reason "Üretilen çıktı elle yazılmaz"
+  allow when path inside project
+  deny  always                           reason "Proje dışı yazma"
+
+  limit 60 per minute
+  audit always
+}
+
+capability ai.local {
+  describe "Yerel model motorunu (Ollama) yönetme"
+
+  # Model çekmek gigabaytlar indirmektir ve bir daemon başlatır.
+  allow always
+
+  limit 30 per minute
+  audit always
+}
+
+capability ai.models {
+  describe "Model kataloğunda arama"
+
+  allow always
+
+  limit 120 per minute
+  audit on deny
+}
+
+# ─── Ağ ───────────────────────────────────────────────────────────────────
+# Makineden dışarı çıkan noktalar. Kullanıcının .http dosyası (net.request) ve
+# — kuruluysa — tarayıcı eklentisinin gezindiği adres (browser.navigate). Başka
+# her yetenek ya kullanıcının kendi diskine ya da 127.0.0.1'e dokunur.
+#
+# Yalnızca kullanıcının bir .http dosyasına kendi yazdığı istek gider: adres
+# metnin içindedir, kural onu birebir görür (arg 0), ve her çağrı — izin verilen
+# de dahil — denetim zincirine yazılır. Otomatik kimlik doğrulama, çerez kavanozu
+# veya ortam değişkeninden gizli okuma yoktur; olsaydı bir depoya işlenmiş
+# dosya sessizce bir jetonu dışarı taşıyabilirdi.
+capability net.request {
+  describe "İstek gönderme (.http dosyaları)"
+
+  # Şema beyaz listesi: file://, data:, ftp:// ve arkadaşları buradan geçmez.
+  deny  when arg 0 matches /^(?!https?:\/\/)/i  reason "Yalnızca http ve https"
+  allow always
+
+  # Elle tetiklenen bir eylem; sınır kaçak bir döngüye karşı.
+  limit 60 per minute
+  audit always
+}
+
+# Tarayıcı eklentisinin gezindiği adres. Konumlandırma ve geçmiş (geri/ileri)
+# doğrudan host'a gider ve karar içermez; yalnızca gezinme — sayfanın seçtiği
+# bir yere çıkan istek — buradan geçer ve kayda düşer.
+capability browser.navigate {
+  describe "Tarayıcıda adres açma"
+
+  deny  when arg 0 matches /^(?!https?:\/\/)/i  reason "Yalnızca http ve https"
+  allow always
+
+  limit 120 per minute
+  audit always
+}
+
+# ─── Proxy (eklenti) ──────────────────────────────────────────────────────
+# Araya giren proxy, Wide'ın bir sayfanın şifreli trafiğini okuyabildiği tek
+# yerdir. Yalnızca 127.0.0.1'i dinler, yalnızca kullanıcının kapsama koyduğu
+# konakları çözer, ve imzalama anahtarını yalnızca bu makinenin anahtarının
+# açabileceği yerde şifreli tutar. Bu yetenekler o üç kararı kayda bağlar.
+capability proxy.listen {
+  describe "Yerel proxy'yi başlatma ve durdurma"
+  allow always
+  limit 30 per minute
+  audit always
+}
+
+capability proxy.intercept {
+  describe "Kapsam ve yakalanan trafik"
+  allow always
+  limit 240 per minute
+  audit on deny
+}
+
+capability proxy.ca {
+  describe "Proxy kök sertifikası"
+  allow always
+  limit 30 per minute
+  audit always
+}
+
+# ─── Hata ayıklayıcı ──────────────────────────────────────────────────────
+# debug:start bir Node sürecini denetleyici açık başlatır; gerisi adımlama
+# denetimidir. Başlatma kaydedilir; sık çağrılan adımlama komutları yalnızca
+# reddedilirse.
+capability debug.run {
+  describe "Hata ayıklayıcıyı çalıştırma"
+  allow always
+  limit 600 per minute
+  audit on deny
+}
+
+capability debug.launch {
+  describe "Hata ayıklanacak süreci başlatma"
+  allow always
+  limit 30 per minute
+  audit always
+}
+
+# ─── Dil sunucuları ───────────────────────────────────────────────────────
+# LSP sunucusu başlatmak bir süreç başlatmaktır. Wide hiçbir sunucuyu kurmaz —
+# yalnızca kullanıcının PATH'inde zaten olanı, açık projenin kökünde çalıştırır.
+# Hangi sunucunun hangi uzantı için çalıştırılacağı kod tarafında sabit bir
+# tablodur; buradan gelen argüman yalnızca projenin kökü ve dosya yoludur.
+capability lsp.serve {
+  describe "Dil sunucusu çalıştırma"
+
+  allow when path inside project
+  deny  always                     reason "Proje dışı dil sunucusu"
+
+  audit always
+}
+
+# Açıkça bağlanmamış her kanal buraya düşer. Bu yetenek olmadan
+# `fail closed` her yeni kanalı reddederdi.
+capability ipc.default {
+  describe "Bağlanmamış IPC kanalı"
+
+  allow always
+  audit on deny
+}
+
+# ─── Kanal bağlamaları ────────────────────────────────────────────────────
+# IPC kanalı → yetenek. `path = arg N` hangi argümanın yol taşıdığını söyler,
+# `root = arg N` proje kökünü o çağrıdan öğrenmeyi sağlar.
+
+bind "fs:readFile"  to fs.read  { path = arg 0 }
+bind "fs:readDir"   to fs.list  { path = arg 0 }
+bind "fs:writeFile" to fs.write { path = arg 0 }
+bind "fs:create"    to fs.write { path = arg 0 }
+bind "fs:rename"    to fs.write { path = arg 0 }
+bind "fs:trash"     to fs.write { path = arg 0 }
+bind "fs:move"      to fs.write { path = arg 0 }
+bind "fs:reveal"    to fs.read  { path = arg 0 }
+
+bind "search:inFiles"    to fs.search { root = arg 0, path = arg 0 }
+bind "project:tailwind"  to fs.read   { root = arg 0, path = arg 0 }
+
+# URL argüman 0: kural gönderilen adresin ta kendisini görür, VE `path` olarak
+# bağlandığı için denetim kaydına da adres yazılır. Alan bloğu olmadan makineden
+# çıkan tek kanalın kaydı adressiz kalıyordu.
+bind "http:send"         to net.request { path = arg 0 }
+bind "browser:navigate"  to browser.navigate { path = arg 0 }
+bind "proxy:start"       to proxy.listen
+bind "proxy:stop"        to proxy.listen
+bind "proxy:status"      to proxy.intercept
+bind "proxy:scope"       to proxy.intercept
+bind "proxy:traffic"     to proxy.intercept
+bind "proxy:clear"       to proxy.intercept
+# Repeater: elle düzenlenip yeniden gönderilen istek. Adres arg 0'ın içindeki
+# nesnede olduğu için net.request gibi tek argümana bağlanamaz; egress kaydı
+# yakalanan trafikle zaten tutuluyor, bu yüzden intercept'e bağlı.
+bind "proxy:replay"      to proxy.intercept
+bind "proxy:caCert"      to proxy.ca
+bind "debug:start"       to debug.launch { path = arg 1 }
+bind "debug:startBrowser" to debug.launch
+bind "debug:stop"        to debug.run
+bind "debug:resume"      to debug.run
+bind "debug:stepOver"    to debug.run
+bind "debug:stepInto"    to debug.run
+bind "debug:stepOut"     to debug.run
+bind "debug:pause"       to debug.run
+bind "debug:properties"  to debug.run
+bind "debug:evaluate"    to debug.run
+bind "debug:setBreakpoint" to debug.run
+
+# Biçimlendirme. format:text yalnızca metin alıp metin döndürür — diske
+# dokunmaz — ama prettier projenin kendi yapılandırmasını okur ve dış
+# biçimlendiriciler bir süreç başlatır, ikisi de projeye bağlı.
+bind "format:text"       to fs.read   { root = arg 2, path = arg 0 }
+
+# ESLint. Ayrı bir süreçte projenin kendi eslint.config.js'ini yükler — yani
+# depodaki JavaScript'i çalıştırır. Build panelinin projenin npm script'lerini
+# çalıştırmasıyla aynı güven sınıfı; ayrı süreç ve zaman aşımı onu sınırlar.
+bind "lint:file"         to fs.read   { root = arg 0, path = arg 1 }
+
+bind "lsp:open"          to lsp.serve { root = arg 0, path = arg 1 }
+bind "lsp:capability"    to fs.read   { path = arg 0 }
+
+# Quick-open indeksi. Sorgu belleğe alınmış indekste çalışır, diske
+# dokunmaz — o yüzden yalnızca indeksi kuran çağrı yol denetimi görür.
+bind "project:scripts"   to fs.read   { root = arg 0, path = arg 0 }
+
+
+bind "dialog:openFile"        to workspace.open
+# Workflow dosyasinin kendisi projenin disinda durabilir; sinir onun
+# icindeki klasorlerden ogrenilir, dosyanin kendi yerinden degil.
+bind "workflow:open"          to workspace.open
+bind "workflow:create"        to workspace.open
+bind "workflow:setFolders"    to workspace.open
+bind "workspace:forgetRecent" to workspace.open
+bind "workspace:recents"      to workspace.open
+bind "workspace:addRecent"    to workspace.open { path = arg 0 }
+bind "workspace:openRecent"   to workspace.open { path = arg 0 }
+
+bind "perf:sample" to perf.read
+
+# Engine. Yalnızca klasör taşıyan çağrılar yol denetimi görür; sunucu bir kez
+# başladıktan sonra durum ve istek kayıtları argümansızdır.
+bind "engine:start"   to engine.serve { root = arg 0, path = arg 0 }
+bind "engine:entries" to engine.serve { root = arg 0, path = arg 0 }
+bind "engine:stop"    to engine.control
+
+
+# Yorumlar projeye yazılır (.wide/engine-comments.json), o yüzden
+# inspect değil dosya yazma yeteneğine bağlı.
+
+
+bind "tools:list"     to tools.manage { root = arg 0, path = arg 0 }
+bind "tools:scaffold" to tools.manage { root = arg 0, path = arg 0 }
+bind "tools:reveal"   to tools.manage { root = arg 0, path = arg 0 }
+bind "tools:run"      to tools.run    { root = arg 0, path = arg 0 }
+bind "tools:cancel"   to tools.run
+
+bind "terminal:start" to terminal.spawn
+bind "toolscan:run"   to toolscan.run { root = arg 0, path = arg 0 }
+
+# Sürüm yönetimi — hepsinde arg 0 proje köküdür.
+bind "codeberg:status"    to vcs.read  { root = arg 0, path = arg 0 }
+bind "codeberg:log"       to vcs.read  { root = arg 0, path = arg 0 }
+bind "codeberg:stage"     to vcs.write { root = arg 0, path = arg 0 }
+bind "codeberg:unstage"   to vcs.write { root = arg 0, path = arg 0 }
+bind "codeberg:commit"    to vcs.write { root = arg 0, path = arg 0 }
+bind "codeberg:init"      to vcs.write { root = arg 0, path = arg 0 }
+bind "codeberg:setRemote" to vcs.write { root = arg 0, path = arg 0 }
+bind "codeberg:identity"  to vcs.write { root = arg 0, path = arg 0 }
+bind "codeberg:tag"       to vcs.write { root = arg 0, path = arg 0 }
+bind "codeberg:push"      to vcs.network { root = arg 0, path = arg 0 }
+bind "codeberg:pull"      to vcs.network { root = arg 0, path = arg 0 }
+
+# Alan yok, bilerek: jeton arg 1'dedir ve bağlanmayan arg kayda geçmez.
+bind "codeberg:signIn"    to vcs.credential
+bind "codeberg:signOut"   to vcs.credential
+bind "codeberg:signedIn"  to vcs.credential
+
+# Yorum temizleyici: metin arayuzden gelir ve arayuze doner, diske hicbir
+# sey yazilmaz. Yine de hangi dosya oldugu kayda gecsin diye baglanir.
+bind "comments:strip"     to fs.read { root = arg 0, path = arg 1 }
+bind "comments:language"  to fs.read { path = arg 0 }
+
+# AI asistanı — arg 0 proje kökü, arg 1 dosya yolu.
+#
+# "ai:egress" gerçek bir IPC kanalı değil; ai:tool.* gibi sentetik bir addır ve
+# 44-ai-agent.js turu başlatmadan önce check()'i onunla çağırır. Böyle olmasının
+# sebebi şu: ai:send'in arg 0'ı tek bir nesnedir, argMatches ise dizge olmayanda
+# false döner (35-sssf-engine.js), yani sağlayıcı beyaz listesi buraya doğrudan
+# bağlandığında hiç ateşlenmiyordu ve denetim kaydında hedef null kalıyordu.
+# Sentetik ad, sağlayıcı adını tek başına ve dizge olarak kurala verir.
+bind "ai:egress"        to ai.egress   { path = arg 0 }
+bind "ai:send"          to ai.models
+bind "ai:stop"          to ai.models
+bind "ai:verifyKey"     to ai.credential
+bind "ai:setKey"        to ai.credential
+bind "ai:keyStatus"     to ai.credential
+bind "ai:config"        to ai.models
+# Konusmalar artik cogul. Listeleme bir kok alir; digerleri bir konusma
+# kimligi alir, ki o bir yol degildir: yol olarak kaydetmek denetim kaydina
+# anlamsiz bir deger yazar ve yola gore yazilmis bir kurali olmayan bir yolla
+# eslestirir.
+bind "ai:sessions"      to ai.models   { root = arg 0, path = arg 0 }
+bind "ai:session"       to ai.models
+bind "ai:newSession"    to ai.models   { root = arg 0, path = arg 0 }
+bind "ai:saveSession"   to ai.models   { root = arg 1, path = arg 1 }
+bind "ai:deleteSession" to ai.models
+bind "ai:search"        to ai.models
+bind "ai:files"         to ai.models
+bind "ai:recommended"   to ai.models
+bind "ai:localStatus"   to ai.local
+bind "ai:localSetup"    to ai.local
+bind "ai:localPull"     to ai.local
+bind "ai:localRemove"   to ai.local
+bind "ai:claudeCodeStatus"  to ai.local
+bind "ai:claudeCodeInstall" to ai.local
+bind "ai:claudeCodeLogin"   to ai.local
+
+# Asistanin araclari kendi kanal adlariyla denetlenir: fs:readFile'a baglamak
+# onlari fs.read'e goturur ve ai.read hic calismazdi. Ayri ad, ayri yetenek,
+# denetim kaydinda ayri satir.
+bind "ai:tool.list"     to ai.read   { root = arg 0, path = arg 1 }
+bind "ai:tool.read"     to ai.read   { root = arg 0, path = arg 1 }
+bind "ai:tool.search"   to ai.read   { root = arg 0, path = arg 0 }
+bind "ai:tool.write"    to ai.write  { root = arg 0, path = arg 1 }
+# Acik olmayan bir dosyaya yazma. Arayuzden erisilebilir, cunku neyin acik
+# oldugunu yalniz arayuz bilir; ama yetenek yine ai.write, boylece denetim
+# satiri yazani kullanici degil asistan olarak kaydeder.
+bind "ai:commitFile"    to ai.write  { root = arg 0, path = arg 1 }
+
+bind "extensions:list"    to extensions.manage
+bind "extensions:prepare" to extensions.provision
+bind "extensions:cancelPrepare" to extensions.provision
+bind "extensions:servers" to extensions.manage
+bind "extensions:install" to extensions.manage
+bind "extensions:remove"  to extensions.manage
+
+
+# ─── Denetim kaydı ────────────────────────────────────────────────────────
+
+audit {
+  # Yalnızca dosya adı verilebilir; her zaman userData altına yazılır.
+  sink file "sssf-audit.jsonl"
+
+  # Her kayıt bir öncekinin özetini taşır, böylece araya sokulan ya da
+  # silinen bir satır doğrulamada ortaya çıkar.
+  chain sha256
+
+  retain 5000 records
+
+  # Bu adları taşıyan alanlar kayda geçmez.
+  redact [ "content", "next", "previous", "apiKey", "key", "token", "old_text", "new_text" ]
+}

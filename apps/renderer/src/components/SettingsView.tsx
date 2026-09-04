@@ -1,0 +1,424 @@
+import { useEffect, useState } from "react";
+
+import { bridge, type RemoteConfig } from "@/lib/bridge";
+import { LANGUAGES, useT, type Language } from "@/lib/i18n";
+import { BASE_THEME, THEMES, type ThemeId } from "@/lib/themes";
+import { formatCombo, shortcutFor, useCommandPalette } from "@/stores/commands";
+import { cn } from "@/lib/utils";
+import { useEditor } from "@/stores/editor";
+import { useSettings } from "@/stores/settings";
+import { useUpdate } from "@/stores/update";
+
+function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-4 border-b border-line py-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] text-fg">{label}</p>
+        {hint && <p className="pt-0.5 text-[11px] text-fg-faint">{hint}</p>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={value}
+      onClick={() => onChange(!value)}
+      className={cn(
+        "h-5 w-9 rounded-full p-0.5 transition-colors duration-100",
+        value ? "bg-selected" : "bg-panel",
+      )}
+    >
+      <span
+        className={cn(
+          "block size-4 rounded-full bg-fg-muted transition-transform duration-100",
+          value && "translate-x-4 bg-fg-bright",
+        )}
+      />
+    </button>
+  );
+}
+
+function LanguagePicker({
+  value,
+  onChange,
+}: {
+  value: Language;
+  onChange: (next: Language) => void;
+}) {
+  return (
+    <div role="radiogroup" className="flex items-center gap-1 rounded-md border border-line p-0.5">
+      {LANGUAGES.map((language) => (
+        <button
+          key={language.id}
+          type="button"
+          role="radio"
+          aria-checked={value === language.id}
+          onClick={() => onChange(language.id)}
+          className={cn(
+            "rounded-sm px-2 py-1 text-[12px] transition-colors duration-100",
+            value === language.id
+              ? "bg-selected text-fg-bright"
+              : "text-fg-muted hover:bg-hover hover:text-fg",
+          )}
+        >
+          {language.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const EXTRA_SHORTCUTS: { combo: string; label: string }[] = [
+  { combo: "ctrl+shift+p", label: "Command palette" },
+  { combo: "ctrl+tab", label: "Next tab" },
+  { combo: "ctrl+shift+tab", label: "Previous tab" },
+  { combo: "ctrl+=", label: "Zoom in" },
+  { combo: "ctrl+-", label: "Zoom out" },
+  { combo: "ctrl+0", label: "Reset font size" },
+];
+
+function ShortcutsSection() {
+  const t = useT();
+  const commands = useCommandPalette((state) => state.commands);
+  const bindings = useCommandPalette((state) => state.bindings);
+  const rows = commands
+    .map((command) => ({ label: t(command.title), combo: shortcutFor(command, bindings) }))
+    .filter((row): row is { label: string; combo: string } => Boolean(row.combo))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const line = (label: string, combo: string) => (
+    <div key={label + combo} className="flex items-center justify-between py-0.5 text-[12px]">
+      <span className="min-w-0 truncate text-fg-dim">{label}</span>
+      <kbd className="ml-2 shrink-0 rounded-sm border border-line bg-panel px-1.5 text-[10px] text-fg-dim">{formatCombo(combo)}</kbd>
+    </div>
+  );
+  return (
+    <div className="border-b border-line py-2">
+      {EXTRA_SHORTCUTS.map((s) => line(t(s.label), s.combo))}
+      {rows.map((row) => line(row.label, row.combo))}
+      <p className="pt-2 text-[11px] leading-snug text-fg-faint">
+        {t("Rebind a command by adding \"combo\": \"command.id\" to .wide/keybindings.json in your project.")}
+      </p>
+    </div>
+  );
+}
+
+function ThemePicker({
+  value,
+  onChange,
+}: {
+  value: ThemeId;
+  onChange: (next: ThemeId) => void;
+}) {
+  const t = useT();
+  return (
+    <div role="radiogroup" className="flex w-full flex-col gap-1">
+      {THEMES.map((theme) => (
+        <button
+          key={theme.id}
+          type="button"
+          role="radio"
+          aria-checked={value === theme.id}
+          onClick={() => onChange(theme.id)}
+          className={cn(
+            "flex items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors duration-100",
+            value === theme.id
+              ? "border-line-strong bg-selected"
+              : "border-line hover:bg-hover",
+          )}
+        >
+          <span
+
+            data-theme={theme.id === BASE_THEME ? undefined : theme.id}
+            className="flex shrink-0 overflow-hidden rounded-sm border border-line"
+            aria-hidden="true"
+          >
+            {
+
+}
+            {["var(--chrome)", "var(--canvas)", "var(--syn-function)", "var(--fg-dim)", "var(--fg-bright)"].map(
+              (colour) => (
+                <span key={colour} className="block size-4" style={{ background: colour }} />
+              ),
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] text-fg">{theme.label}</span>
+            <span className="block text-[11px] text-fg-faint">{t(theme.hint)}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RemoteSection() {
+  const t = useT();
+  const [config, setConfig] = useState<RemoteConfig>({ node: "node" });
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    bridge
+      .remoteGet()
+      .then((reply) => {
+        if (alive && reply.ok && reply.config) setConfig({ node: "node", ...reply.config });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const field = (key: keyof RemoteConfig, value: string | boolean) => {
+    setConfig((current) => ({ ...current, [key]: value }));
+    setState("idle");
+  };
+
+  const save = async () => {
+    setState("saving");
+    setError("");
+    const reply = await bridge.remoteSet({
+      enabled: Boolean(config.enabled),
+      host: (config.host ?? "").trim(),
+      remotePath: (config.remotePath ?? "").trim(),
+      node: (config.node ?? "node").trim() || "node",
+    });
+    if (reply.ok) setState("saved");
+    else {
+      setState("error");
+      setError(reply.error ?? t("The remote target could not be saved."));
+    }
+  };
+
+  const input = (key: keyof RemoteConfig, placeholder: string) => (
+    <input
+      value={String(config[key] ?? "")}
+      onChange={(event) => field(key, event.target.value)}
+      placeholder={placeholder}
+      spellCheck={false}
+      autoCapitalize="off"
+      autoCorrect="off"
+      className="w-60 rounded-sm border border-line bg-panel px-2 py-1 font-mono text-[12px] text-fg outline-none placeholder:text-fg-faint focus:border-line-strong"
+    />
+  );
+
+  return (
+    <>
+      <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Remote")}</h2>
+      <Row
+        label={t("Run the backend over SSH")}
+        hint={t("When on and saved, Wide reconnects its backend to the remote host instead of this machine.")}
+      >
+        <Toggle value={Boolean(config.enabled)} onChange={(next) => field("enabled", next)} />
+      </Row>
+      <Row label={t("SSH host")} hint={t("user@host, or a Host from your ~/.ssh/config. Key or agent auth only.")}>
+        {input("host", "user@host")}
+      </Row>
+      <Row label={t("Remote path")} hint={t("The folder on the remote holding the synced backend.")}>
+        {input("remotePath", "/home/you/wide-backend")}
+      </Row>
+      <Row label={t("Node command")} hint={t("How node is started on the remote.")}>
+        {input("node", "node")}
+      </Row>
+      <div className="flex items-center gap-3 pt-3">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={state === "saving"}
+          className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-50"
+        >
+          {t("Save")}
+        </button>
+        {state === "saved" && <span className="text-[11px] text-status-ok">{t("Saved.")}</span>}
+        {state === "error" && <span className="text-[11px] text-status-error">{error}</span>}
+      </div>
+      <p className="pt-2 text-[11px] text-fg-faint">
+        {t("The remote needs Node and a synced copy of Wide's backend at the path above — see scripts/remote-sync.")}
+      </p>
+    </>
+  );
+}
+
+function UpdatesSection() {
+  const t = useT();
+  const url = useSettings((state) => state.updateManifestUrl);
+  const update = useUpdate();
+
+  return (
+    <>
+      <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Updates")}</h2>
+      <Row
+        label={t("Update manifest URL")}
+        hint={t("A JSON at this URL — { version, url, notes } — is checked for a newer Wide. Leave empty to never check.")}
+      >
+        <input
+          value={url}
+          onChange={(event) => useSettings.getState().set({ updateManifestUrl: event.target.value })}
+          placeholder="https://…/wide-latest.json"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          className="w-60 rounded-sm border border-line bg-panel px-2 py-1 font-mono text-[12px] text-fg outline-none placeholder:text-fg-faint focus:border-line-strong"
+        />
+      </Row>
+      <div className="flex items-center gap-3 pt-3">
+        <button
+          type="button"
+          onClick={() => void update.check()}
+          disabled={update.checking || !url.trim()}
+          className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-50"
+        >
+          {update.checking ? t("Checking…") : t("Check now")}
+        </button>
+        {update.available ? (
+          <button
+            type="button"
+            disabled={update.installing !== "idle"}
+            onClick={() => void update.install()}
+            className="rounded-md border border-accent px-3 py-1.5 text-[12px] text-accent transition-colors duration-100 hover:bg-accent hover:text-bg disabled:opacity-50"
+          >
+            {update.installing === "download"
+              ? t("Downloading…")
+              : update.installing === "install"
+                ? t("Installing…")
+                : t("Install {version}", { version: update.latest })}
+          </button>
+        ) : null}
+      </div>
+      {update.error && <p className="pt-2 text-[11px] text-status-error">{update.error}</p>}
+      {!update.error && update.current && !update.available && update.latest && (
+        <p className="pt-2 text-[11px] text-status-ok">
+          {t("Up to date — you have Wide {version}.", { version: update.current })}
+        </p>
+      )}
+      {update.available && update.notes && (
+        <p className="whitespace-pre-wrap pt-2 text-[11px] text-fg-faint">{update.notes}</p>
+      )}
+    </>
+  );
+}
+
+export function SettingsView() {
+  const settings = useSettings();
+  const t = useT();
+
+  return (
+    <div className="wide-enter-fade h-full overflow-auto px-6 py-5">
+      <div className="mx-auto w-full max-w-[560px]">
+        <h1 className="text-[16px] font-semibold text-fg-bright">{t("Settings")}</h1>
+
+        <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Appearance")}</h2>
+        <Row label={t("Language")} hint={t("The language of the interface.")}>
+          <LanguagePicker
+            value={settings.language}
+            onChange={(next) => settings.set({ language: next })}
+          />
+        </Row>
+        {}
+        <div className="border-b border-line py-3">
+          <p className="pb-2 text-[13px] text-fg">{t("Theme")}</p>
+          <ThemePicker
+            value={settings.theme}
+            onChange={(next) => settings.set({ theme: next })}
+          />
+        </div>
+
+        <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Keyboard Shortcuts")}</h2>
+        <ShortcutsSection />
+
+        <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Editor")}</h2>
+        <Row label={t("Font size")}>
+          <input
+            type="number"
+            min={10}
+            max={24}
+            value={settings.fontSize}
+            onChange={(event) => settings.set({ fontSize: Number(event.target.value) })}
+            className="w-16 rounded-sm border border-line bg-panel px-2 py-1 text-[12px] text-fg outline-none"
+          />
+        </Row>
+        <Row label={t("Tab size")}>
+          <input
+            type="number"
+            min={2}
+            max={8}
+            value={settings.tabSize}
+            onChange={(event) => settings.set({ tabSize: Number(event.target.value) })}
+            className="w-16 rounded-sm border border-line bg-panel px-2 py-1 text-[12px] text-fg outline-none"
+          />
+        </Row>
+        <Row label={t("Wrap long lines")}>
+          <Toggle value={settings.lineWrapping} onChange={(next) => settings.set({ lineWrapping: next })} />
+        </Row>
+        <Row label={t("Colourful syntax")} hint={t("Off flattens every token to one tone.")}>
+          <Toggle value={settings.colorfulSyntax} onChange={(next) => settings.set({ colorfulSyntax: next })} />
+        </Row>
+        <Row
+          label={t("Format on save")}
+          hint={t(
+            "Prettier for JS, TS, HTML, CSS, GraphQL, JSON and Markdown; the tool you have installed for the rest.",
+          )}
+        >
+          <Toggle value={settings.formatOnSave} onChange={(next) => settings.set({ formatOnSave: next })} />
+        </Row>
+
+        <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Session")}</h2>
+        <Row label={t("Cursor trail")} hint={t("Offers your last positions back after a long absence.")}>
+          <Toggle value={settings.cursorTrail} onChange={(next) => settings.set({ cursorTrail: next })} />
+        </Row>
+        <Row label={t("Performance overlay")} hint={t("Frame rate and memory, top right.")}>
+          <Toggle value={settings.perfOverlay} onChange={(next) => settings.set({ perfOverlay: next })} />
+        </Row>
+
+        <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Security")}</h2>
+        <Row
+          label={t("Real-time security analysis")}
+          hint={t("Flags likely vulnerabilities as you type — XSS sinks, injection, weak crypto, secrets — with a fix on hover.")}
+        >
+          <Toggle value={settings.securityLint} onChange={(next) => settings.set({ securityLint: next })} />
+        </Row>
+        <Row
+          label={t("Security policy")}
+          hint={t("What Wide is allowed to touch, and a log of every decision it has made.")}
+        >
+          <button
+            type="button"
+            onClick={() => useEditor.getState().openPolicy()}
+            className="rounded-md border border-line px-3 py-1 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            {t("Open")}
+          </button>
+        </Row>
+
+        <RemoteSection />
+
+        <UpdatesSection />
+
+        <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("About")}</h2>
+        <Row label={t("About Wide")} hint={t("Version, maker and the source repository.")}>
+          <button
+            type="button"
+            onClick={() => useEditor.getState().openAbout()}
+            className="rounded-md border border-line px-3 py-1 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            {t("Open")}
+          </button>
+        </Row>
+
+        <button
+          type="button"
+          onClick={() => settings.reset()}
+          className="mt-6 rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
+        >
+          {t("Reset to defaults")}
+        </button>
+      </div>
+    </div>
+  );
+}
