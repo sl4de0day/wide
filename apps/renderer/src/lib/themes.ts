@@ -1,6 +1,6 @@
 
 
-export type ThemeId = "default";
+export type ThemeId = "default" | "tokyo-night" | "one-dark-pro" | "ariake-dark";
 
 export interface ThemeDef {
   id: ThemeId;
@@ -12,6 +12,9 @@ export interface ThemeDef {
 
 export const THEMES: readonly ThemeDef[] = [
   { id: "default", label: "Default", hint: "Dark, low contrast, Nord blue-grey palette." },
+  { id: "tokyo-night", label: "Tokyo Night", hint: "Deep blue night palette with vivid accents." },
+  { id: "one-dark-pro", label: "One Dark Pro", hint: "The classic Atom One Dark palette." },
+  { id: "ariake-dark", label: "Ariake Dark", hint: "Indigo-tinted dark with soft pastels." },
 ];
 
 export const BASE_THEME: ThemeId = "default";

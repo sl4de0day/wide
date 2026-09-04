@@ -1,6 +1,17 @@
 
 
 export const TR: Record<string, string> = {
+  "Default": "Varsayılan",
+  "Dark, low contrast, Nord blue-grey palette.": "Koyu, düşük kontrast, Nord mavi-gri paleti.",
+  "Deep blue night palette with vivid accents.": "Canlı vurgulu, koyu mavi gece paleti.",
+  "The classic Atom One Dark palette.": "Klasik Atom One Dark paleti.",
+  "Indigo-tinted dark with soft pastels.": "İndigo tonlu koyu, yumuşak pastel vurgular.",
+  "Checking for updates…": "Güncellemeler denetleniyor…",
+  "Updating Wide…": "Wide güncelleniyor…",
+  "Automatic updates": "Otomatik güncellemeler",
+  "Wide checks for updates on startup and installs them automatically from GitHub.": "Wide açılışta güncellemeleri denetler ve GitHub'dan otomatik olarak kurar.",
+  "Add": "Ekle",
+  "Reveal": "Konumunu Göster",
   "Version": "Sürüm",
   "Maker": "Yapımcı",
   "License": "Lisans",

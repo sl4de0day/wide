@@ -1,4 +1,4 @@
-const WIDE_VERSION = "0.25926";
+const WIDE_VERSION = "0.35926";
 const WIDE_REPO = "sl4de0day/wide";
 const WIDE_ASSET_RE = /Wide-Setup-.*\.exe$/i;
 
@@ -118,7 +118,7 @@ function registerUpdateHandlers() {
       return { ok: false, error: "No installer to run." };
     }
     try {
-      const child = node_child_process.spawn(installerPath, ["/SILENT", "/NOCANCEL"], {
+      const child = node_child_process.spawn(installerPath, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL"], {
         detached: true,
         stdio: "ignore",
       });

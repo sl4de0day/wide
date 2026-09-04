@@ -16,7 +16,9 @@ interface UpdateState {
   dismissed: boolean;
   configured: boolean;
   installing: "idle" | "download" | "install";
+  booting: boolean;
   check(): Promise<void>;
+  boot(): Promise<void>;
   open(): void;
   install(): Promise<void>;
   dismiss(): void;
@@ -33,6 +35,7 @@ export const useUpdate = create<UpdateState>((set, get) => ({
   dismissed: false,
   configured: false,
   installing: "idle",
+  booting: true,
 
   check: async () => {
     const manifestUrl = useSettings.getState().updateManifestUrl;
@@ -77,6 +80,20 @@ export const useUpdate = create<UpdateState>((set, get) => ({
     if (!run.ok) {
       set({ installing: "idle", error: run.error ?? "The update could not be installed." });
     }
+  },
+
+  boot: async () => {
+    try {
+      await Promise.race([get().check(), new Promise((resolve) => setTimeout(resolve, 12000))]);
+      const { available, url } = get();
+      if (available && url && /^https:\/\/.*\.exe$/i.test(url)) {
+        await get().install();
+        if (get().installing !== "idle") return;
+      }
+    } catch {
+      void 0;
+    }
+    set({ booting: false });
   },
 
   dismiss: () => set({ dismissed: true }),

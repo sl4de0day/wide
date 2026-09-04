@@ -52,6 +52,7 @@ import { forgetLastFile, recallLastFile, rememberLastFile } from "./lib/lastFile
 import { applySyntaxPalette, applyTheme, useSettings } from "./stores/settings";
 import { useUpdate } from "./stores/update";
 import { subscribeFsChanges, useWorkspace } from "./stores/workspace";
+import logo from "./assets/wide-logo.png";
 
 
 const KEEP_ALIVE = new Set(["terminal"]);
@@ -152,6 +153,21 @@ function addSecurityFindingsForActiveFile(): number {
   return diagnostics.length;
 }
 
+function BootGate() {
+  const installing = useUpdate((state) => state.installing);
+  const t = useT();
+  const label = installing === "idle" ? t("Checking for updates…") : t("Updating Wide…");
+  return (
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5" style={{ background: "#3b4252" }}>
+      <img src={logo} alt="Wide" width={72} height={72} className="size-[72px] select-none" draggable={false} />
+      <div className="flex items-center gap-2.5" style={{ color: "#9aa6bd" }}>
+        <span className="size-4 animate-spin rounded-full border-2" style={{ borderColor: "#9aa6bd", borderTopColor: "transparent" }} />
+        <span className="text-[12px]">{label}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
 
 
@@ -168,6 +184,7 @@ export default function App() {
 
 
   const settingsOpen = useEditor((state) => state.activePath === SETTINGS_PATH);
+  const booting = useUpdate((state) => state.booting);
 
 
 
@@ -393,7 +410,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void useUpdate.getState().check();
+    void useUpdate.getState().boot();
   }, []);
 
 
@@ -529,6 +546,8 @@ export default function App() {
 
 
 
+
+  if (booting) return <BootGate />;
 
   if (!root && !hasFileTab)
     return (

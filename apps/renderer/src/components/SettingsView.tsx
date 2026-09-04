@@ -151,7 +151,7 @@ function ThemePicker({
             )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px] text-fg">{theme.label}</span>
+            <span className="block text-[13px] text-fg">{t(theme.label)}</span>
             <span className="block text-[11px] text-fg-faint">{t(theme.hint)}</span>
           </span>
         </button>
@@ -251,59 +251,17 @@ function RemoteSection() {
 
 function UpdatesSection() {
   const t = useT();
-  const url = useSettings((state) => state.updateManifestUrl);
-  const update = useUpdate();
+  const current = useUpdate((state) => state.current);
 
   return (
     <>
       <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Updates")}</h2>
       <Row
-        label={t("Update manifest URL")}
-        hint={t("A JSON at this URL — { version, url, notes } — is checked for a newer Wide. Leave empty to never check.")}
+        label={t("Automatic updates")}
+        hint={t("Wide checks for updates on startup and installs them automatically from GitHub.")}
       >
-        <input
-          value={url}
-          onChange={(event) => useSettings.getState().set({ updateManifestUrl: event.target.value })}
-          placeholder="https://…/wide-latest.json"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          className="w-60 rounded-sm border border-line bg-panel px-2 py-1 font-mono text-[12px] text-fg outline-none placeholder:text-fg-faint focus:border-line-strong"
-        />
+        <span className="font-mono text-[12px] text-fg-dim">{current || "…"}</span>
       </Row>
-      <div className="flex items-center gap-3 pt-3">
-        <button
-          type="button"
-          onClick={() => void update.check()}
-          disabled={update.checking || !url.trim()}
-          className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-50"
-        >
-          {update.checking ? t("Checking…") : t("Check now")}
-        </button>
-        {update.available ? (
-          <button
-            type="button"
-            disabled={update.installing !== "idle"}
-            onClick={() => void update.install()}
-            className="rounded-md border border-accent px-3 py-1.5 text-[12px] text-accent transition-colors duration-100 hover:bg-accent hover:text-bg disabled:opacity-50"
-          >
-            {update.installing === "download"
-              ? t("Downloading…")
-              : update.installing === "install"
-                ? t("Installing…")
-                : t("Install {version}", { version: update.latest })}
-          </button>
-        ) : null}
-      </div>
-      {update.error && <p className="pt-2 text-[11px] text-status-error">{update.error}</p>}
-      {!update.error && update.current && !update.available && update.latest && (
-        <p className="pt-2 text-[11px] text-status-ok">
-          {t("Up to date — you have Wide {version}.", { version: update.current })}
-        </p>
-      )}
-      {update.available && update.notes && (
-        <p className="whitespace-pre-wrap pt-2 text-[11px] text-fg-faint">{update.notes}</p>
-      )}
     </>
   );
 }

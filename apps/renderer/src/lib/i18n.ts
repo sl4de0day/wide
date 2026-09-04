@@ -55,3 +55,17 @@ export function applyLanguage(): void {
   document.documentElement.lang = language;
   if (language === "tr") loadTr();
 }
+
+export async function ensureLanguageLoaded(): Promise<void> {
+  const language = useSettings.getState().language;
+  document.documentElement.lang = language;
+  if (language !== "tr" || trDict) return;
+  trLoading = true;
+  try {
+    const m = await import("./i18n.tr");
+    trDict = m.TR;
+    useI18nReady.setState((s) => ({ v: s.v + 1 }));
+  } catch {
+    void 0;
+  }
+}

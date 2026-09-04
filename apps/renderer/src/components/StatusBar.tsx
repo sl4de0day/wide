@@ -1,4 +1,4 @@
-import { ArrowUpCircle, CircleAlert, Server, ShieldAlert, TriangleAlert } from "lucide-react";
+import { CircleAlert, Server, ShieldAlert, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { languageLabel } from "@/editor/languages";
@@ -9,48 +9,7 @@ import { useDiagnostics } from "@/stores/diagnostics";
 import { useActiveTab, useEditor } from "@/stores/editor";
 import { useProjectScan } from "@/stores/projectScan";
 import { useSettings } from "@/stores/settings";
-import { useUpdate } from "@/stores/update";
 import { useWorkspace } from "@/stores/workspace";
-
-function UpdateChip() {
-  const t = useT();
-  const available = useUpdate((state) => state.available);
-  const dismissed = useUpdate((state) => state.dismissed);
-  const latest = useUpdate((state) => state.latest);
-  const installing = useUpdate((state) => state.installing);
-
-  if (!available || dismissed) return null;
-  const label =
-    installing === "download"
-      ? t("Downloading…")
-      : installing === "install"
-        ? t("Installing…")
-        : t("Update {version}", { version: latest });
-  return (
-    <span className="flex shrink-0 items-center gap-1 rounded-sm bg-accent/15 px-1.5 text-accent">
-      <button
-        type="button"
-        disabled={installing !== "idle"}
-        onClick={() => void useUpdate.getState().install()}
-        title={t("Wide {version} is available — download and install it now.", { version: latest })}
-        className="flex items-center gap-1 disabled:opacity-70"
-      >
-        <ArrowUpCircle className={cn("size-3", installing !== "idle" && "wide-pulse")} strokeWidth={2} />
-        <span>{label}</span>
-      </button>
-      {installing === "idle" && (
-        <button
-          type="button"
-          onClick={() => useUpdate.getState().dismiss()}
-          title={t("Dismiss")}
-          className="text-accent/70 transition-colors duration-100 hover:text-accent"
-        >
-          ×
-        </button>
-      )}
-    </span>
-  );
-}
 
 function RemoteChip() {
   const t = useT();
@@ -200,7 +159,6 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
 
       <div className="flex-1" />
 
-      <UpdateChip />
       <RemoteChip />
 
       {file && (
