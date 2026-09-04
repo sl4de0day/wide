@@ -35,7 +35,6 @@ const BrowserView = lazy(() => import("./BrowserView").then((m) => ({ default: m
 const DiffView = lazy(() => import("@/panels/DiffView").then((m) => ({ default: m.DiffView })));
 const ExtensionView = lazy(() => import("./ExtensionView").then((m) => ({ default: m.ExtensionView })));
 const SssfView = lazy(() => import("./SssfView").then((m) => ({ default: m.SssfView })));
-const AboutView = lazy(() => import("./AboutView").then((m) => ({ default: m.AboutView })));
 
 function TabOverflowMenu({ tabs, activePath, onPick }: { tabs: Tab[]; activePath: string | null; onPick: (path: string) => void }) {
   const t = useT();
@@ -333,8 +332,6 @@ export function EditorArea({ onOpenPanel }: { onOpenPanel?: (id: string) => void
           <HttpResponse />
         ) : tab.kind === "policy" ? (
           <SssfView />
-        ) : tab.kind === "about" ? (
-          <AboutView />
         ) : tab.kind === "browser" ? (
           <BrowserView />
         ) : tab.kind === "catcher" ? (

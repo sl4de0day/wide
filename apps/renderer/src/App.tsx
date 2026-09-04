@@ -5,10 +5,8 @@ import { useShallow } from "zustand/react/shallow";
 import { ActivityBar, panelById } from "./components/ActivityBar";
 import { EditorArea } from "./components/EditorArea";
 import { Launcher } from "./components/Launcher";
-import { PerfOverlay } from "./components/PerfOverlay";
 import { CodeActionMenu } from "./components/CodeActionMenu";
 import { RenameOverlay } from "./components/RenameOverlay";
-import { SessionOverlay } from "./components/SessionOverlay";
 import { SymbolSearchOverlay } from "./components/SymbolSearchOverlay";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay";
 import { CommandPalette } from "./components/CommandPalette";
@@ -472,7 +470,6 @@ export default function App() {
       { id: "file.closeOthers", title: "Close Other Tabs", group: "File", run: () => { const a = useEditor.getState().activePath; if (a) void requestCloseOthers(a); } },
       { id: "file.closeAll", title: "Close All Tabs", group: "File", run: () => void requestCloseAll() },
       { id: "view.settings", title: "Settings", group: "View", key: "ctrl+,", run: () => useEditor.getState().openSettings() },
-      { id: "help.about", title: "About Wide", group: "Help", run: () => useEditor.getState().openAbout() },
       { id: "view.split", title: "Toggle split editor", group: "View", run: () => useEditor.getState().toggleSplit() },
       { id: "file.openFolder", title: "Open folder", group: "File", key: "ctrl+o", run: () => void useWorkspace.getState().openFolder() },
       { id: "go.file", title: "Go to File…", group: "Go", key: "ctrl+p", when: hasRoot, run: () => useQuickOpen.getState().openPalette() },
@@ -498,7 +495,7 @@ export default function App() {
       { id: "security.projectScan", title: "Scan project for cross-file vulnerabilities", group: "Security", when: hasRoot, run: () => { void useProjectScan.getState().run(); openPanel("problems"); } },
       { id: "view.catcher", title: "Catcher", group: "View", run: () => useEditor.getState().openCatcher() },
       { id: "view.pitcher", title: "Pitcher", group: "View", run: () => useEditor.getState().openPitcher() },
-      { id: "view.browser", title: "Browser", group: "View", when: () => has("browser"), run: () => useEditor.getState().openBrowser() },
+      { id: "view.browser", title: "Browser", group: "View", run: () => useEditor.getState().openBrowser() },
       { id: "catcher.proxy", title: "Catcher: Proxy", group: "Catcher", run: () => useCatcher.getState().show("proxy") },
       { id: "catcher.target", title: "Catcher: Target (Site Map)", group: "Catcher", run: () => useCatcher.getState().show("target") },
       { id: "catcher.repeater", title: "Catcher: Repeater", group: "Catcher", run: () => useCatcher.getState().show("repeater") },
@@ -563,7 +560,6 @@ export default function App() {
         ) : (
           <Launcher />
         )}
-        <PerfOverlay />
       </div>
     );
 
@@ -592,8 +588,6 @@ export default function App() {
         </div>
       </div>
       <StatusBar onOpenPanel={openPanel} />
-      <SessionOverlay />
-      <PerfOverlay />
       <RenameOverlay />
       <CodeActionMenu />
       <SymbolSearchOverlay />

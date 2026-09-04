@@ -121,28 +121,6 @@ const AI_ASSISTANT: MarketplaceExtension = {
 
 
 
-const BROWSER: MarketplaceExtension = {
-  id: "browser",
-  name: "Browser",
-  version: "1.0.0",
-  colour: "#6ea8fe",
-  kind: "tool",
-  removable: true,
-  summary: "Open a live web page inside Wide, in its own tab",
-  description:
-    "Opens web pages in a tab, in a browser engine kept apart from the editor's own: its own storage, its own cookies, and its own network path so that later the interception proxy can sit in front of it without touching Wide itself.\n\nEvery address it navigates to passes through Wide's policy first, and every one is written to the audit log, so what the browser reached is a question the Security page can answer. Its back, forward and reload are ordinary; where it went is not left unrecorded.",
-  provides: [
-    "A web page in an editor tab",
-    "Separate storage from the IDE",
-    "Every navigation under policy, and logged",
-  ],
-  homepage: "",
-
-  path:
-    "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2c1.7 0 3.3 2.5 3.8 6H8.2C8.7 6.5 10.3 4 12 4zm-2.9.6C8.4 5.9 7.9 7.4 7.6 9H4.5a8 8 0 0 1 4.6-4.4zM4.1 11h3.3a20 20 0 0 0 0 2H4.1a8 8 0 0 1 0-2zm.4 4h3.1c.3 1.6.8 3.1 1.5 4.4A8 8 0 0 1 4.5 15zM12 20c-1.7 0-3.3-2.5-3.8-6h7.6c-.5 3.5-2.1 6-3.8 6zm3.9-.6c.7-1.3 1.2-2.8 1.5-4.4h3.1a8 8 0 0 1-4.6 4.4zM19.9 13h-3.3a20 20 0 0 0 0-2h3.3a8 8 0 0 1 0 2zm-3.5-4c-.3-1.6-.8-3.1-1.5-4.4A8 8 0 0 1 19.5 9z",
-  fileExtensions: [],
-  server: null,
-};
 
 
 
@@ -524,7 +502,6 @@ const LANGUAGES: readonly MarketplaceExtension[] = SYSTEM_EXTENSIONS.map((langua
 
 export const CATALOGUE: readonly MarketplaceExtension[] = [
   AI_ASSISTANT,
-  BROWSER,
   TRUFFLEHOG,
   NUCLEI,
   FFUF,

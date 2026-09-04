@@ -9,7 +9,6 @@ export const SETTINGS_PATH = "wide://settings";
 export const HTTP_PATH = "wide://response";
 
 export const POLICY_PATH = "wide://policy";
-export const ABOUT_PATH = "wide://about";
 
 export const BROWSER_PATH = "wide://browser";
 
@@ -36,7 +35,7 @@ export interface FileTab {
 }
 
 export interface VirtualTab {
-  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "about";
+  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher";
   path: string;
   name: string;
 }
@@ -67,7 +66,6 @@ interface EditorState {
   openSettings(): void;
   openHttpResponse(): void;
   openPolicy(): void;
-  openAbout(): void;
   openBrowser(): void;
 
   openCatcher(): void;
@@ -195,17 +193,6 @@ export const useEditor = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, { kind: "policy", path: POLICY_PATH, name: "Security" }],
         activePath: POLICY_PATH,
-      };
-    }),
-
-  openAbout: () =>
-    set((state) => {
-      if (state.tabs.some((tab) => tab.path === ABOUT_PATH)) {
-        return { activePath: ABOUT_PATH };
-      }
-      return {
-        tabs: [...state.tabs, { kind: "about", path: ABOUT_PATH, name: "About" }],
-        activePath: ABOUT_PATH,
       };
     }),
 

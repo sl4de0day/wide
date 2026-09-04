@@ -9,7 +9,7 @@ const EXTENSIONS_FILE = () =>
 
 
 
-const OPTIONAL_EXTENSIONS = new Set(["codeberg", "github", "comment-cleaner", "javascript", "typescript", "html", "css", "php", "python", "csharp", "java", "go", "ruby", "rust", "elixir", "kotlin", "sql", "graphql", "wasm", "scala", "erlang", "vue", "svelte", "angular", "ai-assistant", "browser", "trufflehog", "nuclei", "ffuf", "katana", "httpx", "dalfox", "subfinder", "interactsh", "sqlmap", "arjun", "curlconverter", "retirejs", "secretfinder", "jwt-tool", "commix", "sublist3r", "seclists", "python-debugger", "go-debugger", "ruby-debugger"]);
+const OPTIONAL_EXTENSIONS = new Set(["codeberg", "github", "comment-cleaner", "javascript", "typescript", "html", "css", "php", "python", "csharp", "java", "go", "ruby", "rust", "elixir", "kotlin", "sql", "graphql", "wasm", "scala", "erlang", "vue", "svelte", "angular", "ai-assistant", "trufflehog", "nuclei", "ffuf", "katana", "httpx", "dalfox", "subfinder", "interactsh", "sqlmap", "arjun", "curlconverter", "retirejs", "secretfinder", "jwt-tool", "commix", "sublist3r", "seclists", "python-debugger", "go-debugger", "ruby-debugger"]);
 
 
 
@@ -123,7 +123,7 @@ async function writeExtensionSettings(id, record) {
 
 
 
-const BUILTIN_TOOLS = new Set(["proxy"]);
+const BUILTIN_TOOLS = new Set(["proxy", "browser"]);
 
 
 async function extensionInstalled(id) {

@@ -21,9 +21,6 @@ export interface Settings {
   formatOnSave: boolean;
 
   focusLayer: boolean;
-  cursorTrail: boolean;
-
-  perfOverlay: boolean;
 
   aiGhostText: boolean;
 
@@ -42,8 +39,6 @@ export const DEFAULTS: Settings = {
   colorfulSyntax: true,
   formatOnSave: false,
   focusLayer: false,
-  cursorTrail: true,
-  perfOverlay: false,
   aiGhostText: false,
   securityLint: true,
   updateManifestUrl: "",

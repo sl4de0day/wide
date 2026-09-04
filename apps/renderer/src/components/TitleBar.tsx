@@ -48,7 +48,6 @@ export function TitleBar({ onOpenPanel }: { onOpenPanel: (id: string) => void })
     state.status?.repository ? (state.status.branch?.name ?? "") : "",
   );
 
-  const hasBrowser = useExtensions((state) => state.installed.has("browser"));
   const openBrowser = useEditor((state) => state.openBrowser);
   const openFolder = useWorkspace((state) => state.openFolder);
   const t = useT();
@@ -96,11 +95,9 @@ export function TitleBar({ onOpenPanel }: { onOpenPanel: (id: string) => void })
 
       <div className="flex-1" />
 
-      {hasBrowser && (
-        <TitleButton title={t("Open a web page inside Wide")} onClick={openBrowser}>
-          <Globe className="size-3.5" strokeWidth={1.5} />
-        </TitleButton>
-      )}
+      <TitleButton title={t("Open a web page inside Wide")} onClick={openBrowser}>
+        <Globe className="size-3.5" strokeWidth={1.5} />
+      </TitleButton>
       <TitleButton title={t("Command palette — every action (Ctrl+Shift+P)")} onClick={() => useCommandPalette.getState().openPalette()}>
         <Command className="size-3.5" strokeWidth={1.5} />
       </TitleButton>

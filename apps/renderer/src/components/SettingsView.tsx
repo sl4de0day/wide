@@ -9,6 +9,10 @@ import { useEditor } from "@/stores/editor";
 import { useSettings } from "@/stores/settings";
 import { useUpdate } from "@/stores/update";
 
+const ABOUT_DESCRIPTION =
+  "Wide is an IDE that unifies web development and web security in a single ecosystem. It detects vulnerabilities in real time as you code, enabling secure development from line one, while providing built-in tools to execute full-scale, professional web penetration tests. Whether you are a web pentester, bug bounty hunter, or web developer, Wide is the only tool you need.";
+const ABOUT_REPO_URL = "https://github.com/sl4de0day/wide";
+
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-4 border-b border-line py-3">
@@ -307,6 +311,11 @@ function UpdatesSection() {
 export function SettingsView() {
   const settings = useSettings();
   const t = useT();
+  const aboutVersion = useUpdate((state) => state.current);
+
+  useEffect(() => {
+    if (!aboutVersion) void useUpdate.getState().check();
+  }, [aboutVersion]);
 
   return (
     <div className="wide-enter-fade h-full overflow-auto px-6 py-5">
@@ -368,14 +377,6 @@ export function SettingsView() {
           <Toggle value={settings.formatOnSave} onChange={(next) => settings.set({ formatOnSave: next })} />
         </Row>
 
-        <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Session")}</h2>
-        <Row label={t("Cursor trail")} hint={t("Offers your last positions back after a long absence.")}>
-          <Toggle value={settings.cursorTrail} onChange={(next) => settings.set({ cursorTrail: next })} />
-        </Row>
-        <Row label={t("Performance overlay")} hint={t("Frame rate and memory, top right.")}>
-          <Toggle value={settings.perfOverlay} onChange={(next) => settings.set({ perfOverlay: next })} />
-        </Row>
-
         <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Security")}</h2>
         <Row
           label={t("Real-time security analysis")}
@@ -401,15 +402,34 @@ export function SettingsView() {
         <UpdatesSection />
 
         <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("About")}</h2>
-        <Row label={t("About Wide")} hint={t("Version, maker and the source repository.")}>
-          <button
-            type="button"
-            onClick={() => useEditor.getState().openAbout()}
-            className="rounded-md border border-line px-3 py-1 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
-          >
-            {t("Open")}
-          </button>
-        </Row>
+        <div className="border-b border-line py-3">
+          <p className="text-[14px] font-semibold text-fg-bright">{t("About Wide")}</p>
+          <p className="pt-2 text-[12px] leading-relaxed text-fg-dim">{ABOUT_DESCRIPTION}</p>
+          <div className="flex flex-col gap-1.5 pt-3">
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="text-fg-dim">{t("Version")}</span>
+              <span className="font-mono text-fg">{aboutVersion || "…"}</span>
+            </div>
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="text-fg-dim">{t("Maker")}</span>
+              <span className="font-mono text-fg">sl4de</span>
+            </div>
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="text-fg-dim">{t("License")}</span>
+              <span className="font-mono text-fg">GPLv3</span>
+            </div>
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="text-fg-dim">GitHub</span>
+              <button
+                type="button"
+                onClick={() => void bridge.openExternal(ABOUT_REPO_URL)}
+                className="font-mono text-accent transition-colors duration-100 hover:underline"
+              >
+                sl4de0day/wide
+              </button>
+            </div>
+          </div>
+        </div>
 
         <button
           type="button"
