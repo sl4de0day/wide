@@ -23,5 +23,6 @@ const parts = files.map((name) => {
   return body.replace(/\n+$/, '');
 });
 
+fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, `${parts.join('\n')}\n`, 'utf8');
 console.log(`backend: ${files.length} segments -> ${path.relative(process.cwd(), OUT)}`);
