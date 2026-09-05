@@ -23,7 +23,7 @@ function findCMake() {
   ].filter(Boolean);
   const editions = ['BuildTools', 'Community', 'Professional', 'Enterprise'];
   for (const base of bases) {
-    for (const year of ['2022', '2019']) {
+    for (const year of ['2025', '2022', '2019']) {
       for (const edition of editions) {
         const candidate = path.join(
           base, 'Microsoft Visual Studio', year, edition,
@@ -45,11 +45,42 @@ if (!cmake) {
   process.exit(1);
 }
 
+const VS_GENERATORS = {
+  15: 'Visual Studio 15 2017',
+  16: 'Visual Studio 16 2019',
+  17: 'Visual Studio 17 2022',
+  18: 'Visual Studio 18 2025',
+};
+
+function vsGenerator() {
+  const base = process.env['ProgramFiles(x86)'] ?? process.env.ProgramFiles;
+  if (!base) return null;
+  const vswhere = path.join(base, 'Microsoft Visual Studio', 'Installer', 'vswhere.exe');
+  if (!fs.existsSync(vswhere)) return null;
+  const found = cp.spawnSync(
+    vswhere,
+    [
+      '-latest',
+      '-products', '*',
+      '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+      '-property', 'installationVersion',
+    ],
+    { encoding: 'utf8' },
+  );
+  const major = Number(String(found.stdout ?? '').trim().split('.')[0]);
+  return VS_GENERATORS[major] ?? null;
+}
+
 const mode = process.argv[2] ?? 'build';
+const generator = mode === 'configure' ? vsGenerator() : null;
 const args =
   mode === 'configure'
-    ? ['-S', HOST, '-B', BUILD, '-G', 'Visual Studio 17 2022', '-A', 'x64']
+    ? ['-S', HOST, '-B', BUILD, ...(generator ? ['-G', generator] : []), '-A', 'x64']
     : ['--build', BUILD, '--config', 'Release'];
+
+if (mode === 'configure') {
+  console.log(generator ? 'configuring with ' + generator : 'configuring with the default generator');
+}
 
 const result = cp.spawnSync(cmake, args, { stdio: 'inherit' });
 process.exit(result.status ?? 1);

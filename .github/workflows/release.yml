@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies and configure CMake
@@ -53,6 +53,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "$GITHUB_REF_NAME is already published; leaving its assets untouched."
+            exit 0
+          fi
           gh release create "$GITHUB_REF_NAME" \
             release/Wide-Setup-*.exe \
             release/SHA256SUMS \
