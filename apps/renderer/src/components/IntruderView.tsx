@@ -355,18 +355,18 @@ export function IntruderView() {
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
-                title={t(
-                  m === "sniper" ? "Sniper — sweep each position with one list"
-                  : m === "ram" ? "Battering ram — the same payload in every position"
-                  : m === "pitchfork" ? "Pitchfork — one list per position, stepped together"
-                  : "Cluster bomb — every combination of the lists",
-                )}
+                title={
+                  m === "sniper" ? t("Sniper — sweep each position with one list")
+                  : m === "ram" ? t("Battering ram — the same payload in every position")
+                  : m === "pitchfork" ? t("Pitchfork — one list per position, stepped together")
+                  : t("Cluster bomb — every combination of the lists")
+                }
                 className={cn(
                   "rounded-sm border px-1.5 py-0.5 text-[9px] transition-colors duration-100",
                   mode === m ? "border-accent bg-selected text-fg" : "border-line text-fg-faint hover:bg-hover hover:text-fg",
                 )}
               >
-                {t(m === "sniper" ? "Sniper" : m === "ram" ? "Ram" : m === "pitchfork" ? "Pitchfork" : "Cluster")}
+                {m === "sniper" ? t("Sniper") : m === "ram" ? t("Ram") : m === "pitchfork" ? t("Pitchfork") : t("Cluster")}
               </button>
             ))}
           </div>

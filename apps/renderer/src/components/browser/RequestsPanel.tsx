@@ -36,9 +36,10 @@ export function BrowserRequestsPanel({ host }: { host: string | null }) {
   const entries = useProxy((s) => s.entries);
   const [selected, setSelected] = useState<number | null>(null);
 
-  const shown = useMemo(() => {
-    const list = host ? entries.filter((e) => e.host === host) : entries;
-    return [...list].reverse();
+  const shown = useMemo<ProxyEntry[]>(() => {
+    if (!host) return [];
+    const bare = host.toLowerCase().replace(/:\d+$/, "");
+    return entries.filter((e) => String(e.host || "").toLowerCase().replace(/:\d+$/, "") === bare).reverse();
   }, [entries, host]);
 
   const chosen = shown.find((e) => e.id === selected) ?? null;

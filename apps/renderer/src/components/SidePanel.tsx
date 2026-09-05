@@ -73,6 +73,7 @@ export function BottomDock({
   hidden?: boolean;
   defaultHeight?: number;
 }) {
+  const t = useT();
   const [height, setHeight] = useState(() => Math.max(MIN_HEIGHT, loadDockSize(BOTTOM_KEY, defaultHeight)));
   const [dragging, setDragging] = useState(false);
   const dockRef = useRef<HTMLDivElement>(null);
@@ -111,7 +112,7 @@ export function BottomDock({
       <div
         role="separator"
         aria-orientation="horizontal"
-        aria-label="Resize panel"
+        aria-label={t("Resize panel")}
         onPointerDown={() => setDragging(true)}
         onDoubleClick={() => setHeight(defaultHeight)}
         className="h-px cursor-row-resize bg-line transition-colors duration-100 hover:bg-line-strong"

@@ -133,7 +133,7 @@ export function GrpcView({ req }: { req: PitcherRequest }) {
             <button type="button" onClick={() => void loadProto()} className="rounded-sm border border-accent px-1.5 py-0.5 text-[10px] text-accent hover:bg-accent hover:text-bg">{t("Load")}</button>
           </div>
           <textarea value={protoSource} onChange={(e) => setBody({ raw: e.target.value })} spellCheck={false} placeholder={'syntax = "proto3";\nservice Greeter { rpc SayHello (HelloRequest) returns (HelloReply); }'} className={cn(field, "min-h-0 flex-1 resize-none font-mono text-[10px]")} />
-          {loadError && <p className="mt-1 font-mono text-[10px] text-status-error">{loadError}</p>}
+          {loadError && <p className="mt-1 font-mono text-[10px] text-status-error">{t(loadError)}</p>}
           {services.length > 0 && (
             <div className="mt-2 flex flex-col gap-1">
               <select value={service} onChange={(e) => { setService(e.target.value); setMethod(services.find((s) => s.name === e.target.value)?.methods[0]?.name ?? ""); }} className={field}>

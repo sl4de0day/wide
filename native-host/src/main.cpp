@@ -52,6 +52,7 @@ constexpr COLORREF kBackground = RGB(0x3b, 0x42, 0x52);
 wil::com_ptr<ICoreWebView2Controller> g_controller;
 wil::com_ptr<ICoreWebView2> g_webview;
 SidecarClient g_sidecar;
+HWND g_mainWindow = nullptr;
 
 std::wstring g_pendingOpenPath;
 
@@ -70,16 +71,23 @@ struct BrowserTab {
   bool creating = false;
   std::wstring pendingUrl;
 };
+constexpr UINT_PTR kBrowserEnvRetryTimer = 1;
+constexpr int kBrowserEnvMaxRetries = 8;
+constexpr UINT kBrowserEnvRetryDelayMs = 400;
+
 wil::com_ptr<ICoreWebView2Environment> g_browserEnv;
 bool g_browserEnvReady = false;
 bool g_browserEnvCreating = false;
+unsigned g_browserEnvGeneration = 0;
+int g_browserEnvRetries = 0;
 
-std::vector<std::function<void()>> g_browserEnvWaiters;
+std::vector<std::function<void(bool)>> g_browserEnvWaiters;
 std::map<std::wstring, BrowserTab> g_tabs;
 std::wstring g_activeTab;
 
 HWND g_browserHost = nullptr;
 long g_bpX = 0, g_bpY = 0, g_bpW = 0, g_bpH = 0;
+UINT g_bpDpi = 0;
 bool g_browserVisible = false;
 bool g_browserHasBounds = false;
 
@@ -93,8 +101,11 @@ wil::com_ptr<ICoreWebView2Controller> g_devtoolsController;
 wil::com_ptr<ICoreWebView2> g_devtoolsView;
 HWND g_devtoolsHost = nullptr;
 long g_dtX = 0, g_dtY = 0, g_dtW = 0, g_dtH = 0;
+UINT g_dtDpi = 0;
 bool g_devtoolsVisible = false;
 bool g_devtoolsHasBounds = false;
+bool g_devtoolsCreating = false;
+std::wstring g_devtoolsPendingUrl;
 
 void DestroySplash();
 
@@ -449,7 +460,20 @@ void BrowserAcceptProxyCert(const std::wstring& tabId) {
     wv14->add_ServerCertificateErrorDetected(
         Callback<ICoreWebView2ServerCertificateErrorDetectedEventHandler>(
             [](ICoreWebView2*, ICoreWebView2ServerCertificateErrorDetectedEventArgs* args) -> HRESULT {
-              args->put_Action(COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW);
+              wil::com_ptr<ICoreWebView2Certificate> cert;
+              if (SUCCEEDED(args->get_ServerCertificate(&cert)) && cert) {
+                LPWSTR issuer = nullptr;
+                if (SUCCEEDED(cert->get_Issuer(&issuer)) && issuer) {
+                  const bool ours =
+                      std::wstring(issuer).find(L"Wide Proxy CA") != std::wstring::npos;
+                  CoTaskMemFree(issuer);
+                  if (ours) {
+                    args->put_Action(COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW);
+                    return S_OK;
+                  }
+                }
+              }
+              args->put_Action(COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_DEFAULT);
               return S_OK;
             })
             .Get(),
@@ -461,6 +485,26 @@ void BrowserNavigate(HWND hwnd, const std::wstring& tabId, const std::wstring& u
 void ApplyBrowserPlacement();
 void BrowserActivate(const std::wstring& tabId);
 void RebuildBrowserTabs(HWND hwnd);
+
+void ScheduleBrowserEnvRetry(HWND hwnd) {
+  if (g_browserEnvRetries >= kBrowserEnvMaxRetries) {
+    BrowserEmit(json{{"tabId", std::string()}, {"envFailed", true}});
+    return;
+  }
+  ++g_browserEnvRetries;
+  UINT delay = kBrowserEnvRetryDelayMs;
+  for (int i = 1; i < g_browserEnvRetries && delay < 6000; ++i) delay *= 2;
+  SetTimer(hwnd, kBrowserEnvRetryTimer, delay, nullptr);
+}
+
+void RetryPendingBrowserTabs(HWND hwnd) {
+  std::vector<std::pair<std::wstring, std::wstring>> pending;
+  for (auto& entry : g_tabs) {
+    if (entry.second.ready || entry.second.creating) continue;
+    if (!entry.second.pendingUrl.empty()) pending.emplace_back(entry.first, entry.second.pendingUrl);
+  }
+  for (auto& entry : pending) BrowserNavigate(hwnd, entry.first, entry.second);
+}
 
 LRESULT CALLBACK BrowserHostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   if (m == WM_SETFOCUS) {
@@ -477,7 +521,7 @@ LRESULT CALLBACK BrowserHostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   return DefWindowProcW(h, m, w, l);
 }
 
-void EnsureBrowserEnv(HWND hwnd, std::function<void()> then) {
+void EnsureBrowserEnv(HWND hwnd, std::function<void(bool)> then) {
 
   if (!g_browserHost) {
     static bool registered = false;
@@ -494,10 +538,11 @@ void EnsureBrowserEnv(HWND hwnd, std::function<void()> then) {
                                     GetModuleHandleW(nullptr), nullptr);
   }
 
-  if (g_browserEnvReady) { if (then) then(); return; }
+  if (g_browserEnvReady) { if (then) then(true); return; }
   if (then) g_browserEnvWaiters.push_back(then);
   if (g_browserEnvCreating) return;
   g_browserEnvCreating = true;
+  const unsigned generation = g_browserEnvGeneration;
 
   wil::com_ptr<ICoreWebView2EnvironmentOptions> options;
   if (g_browserDebugPort > 0 || g_browserProxyPort > 0) {
@@ -505,11 +550,12 @@ void EnsureBrowserEnv(HWND hwnd, std::function<void()> then) {
     std::wstring arg;
     if (g_browserDebugPort > 0) {
       arg += L"--remote-debugging-port=" + std::to_wstring(g_browserDebugPort);
-      arg += L" --remote-allow-origins=*";
+      arg += L" --remote-allow-origins=http://127.0.0.1:" + std::to_wstring(g_browserDebugPort);
     }
     if (g_browserProxyPort > 0) {
       if (!arg.empty()) arg += L" ";
       arg += L"--proxy-server=127.0.0.1:" + std::to_wstring(g_browserProxyPort);
+      arg += L" --proxy-bypass-list=<-loopback>";
     }
     opts->put_AdditionalBrowserArguments(arg.c_str());
     options = opts;
@@ -517,14 +563,22 @@ void EnsureBrowserEnv(HWND hwnd, std::function<void()> then) {
   CreateCoreWebView2EnvironmentWithOptions(
       nullptr, BrowserUserDataFolder().c_str(), options.get(),
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-          [](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+          [hwnd, generation](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+            if (generation != g_browserEnvGeneration) return S_OK;
             g_browserEnvCreating = false;
-            if (FAILED(result) || !env) { g_browserEnvWaiters.clear(); return result; }
+            if (FAILED(result) || !env) {
+              auto failed = std::move(g_browserEnvWaiters);
+              g_browserEnvWaiters.clear();
+              for (auto& w : failed) if (w) w(false);
+              ScheduleBrowserEnvRetry(hwnd);
+              return result;
+            }
             g_browserEnv = env;
             g_browserEnvReady = true;
+            g_browserEnvRetries = 0;
             auto waiters = std::move(g_browserEnvWaiters);
             g_browserEnvWaiters.clear();
-            for (auto& w : waiters) if (w) w();
+            for (auto& w : waiters) if (w) w(true);
             return S_OK;
           })
           .Get());
@@ -537,18 +591,27 @@ void EnsureBrowserTab(HWND hwnd, const std::wstring& tabId, std::function<void()
   if (tab.creating) return;
   tab.creating = true;
 
-  EnsureBrowserEnv(hwnd, [tabId, then]() {
+  EnsureBrowserEnv(hwnd, [tabId, then](bool envOk) {
     auto it = g_tabs.find(tabId);
     if (it == g_tabs.end()) return;
-    if (it->second.ready) { if (then) then(); return; }
+    if (!envOk || !g_browserEnv) { it->second.creating = false; return; }
+    if (it->second.ready) { it->second.creating = false; if (then) then(); return; }
 
     const bool hasProxy = g_browserProxyPort > 0;
+    const unsigned generation = g_browserEnvGeneration;
     g_browserEnv->CreateCoreWebView2Controller(
         g_browserHost,
         Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-            [tabId, then, hasProxy](HRESULT r, ICoreWebView2Controller* controller) -> HRESULT {
+            [tabId, then, hasProxy, generation](HRESULT r, ICoreWebView2Controller* controller) -> HRESULT {
+              if (generation != g_browserEnvGeneration) {
+                if (controller) controller->Close();
+                return S_OK;
+              }
               auto it = g_tabs.find(tabId);
-              if (it == g_tabs.end()) return r;
+              if (it == g_tabs.end()) {
+                if (controller) controller->Close();
+                return r;
+              }
               BrowserTab& tab = it->second;
               if (FAILED(r) || !controller) { tab.creating = false; return r; }
               tab.controller = controller;
@@ -597,9 +660,11 @@ void RebuildBrowserTabs(HWND hwnd) {
     if (entry.second.controller) entry.second.controller->Close();
   }
   g_tabs.clear();
+  ++g_browserEnvGeneration;
   g_browserEnv.reset();
   g_browserEnvReady = false;
   g_browserEnvCreating = false;
+  g_browserEnvRetries = 0;
   g_browserEnvWaiters.clear();
 
   for (auto& entry : reopen) {
@@ -631,6 +696,11 @@ void BrowserNavigate(HWND hwnd, const std::wstring& tabId, const std::wstring& u
   }
   tab.pendingUrl = url;
   EnsureBrowserTab(hwnd, tabId, nullptr);
+}
+
+UINT HostDpi() {
+  UINT dpi = g_mainWindow ? GetDpiForWindow(g_mainWindow) : 0;
+  return dpi ? dpi : 96;
 }
 
 void ApplyBrowserPlacement() {
@@ -669,6 +739,7 @@ void BrowserPlace(const std::wstring& tabId, long x, long y, long w, long h, boo
   g_bpY = y;
   g_bpW = w;
   g_bpH = h;
+  g_bpDpi = HostDpi();
   g_browserVisible = visible;
   g_browserHasBounds = true;
   ApplyBrowserPlacement();
@@ -704,13 +775,35 @@ void DevtoolsPlace(long x, long y, long w, long h, bool visible) {
   g_dtY = y;
   g_dtW = w;
   g_dtH = h;
+  g_dtDpi = HostDpi();
   g_devtoolsVisible = visible;
   g_devtoolsHasBounds = true;
   ApplyDevtoolsPlacement();
 }
 
+void RescaleNativePanes(UINT dpi) {
+  if (!dpi) return;
+  if (g_browserHasBounds && g_bpDpi && g_bpDpi != dpi) {
+    g_bpX = MulDiv(g_bpX, dpi, g_bpDpi);
+    g_bpY = MulDiv(g_bpY, dpi, g_bpDpi);
+    g_bpW = MulDiv(g_bpW, dpi, g_bpDpi);
+    g_bpH = MulDiv(g_bpH, dpi, g_bpDpi);
+    g_bpDpi = dpi;
+    ApplyBrowserPlacement();
+  }
+  if (g_devtoolsHasBounds && g_dtDpi && g_dtDpi != dpi) {
+    g_dtX = MulDiv(g_dtX, dpi, g_dtDpi);
+    g_dtY = MulDiv(g_dtY, dpi, g_dtDpi);
+    g_dtW = MulDiv(g_dtW, dpi, g_dtDpi);
+    g_dtH = MulDiv(g_dtH, dpi, g_dtDpi);
+    g_dtDpi = dpi;
+    ApplyDevtoolsPlacement();
+  }
+}
+
 void DevtoolsClose() {
   g_devtoolsVisible = false;
+  g_devtoolsPendingUrl.clear();
   if (g_devtoolsController) g_devtoolsController->put_IsVisible(FALSE);
   if (g_devtoolsHost) ShowWindow(g_devtoolsHost, SW_HIDE);
 }
@@ -728,16 +821,22 @@ void DevtoolsOpen(HWND hwnd, const std::wstring& url) {
     ApplyDevtoolsPlacement();
     return;
   }
-  std::wstring target = url;
+  g_devtoolsPendingUrl = url;
+  if (g_devtoolsCreating) return;
+  g_devtoolsCreating = true;
   g_env->CreateCoreWebView2Controller(
       g_devtoolsHost,
       Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-          [target](HRESULT r, ICoreWebView2Controller* controller) -> HRESULT {
-            if (FAILED(r) || !controller) return r;
+          [](HRESULT r, ICoreWebView2Controller* controller) -> HRESULT {
+            g_devtoolsCreating = false;
+            if (FAILED(r) || !controller) { g_devtoolsPendingUrl.clear(); return r; }
+            if (g_devtoolsController) { controller->Close(); return S_OK; }
             g_devtoolsController = controller;
             g_devtoolsController->get_CoreWebView2(&g_devtoolsView);
             ApplyDevtoolsPlacement();
-            if (g_devtoolsView) g_devtoolsView->Navigate(target.c_str());
+            const std::wstring target = g_devtoolsPendingUrl;
+            g_devtoolsPendingUrl.clear();
+            if (g_devtoolsView && !target.empty()) g_devtoolsView->Navigate(target.c_str());
             return S_OK;
           })
           .Get());
@@ -777,7 +876,10 @@ void WriteRemoteConfig(const json& cfg);
 void BrowserCdp(int id, const std::wstring& tabId, const std::string& method, const std::string& paramsJson) {
   auto it = g_tabs.find(tabId);
   if (method.empty() || it == g_tabs.end() || !it->second.view) {
-    g_sidecar.Send(json{{"t", "hostReply"}, {"id", id}, {"result", nullptr}}.dump());
+    g_sidecar.Send(json{{"t", "hostReply"},
+                        {"id", id},
+                        {"error", "That browser tab is not ready for DevTools calls."}}
+                       .dump());
     return;
   }
   it->second.view->CallDevToolsProtocolMethod(
@@ -850,8 +952,12 @@ void ProcessSidecarLine(HWND hwnd, const std::string& line) {
     }
 
     if (method == "browser:setRemotePort") {
-      if (g_browserDebugPort == 0) g_browserDebugPort = params.value("port", 0);
-      g_sidecar.Send(json{{"t", "hostReply"}, {"id", id}, {"result", g_browserDebugPort}}.dump());
+      const int asked = params.value("port", 0);
+      if (g_browserDebugPort == 0 && asked > 0) {
+        g_browserDebugPort = asked;
+        if (g_browserEnvReady || g_browserEnvCreating) RebuildBrowserTabs(hwnd);
+      }
+      g_sidecar.Send(json{{"t", "hostReply"}, {"id", id}, {"result", {{"port", g_browserDebugPort}}}}.dump());
       return;
     }
 
@@ -1375,7 +1481,7 @@ void CreateSplash(HINSTANCE hi) {
 
   UINT dpi = GetDpiForSystem();
   int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-  int size = MulDiv(219, dpi, 96);
+  int size = MulDiv(438, dpi, 96);
 
   g_splash = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
                              L"WideSplash", L"", WS_POPUP, (sw - size) / 2,
@@ -1403,8 +1509,51 @@ void DestroySplash() {
   }
 }
 
+void ResetBrowserForSidecarRestart(HWND hwnd) {
+  KillTimer(hwnd, kBrowserEnvRetryTimer);
+  std::vector<std::pair<std::wstring, std::wstring>> reopen;
+  for (auto& entry : g_tabs) {
+    std::wstring url;
+    if (entry.second.view) {
+      wil::unique_cotaskmem_string uri;
+      if (SUCCEEDED(entry.second.view->get_Source(&uri)) && uri) url = uri.get();
+    }
+    if (url.empty()) url = entry.second.pendingUrl;
+    reopen.emplace_back(entry.first, url);
+  }
+  const std::wstring wasActive = g_activeTab;
+  for (auto& entry : g_tabs) {
+    if (entry.second.controller) entry.second.controller->Close();
+  }
+  g_tabs.clear();
+  g_activeTab.clear();
+  ++g_browserEnvGeneration;
+  g_browserEnv.reset();
+  g_browserEnvReady = false;
+  g_browserEnvCreating = false;
+  g_browserEnvRetries = 0;
+  g_browserEnvWaiters.clear();
+  g_browserProxyPort = 0;
+  g_browserDebugPort = 0;
+  g_browserFullscreen = false;
+  g_browserVisible = false;
+  g_bpDpi = 0;
+  g_dtDpi = 0;
+  g_devtoolsHasBounds = false;
+  if (g_browserHost) ShowWindow(g_browserHost, SW_HIDE);
+  DevtoolsClose();
+
+  for (auto& entry : reopen) {
+    if (entry.second.empty() || entry.second == L"about:blank") continue;
+    BrowserNavigate(hwnd, entry.first, entry.second);
+  }
+  g_activeTab = wasActive;
+  BrowserActivate(wasActive);
+}
+
 void RestartSidecar(HWND hwnd) {
   g_sidecar.Stop();
+  ResetBrowserForSidecarRestart(hwnd);
   std::wstring remoteCmd = BuildRemoteCommand();
   g_currentlyRemote = !remoteCmd.empty();
   g_sidecarSpoke = false;
@@ -1416,6 +1565,7 @@ void OnSidecarExit(HWND hwnd) {
   if (!g_currentlyRemote || g_sidecarSpoke || g_remoteFellBack) return;
   g_remoteFellBack = true;
   g_sidecar.Stop();
+  ResetBrowserForSidecarRestart(hwnd);
   g_currentlyRemote = false;
   g_sidecar.Start(hwnd, WM_APP_SIDECAR, ResolveNodeExe(), ResolveSidecarScript(), L"");
   if (g_webview) g_webview->Navigate(L"https://app.local/index.html?remoteFallback=1");
@@ -1442,6 +1592,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     }
     case WM_APP_REMOTE_APPLY: {
       ApplyRemoteChange(hwnd);
+      return 0;
+    }
+    case WM_TIMER: {
+      if (wparam != kBrowserEnvRetryTimer) return DefWindowProc(hwnd, msg, wparam, lparam);
+      KillTimer(hwnd, kBrowserEnvRetryTimer);
+      RetryPendingBrowserTabs(hwnd);
       return 0;
     }
     case WM_COPYDATA: {
@@ -1489,6 +1645,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       RECT* r = reinterpret_cast<RECT*>(lparam);
       SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left,
                    r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
+      RescaleNativePanes(HIWORD(wparam));
       return 0;
     }
     case WM_ERASEBKGND: {
@@ -1579,6 +1736,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
       x, y, winW, winH,
       nullptr, nullptr, hInstance, nullptr);
   if (!hwnd) return 1;
+  g_mainWindow = hwnd;
 
   BOOL dark = TRUE;
   DwmSetWindowAttribute(hwnd,  20, &dark,

@@ -273,14 +273,14 @@ function BodyEditor({ req, update }: { req: PitcherRequest; update: (p: Partial<
       <div className="flex flex-wrap items-center gap-1">
         {(["none", "form", "multipart", "raw", "graphql", "binary"] as const).map((m) => (
           <button key={m} type="button" onClick={() => setBody({ mode: m })} className={cn("rounded-sm border px-1.5 py-0.5 text-[10px]", b.mode === m ? "border-accent bg-selected text-fg" : "border-line text-fg-faint hover:bg-hover hover:text-fg")}>
-            {m}
+            {t(m)}
           </button>
         ))}
         {b.mode === "raw" && (
           <select value={b.rawType} onChange={(e) => setBody({ rawType: e.target.value as typeof b.rawType })} className="ml-1 rounded-sm border border-line bg-canvas px-1 py-0.5 text-[10px] text-fg outline-none">
             <option value="json">JSON</option>
             <option value="xml">XML</option>
-            <option value="text">Text</option>
+            <option value="text">{t("Text")}</option>
             <option value="html">HTML</option>
           </select>
         )}
@@ -311,12 +311,12 @@ function AuthEditor({ req, update }: { req: PitcherRequest; update: (p: Partial<
   return (
     <div className="flex flex-col gap-1.5 text-[11px]">
       <select value={a.type} onChange={(e) => setAuth({ type: e.target.value as typeof a.type })} className="w-48 rounded-sm border border-line bg-canvas px-1.5 py-1 text-[11px] text-fg outline-none">
-        <option value="none">No Auth</option>
-        <option value="bearer">Bearer Token</option>
-        <option value="basic">Basic</option>
-        <option value="apikey">API Key</option>
+        <option value="none">{t("No Auth")}</option>
+        <option value="bearer">{t("Bearer Token")}</option>
+        <option value="basic">{t("Basic")}</option>
+        <option value="apikey">{t("API Key")}</option>
         <option value="oauth2">OAuth 2.0</option>
-        <option value="digest">Digest</option>
+        <option value="digest">{t("Digest")}</option>
         <option value="awssigv4">AWS SigV4</option>
       </select>
       {a.type === "bearer" && <input value={a.bearer} onChange={(e) => setAuth({ bearer: e.target.value })} placeholder="{{token}}" className={field} />}
@@ -339,8 +339,8 @@ function AuthEditor({ req, update }: { req: PitcherRequest; update: (p: Partial<
       {a.type === "oauth2" && (
         <>
           <select value={a.oauth2.grant} onChange={(e) => setAuth({ oauth2: { ...a.oauth2, grant: e.target.value as "client_credentials" | "password" } })} className="w-52 rounded-sm border border-line bg-canvas px-1.5 py-1 text-[11px] text-fg outline-none">
-            <option value="client_credentials">Client Credentials</option>
-            <option value="password">Password</option>
+            <option value="client_credentials">{t("Client Credentials")}</option>
+            <option value="password">{t("Password")}</option>
           </select>
           <input value={a.oauth2.tokenUrl} onChange={(e) => setAuth({ oauth2: { ...a.oauth2, tokenUrl: e.target.value } })} placeholder={t("Access token URL")} className={field} />
           <input value={a.oauth2.clientId} onChange={(e) => setAuth({ oauth2: { ...a.oauth2, clientId: e.target.value } })} placeholder={t("Client ID")} className={field} />
@@ -400,7 +400,7 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
 
   if (run?.sending) return <div className="flex flex-1 items-center justify-center text-[12px] text-fg-faint">{t("Sending…")}</div>;
   if (!resp) return <div className="flex flex-1 items-center justify-center text-[12px] text-fg-faint">{t("Send the request to see the response.")}</div>;
-  if (!resp.ok) return <p className="p-3 text-[12px] text-status-error">{resp.error}</p>;
+  if (!resp.ok) return <p className="p-3 text-[12px] text-status-error">{t(resp.error ?? "")}</p>;
 
   const tone = (resp.status ?? 0) >= 500 ? "text-status-error" : (resp.status ?? 0) >= 400 ? "text-amber-400" : "text-emerald-400";
   const passed = tests.filter((x) => x.passed).length;
@@ -437,7 +437,7 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
                 <span className={cn("shrink-0 font-mono text-[10px]", x.passed ? "text-emerald-400" : "text-status-error")}>{x.passed ? "PASS" : "FAIL"}</span>
                 <span className="min-w-0 flex-1">
                   <span className="text-fg">{x.name}</span>
-                  {x.error && <span className="block font-mono text-[10px] text-status-error">{x.error}</span>}
+                  {x.error && <span className="block font-mono text-[10px] text-status-error">{t(x.error)}</span>}
                 </span>
               </div>
             ))

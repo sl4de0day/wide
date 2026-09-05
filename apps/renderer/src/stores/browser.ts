@@ -14,9 +14,16 @@ export interface BrowserTab {
   favicon?: string;
 }
 
-let nextId = 1;
+let seq = 0;
+const makeId = () => `t${Date.now().toString(36)}${(seq += 1).toString(36)}`;
+
+const FAVICON_MAX_CHARS = 100000;
+
+const renderableFavicon = (value: string): string | undefined =>
+  value.startsWith("data:image/") && value.length <= FAVICON_MAX_CHARS ? value : undefined;
+
 const makeTab = (): BrowserTab => ({
-  id: `t${nextId++}`,
+  id: makeId(),
   url: "",
   title: "",
   loading: false,
@@ -92,17 +99,20 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   ingest: (event) =>
     set((state) => {
 
-      const id =
-        event.tabId && state.tabs.some((tab) => tab.id === event.tabId)
-          ? event.tabId
-          : state.activeId;
+      const known = event.tabId ? state.tabs.some((tab) => tab.id === event.tabId) : false;
+      if (event.tabId && !known) return state;
+      const id = event.tabId && known ? event.tabId : state.activeId;
       const patch: Partial<BrowserTab> = {};
       if (event.url !== undefined) patch.url = event.url;
       if (event.title !== undefined) patch.title = event.title;
       if (event.loading !== undefined) patch.loading = event.loading;
       if (event.canGoBack !== undefined) patch.canBack = event.canGoBack;
       if (event.canGoForward !== undefined) patch.canForward = event.canGoForward;
-      if (event.favicon !== undefined) patch.favicon = event.favicon;
+      if (event.favicon !== undefined) {
+        const renderable = renderableFavicon(event.favicon);
+        if (renderable) patch.favicon = renderable;
+        else if (!event.favicon) patch.favicon = undefined;
+      }
       return { tabs: patchActive(state.tabs, id, patch) };
     }),
 

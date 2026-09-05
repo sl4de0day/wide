@@ -6,6 +6,34 @@ function debugBpKey(file, line) {
   return `${file}:${line}`;
 }
 
+function debugRecordBpId(file, line, breakpointId) {
+  if (!dbg || !breakpointId) return;
+  const key = debugBpKey(file, line);
+  const list = dbg.bpIds.get(key) || [];
+  if (!list.includes(breakpointId)) list.push(breakpointId);
+  dbg.bpIds.set(key, list);
+}
+
+function debugTrackBreakpoint(bp) {
+  if (!dbg) return;
+  const key = debugBpKey(bp.file, bp.line);
+  const index = dbg.breakpoints.findIndex((item) => debugBpKey(item.file, item.line) === key);
+  if (index >= 0) dbg.breakpoints[index] = bp;
+  else dbg.breakpoints.push(bp);
+}
+
+function debugForgetBreakpoint(file, line) {
+  if (!dbg) return [];
+  const key = debugBpKey(file, line);
+  for (let i = dbg.breakpoints.length - 1; i >= 0; i -= 1) {
+    const item = dbg.breakpoints[i];
+    if (debugBpKey(item.file, item.line) === key) dbg.breakpoints.splice(i, 1);
+  }
+  const ids = dbg.bpIds.get(key) || [];
+  dbg.bpIds.delete(key);
+  return ids;
+}
+
 function smResolveForScript(bp, scriptUrl, map) {
   if (map) {
     if (!smHasSource(map, bp.file)) return null;
@@ -43,12 +71,7 @@ async function debugSetBpOnScript(bp, scriptUrl, map) {
     columnNumber: where.column || 0,
     condition: bp.condition || undefined,
   });
-  if (dbg && result && result.breakpointId) {
-    const key = debugBpKey(bp.file, bp.line);
-    const list = dbg.bpIds.get(key) || [];
-    list.push(result.breakpointId);
-    dbg.bpIds.set(key, list);
-  }
+  if (result && result.breakpointId) debugRecordBpId(bp.file, bp.line, result.breakpointId);
 }
 
 async function debugOnScriptParsed(scriptId, scriptUrl, sourceMapURL) {
@@ -57,12 +80,13 @@ async function debugOnScriptParsed(scriptId, scriptUrl, sourceMapURL) {
   const map = sourceMapURL ? await smLoad(scriptUrl, sourceMapURL) : null;
   if (dbg !== session) return;
   session.scriptMaps.set(scriptId, map);
-  for (const bp of session.breakpoints) await debugSetBpOnScript(bp, scriptUrl, map);
+  for (const bp of [...session.breakpoints]) await debugSetBpOnScript(bp, scriptUrl, map);
 }
 
 async function debugBindBrowserBreakpoint(bp) {
   if (!dbg) return;
-  for (const [scriptId, scriptUrl] of dbg.scripts) {
+  for (const [scriptId, scriptUrl] of [...dbg.scripts]) {
+    if (!dbg) return;
     await debugSetBpOnScript(bp, scriptUrl, dbg.scriptMaps.get(scriptId));
   }
 }
@@ -199,15 +223,7 @@ async function debugStop() {
   } catch {
 
   }
-  if (session.browser) {
-
-    try {
-      electron.hostRequest("browser:debug", { port: 0 });
-    } catch {
-
-    }
-    return;
-  }
+  if (session.browser) return;
   try {
     if (session.child) killProcessTree(session.child);
   } catch {
@@ -301,12 +317,13 @@ async function debugStart(event, cwd, file, breakpoints) {
   await debugSend("Debugger.enable");
 
   for (const bp of dbg.breakpoints) {
-    await debugSend("Debugger.setBreakpointByUrl", {
+    const result = await debugSend("Debugger.setBreakpointByUrl", {
       url: debugFileUrl(bp.file),
       lineNumber: bp.line,
       columnNumber: 0,
       condition: bp.condition || undefined,
     });
+    debugRecordBpId(bp.file, bp.line, result && result.breakpointId);
   }
   await debugSend("Runtime.runIfWaitingForDebugger");
   return { ok: true, port };
@@ -347,16 +364,20 @@ function debugBrowserTarget(port) {
 
 async function debugAttachBrowser(event, breakpoints, root) {
   await debugStop();
-  const port = await debugFreePort();
-  try {
-    await electron.hostRequest("browser:debug", { port });
-  } catch {
 
+  let port = browserRemotePort;
+  if (!port) {
+    port = await debugFreePort();
+    try {
+      await electron.hostRequest("browser:debug", { port });
+    } catch {
+      void 0;
+    }
+    browserRemotePort = port;
   }
 
   const wsUrl = await debugBrowserTarget(port);
   if (!wsUrl) {
-    electron.hostRequest("browser:debug", { port: 0 });
     return { ok: false, error: "Could not reach the browser's debugger." };
   }
 
@@ -378,8 +399,12 @@ async function debugAttachBrowser(event, breakpoints, root) {
   const ws = new WebSocket(wsUrl);
   dbg.ws = ws;
   ws.addEventListener("message", (message) => debugHandle(message.data));
-  ws.addEventListener("close", () => debugEmit({ type: "closed" }));
-  ws.addEventListener("error", () => debugEmit({ type: "closed" }));
+  const ended = () => {
+    debugEmit({ type: "closed" });
+    if (dbg && dbg.ws === ws) dbg = null;
+  };
+  ws.addEventListener("close", ended);
+  ws.addEventListener("error", ended);
   await new Promise((resolve) => {
     ws.addEventListener("open", () => resolve(), { once: true });
     setTimeout(resolve, 5000);
@@ -479,30 +504,28 @@ function registerDebugHandlers() {
     if (!dbg) return { ok: true };
     if (dbg.kind === "dap") return dapSetBreakpoint(file, line, on);
 
+    const armed = debugForgetBreakpoint(file, line);
+    if (!armed.length && !on && id) armed.push(id);
+
+    const bp = on ? { file, line, condition } : null;
+    if (bp) debugTrackBreakpoint(bp);
+
+    for (const bid of armed) await debugSend("Debugger.removeBreakpoint", { breakpointId: bid });
+    if (!on) return { ok: true };
+    if (!dbg) return { ok: true };
+
     if (dbg.browser) {
-      const key = debugBpKey(file, line);
-      if (on) {
-        dbg.bpIds.set(key, []);
-        await debugBindBrowserBreakpoint({ file, line, condition });
-        const ids = dbg.bpIds.get(key) || [];
-        return { ok: true, id: ids[0] ?? null };
-      }
-      for (const bid of dbg.bpIds.get(key) || []) {
-        await debugSend("Debugger.removeBreakpoint", { breakpointId: bid });
-      }
-      dbg.bpIds.delete(key);
-      return { ok: true };
+      await debugBindBrowserBreakpoint(bp);
+      const ids = (dbg && dbg.bpIds.get(debugBpKey(file, line))) || [];
+      return { ok: true, id: ids[0] ?? null };
     }
-    if (on) {
-      const result = await debugSend("Debugger.setBreakpointByUrl", {
-        url: debugFileUrl(file),
-        lineNumber: line,
-        columnNumber: 0,
-        condition: condition || undefined,
-      });
-      return { ok: true, id: result?.breakpointId ?? null };
-    }
-    if (id) await debugSend("Debugger.removeBreakpoint", { breakpointId: id });
-    return { ok: true };
+    const result = await debugSend("Debugger.setBreakpointByUrl", {
+      url: debugFileUrl(file),
+      lineNumber: line,
+      columnNumber: 0,
+      condition: condition || undefined,
+    });
+    debugRecordBpId(file, line, result && result.breakpointId);
+    return { ok: true, id: result?.breakpointId ?? null };
   });
 }

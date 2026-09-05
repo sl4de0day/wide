@@ -73,7 +73,7 @@ const AI_TOOLS = [
   {
     name: "write_file",
     description:
-      "Replace a file's entire contents. Read the file first; you are replacing all of it, not appending. The change goes into the editor, not the disk, so the person can undo it with one keystroke and nothing is saved until they save it.",
+      "Replace a file's entire contents. Read the file first; you are replacing all of it, not appending. The change is proposed to the person in the editor rather than written to the disk, so it only takes effect once they accept it, and they can undo it with one keystroke.",
     parameters: {
       type: "object",
       properties: {
@@ -130,6 +130,20 @@ function aiTrim(text) {
   );
 }
 
+const AI_ARGS_MAY_BE_EMPTY = new Set(["content"]);
+
+function aiMissingArgs(name, input) {
+  const spec = AI_TOOLS.find((tool) => tool.name === name);
+  if (!spec) return [];
+  const properties = spec.parameters.properties ?? {};
+  return (spec.parameters.required ?? []).filter((key) => {
+    const value = input?.[key];
+    if (properties[key]?.type !== "string") return value === undefined || value === null;
+    if (typeof value !== "string") return true;
+    return value.trim() === "" && !AI_ARGS_MAY_BE_EMPTY.has(key);
+  });
+}
+
 function aiAllowed(channel, args) {
   const verdict = check({ channel, args, subject: "ai" });
   if (verdict.decision === "deny" && verdict.enforced) {
@@ -141,7 +155,16 @@ function aiAllowed(channel, args) {
 async function aiRunTool(root, name, input, send) {
   try {
 
-    if (isMcpTool(name)) return await mcpCallTool(name, input ?? {});
+    if (isMcpTool(name)) {
+      const allowed = aiAllowed("ai:tool.mcp", [name]);
+      if (!allowed.ok) return allowed.reason;
+      return aiTrim(await mcpCallTool(name, input ?? {}));
+    }
+
+    const missing = aiMissingArgs(name, input);
+    if (missing.length > 0) {
+      return `The call to ${name} arrived without ${missing.join(" and ")}, so nothing was done. Send it again with the whole argument object.`;
+    }
 
     if (name === "find_relevant") {
       const allowed = aiAllowed("ai:tool.search", [root]);
@@ -187,7 +210,7 @@ async function aiRunTool(root, name, input, send) {
       if (!allowed.ok) return allowed.reason;
       const result = await searchInFiles(root, {
         query: String(input.query ?? ""),
-        regex: Boolean(input.regex),
+        regexp: Boolean(input.regex),
         caseSensitive: Boolean(input.caseSensitive),
       });
       if (result?.error) return result.error;
@@ -196,7 +219,7 @@ async function aiRunTool(root, name, input, send) {
       const lines = [];
       for (const file of files) {
         for (const match of file.matches ?? []) {
-          lines.push(`${file.relativePath ?? file.path}:${match.line}  ${String(match.text ?? "").trim()}`);
+          lines.push(`${file.relativePath ?? file.path}:${match.line}  ${String(match.preview ?? "").trim()}`);
         }
       }
       return aiTrim(`${result.total ?? lines.length} matches\n${lines.join("\n")}`);
@@ -213,13 +236,18 @@ async function aiRunTool(root, name, input, send) {
     if (name === "write_file") {
       const resolved = aiResolvePath(root, input.path);
       if (resolved.error) return resolved.error;
-      if (typeof input.content !== "string") return "No content was given to write.";
 
       const allowed = aiAllowed("ai:tool.write", [root, resolved.path]);
       if (!allowed.ok) return allowed.reason;
-      send({ type: "edit", root, path: resolved.path, content: input.content });
+      let existed = true;
+      try {
+        await promises.access(resolved.path);
+      } catch {
+        existed = false;
+      }
+      send({ type: "edit", root, path: resolved.path, content: input.content, existed });
 
-      return `Wrote ${resolved.relative}.`;
+      return `The change to ${resolved.relative} was handed to the editor. It may still be waiting for the person to accept it, so do not assume the copy on disk matches; do not read it back to check, and describe it as a change you are making rather than one that is finished.`;
     }
 
     return `There is no tool called ${name}.`;
@@ -235,6 +263,7 @@ async function aiRunTurn({ provider, model, key, root, system, messages, allowWr
   for (let round = 0; round < AI_MAX_TOOL_ROUNDS; round += 1) {
     const calls = [];
     let answered = false;
+    let said = "";
 
     const stream =
       provider === "gemini"
@@ -245,17 +274,22 @@ async function aiRunTurn({ provider, model, key, root, system, messages, allowWr
 
     for await (const event of stream) {
       if (event.type === "tool_use") calls.push(event);
-      else if (event.type === "text") answered = true;
+      else if (event.type === "text") {
+        answered = true;
+        said += String(event.text ?? "");
+      }
       send(event);
     }
 
     if (calls.length === 0) return { ok: true, answered };
 
-    history.push(aiAssistantTurn(provider, calls));
+    history.push(aiAssistantTurn(provider, calls, said));
 
     for (const call of calls) {
       send({ type: "tool_start", id: call.id, name: call.name, input: call.input });
-      const result = await aiRunTool(root, call.name, call.input ?? {}, send);
+      const result = call.truncated
+        ? `The call to ${call.name} arrived cut off, so nothing was done. The provider ended the answer mid-argument; send the call again with the whole argument object, or make a smaller change.`
+        : await aiRunTool(root, call.name, call.input ?? {}, send);
       send({ type: "tool_end", id: call.id, name: call.name, result });
       history.push(aiToolResultTurn(provider, call, result));
       if (signal?.aborted) return { ok: false, error: "stopped" };
@@ -269,32 +303,38 @@ async function aiRunTurn({ provider, model, key, root, system, messages, allowWr
   return { ok: false, error: "too-many-rounds" };
 }
 
-function aiAssistantTurn(provider, calls) {
+function aiAssistantTurn(provider, calls, text) {
+  const said = String(text ?? "");
+  const spoke = said.trim().length > 0;
   if (provider === "claude") {
+    const blocks = calls.map((call) => ({
+      type: "tool_use",
+      id: call.id,
+      name: call.name,
+      input: call.input ?? {},
+    }));
     return {
       role: "assistant",
-      content: calls.map((call) => ({
-        type: "tool_use",
-        id: call.id,
-        name: call.name,
-        input: call.input ?? {},
-      })),
+      content: spoke ? [{ type: "text", text: said }, ...blocks] : blocks,
     };
   }
   if (provider === "gemini") {
+    const steps = calls.map((call) => ({
+      type: "function_call",
+      id: call.id,
+      name: call.name,
+      arguments: JSON.stringify(call.input ?? {}),
+    }));
     return {
       role: "assistant",
-      geminiSteps: calls.map((call) => ({
-        type: "function_call",
-        id: call.id,
-        name: call.name,
-        arguments: JSON.stringify(call.input ?? {}),
-      })),
+      geminiSteps: spoke
+        ? [{ type: "model_output", content: [{ type: "text", text: said }] }, ...steps]
+        : steps,
     };
   }
   return {
     role: "assistant",
-    content: null,
+    content: spoke ? said : null,
     tool_calls: calls.map((call) => ({
       id: call.id,
       type: "function",
@@ -393,6 +433,10 @@ function registerAiAgentHandlers() {
       return { ok: false, error: "no-key" };
     }
 
+    const sender = event.sender;
+    const controller = new AbortController();
+    aiTurns.set(id, controller);
+
     if (provider !== "claude-code") {
       try {
         await ensureMcp(root);
@@ -400,10 +444,10 @@ function registerAiAgentHandlers() {
 
       }
     }
-
-    const sender = event.sender;
-    const controller = new AbortController();
-    aiTurns.set(id, controller);
+    if (controller.signal.aborted) {
+      aiTurns.delete(id);
+      return { ok: false, error: "stopped" };
+    }
 
     const send = (payload) => {
       if (!sender.isDestroyed()) sender.send("ai:event", { ...payload, id });
@@ -483,9 +527,12 @@ function registerAiAgentHandlers() {
         const stream =
           provider === "gemini"
             ? aiStreamGemini({ key, model, system, steps: aiToGeminiSteps(messages), tools: [], signal: controller.signal })
-            : provider === "claude"
+            : provider === "claude" || provider === "claude-code"
               ? aiStreamClaude({ key, model, system, messages, tools: [], signal: controller.signal })
-              : aiStreamDeepSeek({ key, model, system, messages, tools: [], signal: controller.signal });
+              : provider === "deepseek"
+                ? aiStreamDeepSeek({ key, model, system, messages, tools: [], signal: controller.signal })
+                : null;
+        if (!stream) return { ok: false };
         for await (const event of stream) {
           if (event.type === "text" && typeof event.text === "string") text += event.text;
         }
@@ -509,6 +556,7 @@ function registerAiAgentHandlers() {
     const allowed = aiAllowed("ai:tool.write", [root, resolved.path]);
     if (!allowed.ok) return { ok: false, error: allowed.reason };
     try {
+      await promises.mkdir(node_path.dirname(resolved.path), { recursive: true });
       await promises.writeFile(resolved.path, content, "utf8");
       return { ok: true, path: resolved.path };
     } catch (error) {

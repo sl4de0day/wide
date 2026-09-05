@@ -8,6 +8,7 @@ const forge = require("node-forge");
 
 const PROXY_MAX_BODY = 8 * 1024 * 1024;
 const PROXY_MAX_ENTRIES = 500;
+const PROXY_TUNNEL_IDLE_MS = 120000;
 
 let proxyServer = null;
 let proxyPort = 0;
@@ -173,6 +174,7 @@ function cookieHeader(jar) {
 async function loadOrMakeCa() {
   if (proxyCa) return proxyCa;
   await promises.mkdir(PROXY_DIR(), { recursive: true });
+  let unreadable = false;
   try {
     const certPem = await promises.readFile(PROXY_CA_CERT(), "utf8");
     const keyBlob = await promises.readFile(PROXY_CA_KEY());
@@ -182,9 +184,23 @@ async function loadOrMakeCa() {
       key: forge.pki.privateKeyFromPem(keyPem),
       pem: certPem,
     };
-    return proxyCa;
-  } catch {
+    const isLegacy = electron.safeStorage.isLegacyEncrypted;
+    const stale = secretsNeedReseal();
+    if (stale || (typeof isLegacy === "function" && isLegacy.call(electron.safeStorage, keyBlob))) {
+      try {
+        await promises.writeFile(PROXY_CA_KEY(), electron.safeStorage.encryptString(keyPem));
+      } catch {
 
+      }
+    }
+    return proxyCa;
+  } catch (error) {
+    unreadable = Boolean(error && error.code !== "ENOENT");
+  }
+
+  if (unreadable) {
+    await preserveUnreadable(PROXY_CA_KEY());
+    await preserveUnreadable(PROXY_CA_CERT());
   }
 
   const keys = forge.pki.rsa.generateKeyPair(2048);
@@ -265,20 +281,55 @@ function inScope(host) {
   });
 }
 
+function isLoopbackName(host) {
+  let name = String(host || "").trim().toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  if (!name) return false;
+  if (name === "localhost" || name.endsWith(".localhost")) return true;
+  if (name === "::1" || name === "::" || name === "0:0:0:0:0:0:0:1") return true;
+  const mapped = /^::ffff:(.+)$/.exec(name);
+  if (mapped) name = mapped[1];
+  if (/^\d+$/.test(name)) {
+    const packed = Number(name);
+    if (Number.isSafeInteger(packed) && packed >= 0 && packed <= 0xffffffff) {
+      name = [packed >>> 24, (packed >>> 16) & 255, (packed >>> 8) & 255, packed & 255].join(".");
+    }
+  } else if (/^0x[0-9a-f]+$/.test(name)) {
+    const packed = Number(name);
+    if (Number.isSafeInteger(packed) && packed >= 0 && packed <= 0xffffffff) {
+      name = [packed >>> 24, (packed >>> 16) & 255, (packed >>> 8) & 255, packed & 255].join(".");
+    }
+  }
+  const octets = name.split(".");
+  if (octets.length === 4 && octets.every((part) => /^\d{1,3}$/.test(part))) {
+    const first = Number(octets[0]);
+    return first === 127 || first === 0;
+  }
+  return false;
+}
+
+function isProxyItself(host, port) {
+  if (!proxyPort || Number(port) !== proxyPort) return false;
+  return isLoopbackName(host);
+}
+
 let trafficBuffer = [];
 let trafficTimer = null;
 function flushTraffic() {
+  if (trafficTimer) clearTimeout(trafficTimer);
   trafficTimer = null;
   if (trafficBuffer.length === 0) return;
   const batch = trafficBuffer;
   trafficBuffer = [];
   broadcast("proxy:traffic", batch);
 }
+function queueEntry(entry) {
+  trafficBuffer.push(entry);
+  if (!trafficTimer) trafficTimer = setTimeout(flushTraffic, 50);
+}
 function recordEntry(entry) {
   proxyLog.push(entry);
   if (proxyLog.length > PROXY_MAX_ENTRIES) proxyLog.shift();
-  trafficBuffer.push(entry);
-  if (!trafficTimer) trafficTimer = setTimeout(flushTraffic, 50);
+  queueEntry(entry);
 }
 
 function readBody(stream, onDone) {
@@ -387,6 +438,7 @@ const TEXT_TYPE = /(text\/|application\/(?:json|javascript|xml|xhtml\+xml|x-www-
 
 function forward(scheme, req, res) {
   const host = req.headers.host || "";
+  const capture = inScope(host);
   const transport = scheme === "https" ? node_https : node_http;
   const id = ++proxyCounter;
   const startedAt = Date.now();
@@ -394,8 +446,9 @@ function forward(scheme, req, res) {
   res.on("error", () => {});
 
   const target = new URL(req.url.startsWith("http") ? req.url : `${scheme}://${host}${req.url}`);
+  const targetPort = Number(target.port) || (scheme === "https" ? 443 : 80);
   const rewriteResBody = rulesFor("res-body").length > 0;
-  const willHold = intercepting && inScope(host);
+  const willHold = capture && intercepting;
 
   const bufferRequest = willHold || rulesFor("req-header").length > 0 || rulesFor("req-body").length > 0;
 
@@ -404,13 +457,22 @@ function forward(scheme, req, res) {
   let recBody = "";
   let recTruncated = false;
 
-  const recordFailure = (status, extra) =>
+  const recordFailure = (status, extra) => {
+    if (!capture) return;
     recordEntry({
       id, at: startedAt, ms: Date.now() - startedAt,
       method: recMethod, url: target.toString(), host, scheme, status,
       reqHeaders: objectToPairs(recHeaders), reqBody: recBody, reqTruncated: recTruncated,
       resHeaders: [], resBody: "", ...extra,
     });
+  };
+
+  if (isProxyItself(target.hostname, targetPort)) {
+    try { res.writeHead(508); } catch {  }
+    try { res.end(); } catch {  }
+    recordFailure(508, {});
+    return;
+  }
 
   const handleResponse = (up) => {
     up.on("error", () => {
@@ -424,7 +486,7 @@ function forward(scheme, req, res) {
     const canRewriteBody = rewriteResBody && TEXT_TYPE.test(contentType) && declaredLength <= 32 * 1024 * 1024;
 
     const holdResponse =
-      interceptingResponses && inScope(host) && TEXT_TYPE.test(contentType) && declaredLength <= 32 * 1024 * 1024;
+      capture && interceptingResponses && TEXT_TYPE.test(contentType) && declaredLength <= 32 * 1024 * 1024;
 
     if (holdResponse) {
       const chunks = [];
@@ -504,12 +566,14 @@ function forward(scheme, req, res) {
       let resTruncated = false;
       up.on("data", (chunk) => {
         res.write(chunk);
+        if (!capture) return;
         captureSize += chunk.length;
         if (captureSize <= PROXY_MAX_BODY) captureChunks.push(chunk);
         else resTruncated = true;
       });
       up.on("end", () => {
         res.end();
+        if (!capture) return;
         recordEntry({
           id, at: startedAt, ms: Date.now() - startedAt,
           method: recMethod, url: target.toString(), host, scheme, status: up.statusCode || 0,
@@ -551,7 +615,7 @@ function forward(scheme, req, res) {
       {
         protocol: target.protocol,
         hostname: target.hostname,
-        port: target.port || (scheme === "https" ? 443 : 80),
+        port: targetPort,
         method: recMethod,
         path: target.pathname + target.search,
         headers: out,
@@ -569,14 +633,16 @@ function forward(scheme, req, res) {
   if (!bufferRequest) {
 
     const upstream = makeUpstream(req.headers);
-    const captureChunks = [];
-    let capSize = 0;
-    req.on("data", (chunk) => {
-      capSize += chunk.length;
-      if (capSize <= PROXY_MAX_BODY) captureChunks.push(chunk);
-      else recTruncated = true;
-    });
-    req.on("end", () => { recBody = Buffer.concat(captureChunks).toString("utf8"); });
+    if (capture) {
+      const captureChunks = [];
+      let capSize = 0;
+      req.on("data", (chunk) => {
+        capSize += chunk.length;
+        if (capSize <= PROXY_MAX_BODY) captureChunks.push(chunk);
+        else recTruncated = true;
+      });
+      req.on("end", () => { recBody = Buffer.concat(captureChunks).toString("utf8"); });
+    }
     req.on("error", () => { try { upstream.destroy(); } catch {  } });
     req.pipe(upstream);
     return;
@@ -670,6 +736,12 @@ function makeFrameReader(onFrame) {
 function relayWebSocket(scheme, req, clientSocket, head) {
   const host = (req.headers.host || "").replace(/:\d+$/, "");
   const port = Number((req.headers.host || "").split(":")[1]) || (scheme === "https" ? 443 : 80);
+  if (isProxyItself(host, port)) {
+    clientSocket.destroy();
+    return;
+  }
+
+  const capture = inScope(host);
   const id = ++proxyCounter;
   const startedAt = Date.now();
 
@@ -685,6 +757,7 @@ function relayWebSocket(scheme, req, clientSocket, head) {
     broadcast("proxy:ws", batch);
   };
   const note = (direction) => (frame) => {
+    if (!capture) return;
     const rec = { direction, at: Date.now(), ...frame };
     frames.push(rec);
     if (frames.length > FRAME_CAP) frames.shift();
@@ -709,8 +782,29 @@ function relayWebSocket(scheme, req, clientSocket, head) {
   }
   const handshake = head_lines.join("\r\n") + "\r\n\r\n";
 
+  const entry = {
+    id,
+    at: startedAt,
+    ms: 0,
+    method: "WS",
+    url: `${scheme === "https" ? "wss" : "ws"}://${req.headers.host || host}${target}`,
+    host: req.headers.host || host,
+    scheme,
+    status: 101,
+    reqHeaders: pairHeaders(req.rawHeaders),
+    reqBody: "",
+    resHeaders: [],
+    resBody: "",
+    websocket: true,
+    frames,
+  };
+  if (capture) {
+    recordEntry(entry);
+    flushTraffic();
+  }
+
   const live = { clientSocket, upstream: null };
-  liveWebSockets.set(id, live);
+  if (capture) liveWebSockets.set(id, live);
 
   const connect = scheme === "https" ? node_tls.connect : node_net.connect;
   const options =
@@ -734,22 +828,10 @@ function relayWebSocket(scheme, req, clientSocket, head) {
   });
 
   const finish = () => {
-    recordEntry({
-      id,
-      at: startedAt,
-      ms: Date.now() - startedAt,
-      method: "WS",
-      url: `${scheme === "https" ? "wss" : "ws"}://${req.headers.host}${req.url}`,
-      host: req.headers.host || host,
-      scheme,
-      status: 101,
-      reqHeaders: pairHeaders(req.rawHeaders),
-      reqBody: "",
-      resHeaders: [],
-      resBody: "",
-      websocket: true,
-      frames,
-    });
+    if (!capture) return;
+    entry.ms = Date.now() - startedAt;
+    if (proxyLog.indexOf(entry) === -1) recordEntry(entry);
+    else queueEntry(entry);
   };
   live.upstream = upstream;
   const forget = () => liveWebSockets.delete(id);
@@ -761,18 +843,23 @@ function relayWebSocket(scheme, req, clientSocket, head) {
 
 const mitmServers = new Map();
 
-function mitmServerFor(host) {
-  const existing = mitmServers.get(host);
+function mitmServerFor(host, secure) {
+  const scheme = secure ? "https" : "http";
+  const key = `${scheme}:${host}`;
+  const existing = mitmServers.get(key);
   if (existing) return existing;
-  const leaf = leafFor(host);
-  const server = node_https.createServer(
-    { key: leaf.key, cert: leaf.cert },
-    (req, res) => forward("https", req, res),
-  );
+  const handleRequest = (req, res) => forward(scheme, req, res);
+  let server;
+  if (secure) {
+    const leaf = leafFor(host);
+    server = node_https.createServer({ key: leaf.key, cert: leaf.cert }, handleRequest);
+  } else {
+    server = node_http.createServer(handleRequest);
+  }
 
-  server.on("upgrade", (req, socket, head) => relayWebSocket("https", req, socket, head));
+  server.on("upgrade", (req, socket, head) => relayWebSocket(scheme, req, socket, head));
   server.on("error", () => {});
-  mitmServers.set(host, server);
+  mitmServers.set(key, server);
   return server;
 }
 
@@ -787,25 +874,65 @@ function startProxy() {
   server.on("upgrade", (req, socket, head) => relayWebSocket("http", req, socket, head));
 
   server.on("connect", (req, clientSocket, head) => {
-    const [host, portText] = String(req.url).split(":");
-    const port = Number(portText) || 443;
+    const authority = String(req.url || "");
+    const colon = authority.lastIndexOf(":");
+    const host = colon > 0 ? authority.slice(0, colon) : authority;
+    const port = Number(colon > 0 ? authority.slice(colon + 1) : "") || 443;
 
-    if (inScope(host)) {
+    clientSocket.on("error", () => clientSocket.destroy());
 
-      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      const mitm = mitmServerFor(host);
-      mitm.emit("connection", clientSocket);
-      if (head && head.length) clientSocket.unshift(head);
-    } else {
+    if (isProxyItself(host, port)) {
+      clientSocket.destroy();
+      return;
+    }
 
+    const passThrough = (established, first) => {
       const upstream = node_net.connect(port, host, () => {
-        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (head && head.length) upstream.write(head);
+        if (!established) clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        if (first && first.length) upstream.write(first);
         upstream.pipe(clientSocket);
         clientSocket.pipe(upstream);
       });
       upstream.on("error", () => clientSocket.destroy());
       clientSocket.on("error", () => upstream.destroy());
+    };
+
+    if (inScope(host)) {
+
+      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      let waiting = null;
+      const enterTunnel = (first) => {
+        if (waiting) {
+          clearTimeout(waiting);
+          waiting = null;
+        }
+        const byte = first && first.length ? first[0] : -1;
+        const tls = byte === 0x16;
+        const looksHttp = byte > 32 && byte < 127;
+        if (!tls && !looksHttp) {
+          clientSocket.pause();
+          passThrough(true, first);
+          return;
+        }
+        clientSocket.pause();
+        if (first && first.length) clientSocket.unshift(first);
+        mitmServerFor(host, tls).emit("connection", clientSocket);
+        process.nextTick(() => clientSocket.resume());
+      };
+      if (head && head.length) {
+        enterTunnel(head);
+      } else {
+        waiting = setTimeout(() => {
+          waiting = null;
+          clientSocket.removeListener("data", enterTunnel);
+          clientSocket.destroy();
+        }, PROXY_TUNNEL_IDLE_MS);
+        waiting.unref();
+        clientSocket.once("data", enterTunnel);
+      }
+    } else {
+
+      passThrough(false, head);
     }
   });
 
@@ -835,7 +962,35 @@ function stopProxy() {
   releaseResponseIntercepts();
 }
 
+function catcherAutosaveFile(root) {
+  const key = node_crypto.createHash("sha1").update(String(root || "")).digest("hex").slice(0, 16);
+  return node_path.join(electron.app.getPath("userData"), "catcher-sessions", `${key}.json`);
+}
+
 function registerProxyHandlers() {
+  electron.ipcMain.handle("catcher:autosaveWrite", async (_event, root, json) => {
+    if (typeof root !== "string" || !root || typeof json !== "string") {
+      return { ok: false, error: "There is nothing to save." };
+    }
+    try {
+      const file = catcherAutosaveFile(root);
+      await promises.mkdir(node_path.dirname(file), { recursive: true });
+      await promises.writeFile(file, json, "utf8");
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  });
+
+  electron.ipcMain.handle("catcher:autosaveRead", async (_event, root) => {
+    if (typeof root !== "string" || !root) return { ok: true, json: "" };
+    try {
+      return { ok: true, json: await promises.readFile(catcherAutosaveFile(root), "utf8") };
+    } catch {
+      return { ok: true, json: "" };
+    }
+  });
+
   electron.ipcMain.handle("proxy:start", async () => {
     const gate = await requireInstalled("proxy");
     if (gate) return gate;

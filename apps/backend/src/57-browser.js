@@ -3,8 +3,39 @@
 const BROWSER_SCHEME = /^https?:\/\//i;
 
 let browserRemotePort = 0;
+let browserLastTab = "";
 
-function browserDevtoolsUrl(port, activeUrl) {
+function browserOrigin(url) {
+  const match = /^https?:\/\/[^/?#]+/i.exec(typeof url === "string" ? url : "");
+  return match ? match[0].toLowerCase() : "";
+}
+
+function browserTargetId(tabId) {
+  if (!tabId) return Promise.resolve("");
+  const asked = electron
+    .hostRequest("browser:cdp", { tabId, method: "Page.getFrameTree", params: {} })
+    .then((result) => {
+      const frame = result && result.frameTree && result.frameTree.frame;
+      return frame && typeof frame.id === "string" ? frame.id : "";
+    })
+    .catch(() => "");
+  return Promise.race([asked, new Promise((resolve) => setTimeout(() => resolve(""), 2000))]);
+}
+
+function browserPickPage(pages, activeUrl, targetId, trusted) {
+  const byId = targetId ? pages.find((t) => t.id === targetId) || null : null;
+  if (trusted) return byId;
+  const exact = activeUrl ? pages.filter((t) => t.url === activeUrl) : [];
+  if (exact.length === 1) return exact[0];
+  if (byId) return byId;
+  if (exact.length > 1) return exact[0];
+  const origin = browserOrigin(activeUrl);
+  const sameOrigin = origin ? pages.filter((t) => browserOrigin(t.url) === origin) : [];
+  if (sameOrigin.length === 1) return sameOrigin[0];
+  return pages[0] || null;
+}
+
+function browserDevtoolsUrl(port, activeUrl, targetId, trusted) {
   return new Promise((resolve) => {
     let tries = 0;
     const attempt = () => {
@@ -27,7 +58,8 @@ function browserDevtoolsUrl(port, activeUrl) {
                   !/\/devtools\//.test(t.url),
               );
               const page =
-                (activeUrl && pages.find((t) => t.url === activeUrl)) || pages[0];
+                browserPickPage(pages, activeUrl, targetId, trusted) ||
+                (tries >= 6 ? browserPickPage(pages, activeUrl, targetId, false) : null);
               if (page) {
 
                 url = `http://127.0.0.1:${port}/devtools/inspector.html?ws=127.0.0.1:${port}/devtools/page/${page.id}`;
@@ -57,12 +89,18 @@ function browserDevtoolsUrl(port, activeUrl) {
 
 function registerBrowserHandlers() {
 
-  debugFreePort().then((port) => {
+  debugFreePort().then(async (port) => {
     browserRemotePort = port;
-    electron.hostRequest("browser:setRemotePort", { port });
+    try {
+      const reply = await electron.hostRequest("browser:setRemotePort", { port });
+      const actual = reply && Number(reply.port);
+      if (Number.isFinite(actual) && actual > 0) browserRemotePort = actual;
+    } catch {
+      void 0;
+    }
   });
 
-  electron.ipcMain.handle("browser:devtools", async (_event, open, activeUrl) => {
+  electron.ipcMain.handle("browser:devtools", async (_event, open, activeUrl, tabId) => {
     if (!open) {
       electron.hostRequest("browser:devtools", { url: "" });
       return { ok: true };
@@ -70,7 +108,9 @@ function registerBrowserHandlers() {
     if (!browserRemotePort) return { ok: false, error: "The browser has no debug port yet." };
 
     const want = typeof activeUrl === "string" ? activeUrl : "";
-    const url = await browserDevtoolsUrl(browserRemotePort, want);
+    const asked = typeof tabId === "string" ? tabId.trim() : "";
+    const targetId = await browserTargetId(asked || browserLastTab);
+    const url = await browserDevtoolsUrl(browserRemotePort, want, targetId, Boolean(asked && targetId));
     if (!url) return { ok: false, error: `Could not reach the browser's DevTools on port ${browserRemotePort}.` };
     electron.hostRequest("browser:devtools", { url });
     return { ok: true, url };
@@ -87,6 +127,7 @@ function registerBrowserHandlers() {
       return { ok: false, error: "Only http and https can be opened in the browser." };
     }
 
+    if (tab) browserLastTab = tab;
     electron.hostRequest("browser:navigate", { url: target, tabId: tab });
     return { ok: true, url: target };
   });
@@ -94,9 +135,10 @@ function registerBrowserHandlers() {
   electron.ipcMain.handle("browser:cdp", async (_event, tabId, method, params) => {
     const gate = await requireInstalled("browser");
     if (gate) return gate;
+    const tab = typeof tabId === "string" ? tabId : "";
     try {
       const result = await electron.hostRequest("browser:cdp", {
-        tabId: typeof tabId === "string" ? tabId : "",
+        tabId: tab,
         method: typeof method === "string" ? method : "",
         params: params && typeof params === "object" ? params : {},
       });

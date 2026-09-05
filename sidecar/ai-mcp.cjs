@@ -96,6 +96,8 @@ function callWide(name, args) {
       },
       (response) => {
         let body = '';
+        response.setEncoding('utf8');
+        response.on('error', () => resolve('That tool could not be run: the reply was cut off.'));
         response.on('data', (chunk) => (body += chunk));
         response.on('end', () => {
           if (response.statusCode !== 200) {
@@ -119,7 +121,13 @@ function callWide(name, args) {
   });
 }
 
-const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+const write = (message) => {
+  try {
+    process.stdout.write(`${JSON.stringify(message)}\n`);
+  } catch {
+    process.exit(0);
+  }
+};
 const reply = (id, result) => write({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message) => write({ jsonrpc: '2.0', id, error: { code, message } });
 
@@ -177,4 +185,7 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
   }
 });
 
+process.stdout.on('error', () => process.exit(0));
+process.stdin.on('error', () => process.exit(0));
+process.stdin.on('end', () => process.exit(0));
 process.stdin.on('close', () => process.exit(0));

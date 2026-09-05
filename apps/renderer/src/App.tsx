@@ -19,6 +19,7 @@ import { MacrosOverlay } from "./components/MacrosOverlay";
 import { useMacros } from "./stores/macros";
 import { subscribeProjectScan, useProjectScan } from "./stores/projectScan";
 import { AiEditsOverlay } from "./components/AiEditsOverlay";
+import { McpTrustPrompt } from "./components/McpTrustPrompt";
 import { useAiEdits } from "./stores/aiEdits";
 import { BottomDock, SidePanel } from "./components/SidePanel";
 import { SettingsView } from "./components/SettingsView";
@@ -47,9 +48,10 @@ import { resetEslintState } from "./editor/features/eslint";
 import { resetLspState, subscribeLspDiagnostics } from "./editor/features/lsp";
 import { parseProjectRules, setProjectRules } from "./editor/features/inspect/engine";
 import { forgetTailwindTheme } from "./editor/features/tailwind";
-import { applyLanguage, useT } from "./lib/i18n";
+import { applyLanguage, isLanguage, useT } from "./lib/i18n";
+import { installCatcherSession } from "./lib/catcherSession";
 import { forgetLastFile, recallLastFile, rememberLastFile } from "./lib/lastFile";
-import { applySyntaxPalette, applyTheme, useSettings } from "./stores/settings";
+import { applySyntaxPalette, applyTheme, hasStoredLanguage, useSettings } from "./stores/settings";
 import { useUpdate } from "./stores/update";
 import { subscribeFsChanges, useWorkspace } from "./stores/workspace";
 import logo from "./assets/wide-logo.png";
@@ -156,7 +158,7 @@ function addSecurityFindingsForActiveFile(): number {
 function BootGate() {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: "#3b4252" }}>
-      <img src={logo} alt="Wide" width={216} height={216} className="size-[216px] select-none animate-pulse" draggable={false} />
+      <img src={logo} alt="Wide" width={432} height={432} className="size-[432px] select-none animate-pulse" draggable={false} />
     </div>
   );
 }
@@ -403,7 +405,38 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (hasStoredLanguage()) return;
+    void bridge
+      .installLanguage()
+      .then((reply) => {
+        const code = reply.ok ? (reply.language ?? "") : "";
+        if (code && isLanguage(code) && code !== useSettings.getState().language) {
+          useSettings.getState().set({ language: code });
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     void useUpdate.getState().boot();
+  }, []);
+
+  useEffect(() => {
+    if (!root) return undefined;
+    return installCatcherSession(root);
+  }, [root]);
+
+  useEffect(() => {
+    const timer = setInterval(
+      () => {
+        void (async () => {
+          await useUpdate.getState().check();
+          await useUpdate.getState().stage();
+        })();
+      },
+      6 * 60 * 60 * 1000,
+    );
+    return () => clearInterval(timer);
   }, []);
 
 
@@ -609,6 +642,7 @@ export default function App() {
       <ComparerOverlay />
       <MacrosOverlay />
       <AiEditsOverlay />
+      <McpTrustPrompt />
       <ConfirmHost />
       <PromptHost />
       <Toasts />

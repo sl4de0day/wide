@@ -183,7 +183,7 @@ export function Launcher() {
           <ActionRow icon={Settings} label={t("Settings")} onClick={openSettings} />
         </Section>
 
-        {error && <p className="pt-4 text-[12px] text-status-error">{error}</p>}
+        {error && <p className="pt-4 text-[12px] text-status-error">{t(error)}</p>}
 
         {
 }

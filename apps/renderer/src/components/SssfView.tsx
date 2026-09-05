@@ -53,8 +53,8 @@ function Record({ record }: { record: SssfRecord }) {
         <span className="shrink-0 text-[10px] text-amber-400">{t("rate limited")}</span>
       )}
       {denied && record.reason && (
-        <span className="shrink-0 truncate text-[11px] text-status-error" title={record.reason}>
-          {record.reason}
+        <span className="shrink-0 truncate text-[11px] text-status-error" title={t(record.reason)}>
+          {t(record.reason)}
         </span>
       )}
     </div>
@@ -149,8 +149,8 @@ export function SssfView() {
                 {t("{count} capabilities", { count: status.stats?.capabilities ?? status.capabilities.length })}
               </span>
               {status.lastError && (
-                <span className="w-full truncate text-[11px] text-status-error" title={status.lastError}>
-                  {status.lastError}
+                <span className="w-full truncate text-[11px] text-status-error" title={t(status.lastError)}>
+                  {t(status.lastError)}
                 </span>
               )}
               <span className="flex-1" />

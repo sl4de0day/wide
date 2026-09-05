@@ -221,7 +221,7 @@ export function RepeaterView({ id }: { id: string }) {
         )}
 
         {error ? (
-          <p className="p-3 text-[12px] text-status-error">{error}</p>
+          <p className="p-3 text-[12px] text-status-error">{t(error)}</p>
         ) : !reply ? (
           <p className="p-3 text-[12px] text-fg-faint">{t("Send the request to see the response.")}</p>
         ) : (

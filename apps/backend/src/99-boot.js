@@ -28,6 +28,7 @@ electron.app.whenReady().then(async () => {
   registerAiStoreHandlers();
   registerAiCatalogHandlers();
   registerAiLocalHandlers();
+  registerMcpHandlers();
   registerAiAgentHandlers();
   registerClaudeCodeHandlers();
   registerBrowserHandlers();

@@ -104,7 +104,7 @@ export function FindingsPanel() {
                 <span className={cn("shrink-0 rounded-sm border px-1 py-0.5 text-[9px] uppercase", SEVERITY_TONE[finding.severity])}>
                   {t(finding.severity)}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{finding.title}</span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{t(finding.title)}</span>
               </button>
               {open === finding.id && (
                 <div className="px-2 pb-2">
@@ -115,7 +115,7 @@ export function FindingsPanel() {
                   )}
                   {finding.detail && (
                     <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-sm border border-line bg-canvas px-2 py-1 font-mono text-[11px] text-fg-dim">
-                      {finding.detail}
+                      {t(finding.detail)}
                     </pre>
                   )}
                   <button type="button" onClick={() => useFindings.getState().remove(finding.id)} className="mt-1 flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-rose-300">

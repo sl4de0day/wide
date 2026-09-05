@@ -355,6 +355,17 @@ capability ai.write {
   audit always
 }
 
+capability ai.mcp {
+  describe "Asistanın onaylanmış bir MCP sunucusunun aracını çağırması"
+
+  # Sunucunun kendisi zaten kişinin onayından geçmeden başlatılmaz. Burası
+  # o onaydan sonra kalan sınır: çağrı hızı ve her çağrının kayda geçmesi.
+  allow always
+
+  limit 60 per minute
+  audit always
+}
+
 capability ai.local {
   describe "Yerel model motorunu (Ollama) yönetme"
 
@@ -636,6 +647,9 @@ bind "ai:tool.list"     to ai.read   { root = arg 0, path = arg 1 }
 bind "ai:tool.read"     to ai.read   { root = arg 0, path = arg 1 }
 bind "ai:tool.search"   to ai.read   { root = arg 0, path = arg 0 }
 bind "ai:tool.write"    to ai.write  { root = arg 0, path = arg 1 }
+# MCP araci Wide'in disinda bir programda calisir; kanal adi ayri tutulur ki
+# denetim satirinda hangi sunucunun hangi aracinin cagrildigi gorunsun.
+bind "ai:tool.mcp"      to ai.mcp    { path = arg 0 }
 # Acik olmayan bir dosyaya yazma. Arayuzden erisilebilir, cunku neyin acik
 # oldugunu yalniz arayuz bilir; ama yetenek yine ai.write, boylece denetim
 # satiri yazani kullanici degil asistan olarak kaydeder.

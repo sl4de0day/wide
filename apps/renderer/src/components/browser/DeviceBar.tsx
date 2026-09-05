@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
@@ -28,6 +28,15 @@ export function DeviceBar({ tabId }: { tabId: string }) {
   const t = useT();
   const [active, setActive] = useState("Responsive");
   const [ua, setUa] = useState("");
+
+  useEffect(() => {
+    setActive("Responsive");
+    setUa("");
+    return () => {
+      void bridge.browserCdp(tabId, "Emulation.clearDeviceMetricsOverride");
+      void bridge.browserCdp(tabId, "Emulation.setUserAgentOverride", { userAgent: "" });
+    };
+  }, [tabId]);
 
   const apply = async (preset: Preset) => {
     setActive(preset.label);

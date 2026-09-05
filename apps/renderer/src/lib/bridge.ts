@@ -532,6 +532,18 @@ export type DebugEvent =
 
 export type Ok<T = unknown> = { ok: boolean; error?: string } & Partial<T>;
 
+export interface McpServerOffer {
+  name: string;
+  signature: string;
+  command: string;
+  args: string[];
+}
+
+export interface McpPendingEvent {
+  root: string;
+  servers: McpServerOffer[];
+}
+
 
 
 
@@ -600,7 +612,7 @@ export type AiEvent =
   | { id: string; type: "done" }
 
   | { id: string; type: "open"; path: string; line: number }
-  | { id: string; type: "edit"; root?: string; path: string; content: string };
+  | { id: string; type: "edit"; root?: string; path: string; content: string; existed?: boolean };
 
 
 export interface AiSessionMeta {
@@ -879,7 +891,7 @@ export interface HostApi {
 
   browserClose(tabId: string): void;
 
-  browserDevtools(open: boolean, activeUrl?: string): Promise<Ok<{ url?: string }>>;
+  browserDevtools(open: boolean, activeUrl?: string, tabId?: string): Promise<Ok<{ url?: string }>>;
 
   browserCdp(tabId: string, method: string, params?: Record<string, unknown>): Promise<Ok<{ result?: unknown }>>;
 
@@ -962,6 +974,8 @@ export interface HostApi {
   onGrpcEvent: Subscriber<GrpcEvent>;
 
   proxyMatchReplace(rules: MatchReplaceRule[]): Promise<Ok<{ rules?: MatchReplaceRule[] }>>;
+  catcherAutosaveWrite(root: string, json: string): Promise<Ok>;
+  catcherAutosaveRead(root: string): Promise<Ok<{ json?: string }>>;
 
 
   proxySetIntercept(
@@ -1032,15 +1046,25 @@ export interface HostApi {
       current?: string;
       latest?: string;
       url?: string;
+      asset?: string;
+      sums?: string;
       notes?: string;
       available?: boolean;
+      blocked?: boolean;
+      attempts?: number;
     }>
   >;
 
   updateOpen(url: string): Promise<Ok>;
-  updateDownload(url: string): Promise<Ok<{ path?: string; bytes?: number }>>;
-  updateInstall(path: string): Promise<Ok>;
+  updateDownload(info: {
+    url: string;
+    version?: string;
+    asset?: string;
+    sums?: string;
+  }): Promise<Ok<{ path?: string; bytes?: number; verified?: boolean; cached?: boolean }>>;
+  updateInstall(info: { path: string; version?: string }): Promise<Ok>;
   onUpdateProgress: Subscriber<{ phase: string; state: string; bytes?: number; error?: string }>;
+  installLanguage(): Promise<Ok<{ language?: string }>>;
   openExternal(url: string): Promise<Ok>;
 
 
@@ -1139,6 +1163,9 @@ export interface HostApi {
   aiClaudeCodeLogin(): Promise<Ok<{ started?: boolean }>>;
   onAiEvent: Subscriber<AiEvent>;
   onAiPull: Subscriber<AiPullEvent>;
+  onMcpPending: Subscriber<McpPendingEvent>;
+  mcpPending(): Promise<Ok<{ servers?: McpServerOffer[] }>>;
+  mcpTrust(signature: string, allow: boolean): Promise<Ok<Record<string, never>>>;
 
 
   stripComments(
@@ -1325,6 +1352,8 @@ const fallback = {
   grpcCancel: async () => (warn(), { ok: false, error: "No bridge" }),
   onGrpcEvent: noSub<GrpcEvent>(),
   proxyMatchReplace: async () => (warn(), { ok: false, error: "No bridge" }),
+  catcherAutosaveWrite: async () => (warn(), { ok: false, error: "No bridge" }),
+  catcherAutosaveRead: async () => (warn(), { ok: false, error: "No bridge" }),
   proxySetIntercept: async () => (warn(), { ok: false, error: "No bridge" }),
   proxyInterceptDecision: async () => (warn(), { ok: false, error: "No bridge" }),
   onProxyIntercept: noSub<InterceptedRequest>(),
@@ -1351,6 +1380,7 @@ const fallback = {
   updateDownload: async () => (warn(), { ok: false, error: "No bridge" }),
   updateInstall: async () => (warn(), { ok: false, error: "No bridge" }),
   onUpdateProgress: noSub<{ phase: string; state: string; bytes?: number; error?: string }>(),
+  installLanguage: async () => (warn(), { ok: false, error: "No bridge" }),
   openExternal: async () => (warn(), { ok: false, error: "No bridge" }),
   onDebugEvent: noSub<DebugEvent>(),
   toolScanRun: async () => (warn(), { ok: false, error: "No bridge" }),
@@ -1413,6 +1443,9 @@ const fallback = {
   aiClaudeCodeLogin: async () => (warn(), { ok: false, error: "No bridge" }),
   onAiEvent: noSub<AiEvent>(),
   onAiPull: noSub<AiPullEvent>(),
+  onMcpPending: noSub<McpPendingEvent>(),
+  mcpPending: async () => (warn(), { ok: false, error: "No bridge" }),
+  mcpTrust: async () => (warn(), { ok: false, error: "No bridge" }),
 
   stripComments: async () => (warn(), { ok: false, error: "No bridge" }),
   commentLanguage: async () => (warn(), { ok: false, error: "No bridge" }),

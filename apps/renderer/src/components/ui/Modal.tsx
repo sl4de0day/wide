@@ -1,9 +1,12 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { useT } from "@/lib/i18n";
+
 const FOCUSABLE = 'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])';
 
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
@@ -14,7 +17,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     if (!(panel && panel.contains(document.activeElement) && document.activeElement !== panel)) {
       const focusables = panel ? Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)) : [];
 
-      const target = focusables.find((el) => el.getAttribute("aria-label") !== "Close") ?? focusables[0] ?? panel;
+      const target = focusables.find((el) => el.dataset.modalClose !== "true") ?? focusables[0] ?? panel;
       target?.focus();
     }
     return () => {
@@ -71,7 +74,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
           <span className="flex-1 text-[12px] font-medium text-fg">{title}</span>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
+          <button type="button" onClick={onClose} data-modal-close="true" aria-label={t("Close")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
             <X className="size-4" strokeWidth={1.75} />
           </button>
         </div>

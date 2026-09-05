@@ -7,6 +7,17 @@ const STORAGE_KEY = "wide.settings";
 
 const LEGACY_STORAGE_KEY = "handcuffs.settings";
 
+export function hasStoredLanguage(): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.language === "string";
+  } catch {
+    return false;
+  }
+}
+
 export interface Settings {
 
   language: Language;

@@ -14,6 +14,7 @@ interface Cookie {
   httpOnly?: boolean;
   secure?: boolean;
   sameSite?: string;
+  partitionKey?: unknown;
 }
 
 export function CookiePanel({ tabId }: { tabId: string }) {
@@ -38,7 +39,7 @@ export function CookiePanel({ tabId }: { tabId: string }) {
 
   const setValue = async (c: Cookie, value: string) => {
     setCookies((prev) => prev.map((x) => (x === c ? { ...x, value } : x)));
-    await bridge.browserCdp(tabId, "Network.setCookie", {
+    const reply = await bridge.browserCdp(tabId, "Network.setCookie", {
       name: c.name,
       value,
       domain: c.domain,
@@ -46,12 +47,32 @@ export function CookiePanel({ tabId }: { tabId: string }) {
       httpOnly: c.httpOnly,
       secure: c.secure,
       ...(c.sameSite ? { sameSite: c.sameSite } : {}),
+      ...(typeof c.expires === "number" && c.expires >= 0 ? { expires: c.expires } : {}),
+      ...(c.partitionKey ? { partitionKey: c.partitionKey } : {}),
     });
+    const wrote = reply.ok && (reply.result as { success?: boolean } | undefined)?.success !== false;
+    if (!wrote) {
+      setError(reply.error ?? t("That cookie could not be written."));
+      void refresh();
+      return;
+    }
+    setError("");
   };
 
   const remove = async (c: Cookie) => {
     setCookies((prev) => prev.filter((x) => x !== c));
-    await bridge.browserCdp(tabId, "Network.deleteCookies", { name: c.name, domain: c.domain, path: c.path });
+    const reply = await bridge.browserCdp(tabId, "Network.deleteCookies", {
+      name: c.name,
+      domain: c.domain,
+      path: c.path,
+      ...(c.partitionKey ? { partitionKey: c.partitionKey } : {}),
+    });
+    if (!reply.ok) {
+      setError(reply.error ?? t("That cookie could not be deleted."));
+      void refresh();
+      return;
+    }
+    setError("");
   };
 
   return (
@@ -66,7 +87,7 @@ export function CookiePanel({ tabId }: { tabId: string }) {
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {error ? (
-          <p className="px-3 py-3 text-[11px] text-status-error">{error}</p>
+          <p className="px-3 py-3 text-[11px] text-status-error">{t(error)}</p>
         ) : cookies.length === 0 ? (
           <p className="px-3 py-3 text-[11px] text-fg-faint">{t("No cookies for this page.")}</p>
         ) : (

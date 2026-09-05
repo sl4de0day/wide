@@ -75,7 +75,7 @@ export function DecoderOverlay() {
             ))}
           </div>
 
-          {error && <p className="mt-2 text-[11px] text-status-error">{error}</p>}
+          {error && <p className="mt-2 text-[11px] text-status-error">{t(error)}</p>}
 
           {output && (
             <div className="mt-2">

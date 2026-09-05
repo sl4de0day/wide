@@ -1,15 +1,37 @@
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useT } from "@/lib/i18n";
 import { diffCounts, lineDiff } from "@/lib/lineDiff";
 import { basename, cn } from "@/lib/utils";
 import { useAiEdits, type PendingEdit } from "@/stores/aiEdits";
+import { useEditor } from "@/stores/editor";
 
-function EditRow({ edit }: { edit: PendingEdit }) {
+function useSettled(value: string, ms: number): string {
+  const [held, setHeld] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setHeld(value), ms);
+    return () => clearTimeout(id);
+  }, [value, ms]);
+  return held;
+}
+
+function earlierContent(pending: PendingEdit[], index: number): string | null {
+  for (let before = index - 1; before >= 0; before -= 1) {
+    if (pending[before].path === pending[index].path) return pending[before].content;
+  }
+  return null;
+}
+
+function EditRow({ edit, chained }: { edit: PendingEdit; chained: string | null }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const rows = useMemo(() => lineDiff(edit.oldContent, edit.content), [edit.oldContent, edit.content]);
+  const buffer = useEditor((state) => {
+    const tab = state.tabs.find((item) => item.path === edit.path);
+    return tab && tab.kind === "file" && !tab.tooLarge ? tab.content : null;
+  });
+  const base = useSettled(chained ?? buffer ?? edit.oldContent, 400);
+  const rows = useMemo(() => lineDiff(base, edit.content), [base, edit.content]);
   const { added, removed } = useMemo(() => diffCounts(rows), [rows]);
 
   return (
@@ -25,7 +47,7 @@ function EditRow({ edit }: { edit: PendingEdit }) {
         </button>
         <button
           type="button"
-          onClick={() => useAiEdits.getState().accept(edit.id)}
+          onClick={() => void useAiEdits.getState().accept(edit.id)}
           className="shrink-0 rounded-sm border border-line bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300 transition-colors duration-100 hover:bg-emerald-500/20"
         >
           {t("Accept")}
@@ -78,7 +100,7 @@ export function AiEditsOverlay() {
           </span>
           <button
             type="button"
-            onClick={() => useAiEdits.getState().acceptAll()}
+            onClick={() => void useAiEdits.getState().acceptAll()}
             className="rounded-sm border border-line bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-300 transition-colors duration-100 hover:bg-emerald-500/20"
           >
             {t("Accept all")}
@@ -93,8 +115,8 @@ export function AiEditsOverlay() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          {pending.map((edit) => (
-            <EditRow key={edit.id} edit={edit} />
+          {pending.map((edit, index) => (
+            <EditRow key={edit.id} edit={edit} chained={earlierContent(pending, index)} />
           ))}
         </div>
 

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { bridge, type RemoteConfig } from "@/lib/bridge";
 import { LANGUAGES, useT, type Language } from "@/lib/i18n";
@@ -12,6 +13,23 @@ import { useUpdate } from "@/stores/update";
 const ABOUT_DESCRIPTION =
   "Wide is an IDE that unifies web development and web security in a single ecosystem. It detects vulnerabilities in real time as you code, enabling secure development from line one, while providing built-in tools to execute full-scale, professional web penetration tests. Whether you are a web pentester, bug bounty hunter, or web developer, Wide is the only tool you need.";
 const ABOUT_REPO_URL = "https://github.com/sl4de0day/wide";
+
+const THEME_PREVIEW_LINES: { token: string; width: number }[][] = [
+  [
+    { token: "syn-keyword", width: 13 },
+    { token: "syn-function", width: 22 },
+    { token: "syn-punct", width: 5 },
+  ],
+  [
+    { token: "syn-property", width: 10 },
+    { token: "syn-string", width: 28 },
+  ],
+  [
+    { token: "syn-number", width: 8 },
+    { token: "syn-type", width: 15 },
+    { token: "syn-comment", width: 12 },
+  ],
+];
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -54,25 +72,68 @@ function LanguagePicker({
   value: Language;
   onChange: (next: Language) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const current = LANGUAGES.find((language) => language.id === value) ?? LANGUAGES[0];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (event: MouseEvent) => {
+      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <div role="radiogroup" className="flex items-center gap-1 rounded-md border border-line p-0.5">
-      {LANGUAGES.map((language) => (
-        <button
-          key={language.id}
-          type="button"
-          role="radio"
-          aria-checked={value === language.id}
-          onClick={() => onChange(language.id)}
-          className={cn(
-            "rounded-sm px-2 py-1 text-[12px] transition-colors duration-100",
-            value === language.id
-              ? "bg-selected text-fg-bright"
-              : "text-fg-muted hover:bg-hover hover:text-fg",
-          )}
+    <div ref={boxRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((was) => !was)}
+        className="flex w-44 items-center justify-between gap-2 rounded-md border border-line px-2 py-1 text-[12px] text-fg transition-colors duration-100 hover:bg-hover"
+      >
+        <span className="truncate">{current.label}</span>
+        <ChevronDown
+          className={cn("size-3.5 shrink-0 text-fg-faint transition-transform duration-100", open && "rotate-180")}
+          strokeWidth={1.75}
+        />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute right-0 z-30 mt-1 max-h-64 w-44 overflow-auto rounded-md border border-line bg-raised py-0.5 shadow-lg"
         >
-          {language.label}
-        </button>
-      ))}
+          {LANGUAGES.map((language) => (
+            <button
+              key={language.id}
+              type="button"
+              role="option"
+              aria-selected={language.id === value}
+              onClick={() => {
+                onChange(language.id);
+                setOpen(false);
+              }}
+              className={cn(
+                "block w-full px-2 py-1 text-left text-[12px] transition-colors duration-100",
+                language.id === value
+                  ? "bg-selected text-fg-bright"
+                  : "text-fg-muted hover:bg-hover hover:text-fg",
+              )}
+            >
+              {language.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -136,19 +197,22 @@ function ThemePicker({
           )}
         >
           <span
-
             data-theme={theme.id}
-            className="flex shrink-0 overflow-hidden rounded-sm border border-line"
+            className="flex shrink-0 flex-col justify-center gap-[3px] overflow-hidden rounded-sm border border-line px-2 py-2"
+            style={{ background: "var(--canvas)", width: 82, height: 46 }}
             aria-hidden="true"
           >
-            {
-
-}
-            {["var(--chrome)", "var(--canvas)", "var(--syn-function)", "var(--fg-dim)", "var(--fg-bright)"].map(
-              (colour) => (
-                <span key={colour} className="block size-4" style={{ background: colour }} />
-              ),
-            )}
+            {THEME_PREVIEW_LINES.map((line, index) => (
+              <span key={index} className="flex items-center gap-[3px]">
+                {line.map((bar) => (
+                  <span
+                    key={bar.token}
+                    className="block rounded-full"
+                    style={{ background: `var(--${bar.token})`, width: bar.width, height: 3 }}
+                  />
+                ))}
+              </span>
+            ))}
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-[13px] text-fg">{t(theme.label)}</span>
@@ -240,7 +304,7 @@ function RemoteSection() {
           {t("Save")}
         </button>
         {state === "saved" && <span className="text-[11px] text-status-ok">{t("Saved.")}</span>}
-        {state === "error" && <span className="text-[11px] text-status-error">{error}</span>}
+        {state === "error" && <span className="text-[11px] text-status-error">{t(error)}</span>}
       </div>
       <p className="pt-2 text-[11px] text-fg-faint">
         {t("The remote needs Node and a synced copy of Wide's backend at the path above — see scripts/remote-sync.")}

@@ -398,7 +398,7 @@ export function DebugPanel() {
           onClick={() => useDebug.setState({ error: "" })}
           className="wide-enter-fade shrink-0 border-b border-line px-3 py-1.5 text-left text-[11px] text-status-error"
         >
-          {error}
+          {t(error)}
         </button>
       )}
       <Breakpoints />

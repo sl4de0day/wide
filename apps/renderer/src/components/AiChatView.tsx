@@ -15,6 +15,8 @@ const keptFor = (id: string) => (kept[id] ??= { draft: "", scroll: 0, pinned: tr
 
 const unfolded: Record<string, boolean> = {};
 
+const NOTHING_ATTACHED: string[] = [];
+
 const BODY = "text-[13px] leading-relaxed text-fg";
 
 const QUESTION = "data-question";
@@ -281,12 +283,12 @@ const Turn = memo(function Turn({
         </p>
       )}
       {}
-      {turn.error && <p className={cn("pt-1", BODY, "text-status-error")}>{turn.error}</p>}
+      {turn.error && <p className={cn("pt-1", BODY, "text-status-error")}>{t(turn.error)}</p>}
     </div>
   );
 });
 
-function AttachButton() {
+function AttachButton({ session }: { session: string }) {
   const t = useT();
   const root = useWorkspace((state) => state.root);
   const [open, setOpen] = useState(false);
@@ -339,7 +341,7 @@ function AttachButton() {
                     key={file.path}
                     type="button"
                     onClick={() => {
-                      useAi.getState().attach(file.path);
+                      useAi.getState().attach(session, file.path);
                       setOpen(false);
                     }}
                     className="block w-full truncate px-2 py-1 text-left text-[12px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
@@ -362,7 +364,7 @@ export function AiChatView({ id }: { id: string }) {
   const root = useWorkspace((state) => state.root);
   const chat = useAi((state) => state.chats[id]);
   const revealTurn = useAi((state) => state.revealTurn);
-  const attachments = useAi((state) => state.attachments);
+  const attachments = useAi((state) => state.attachments[id] ?? NOTHING_ATTACHED);
 
   const context = useEditor((state) => state.lastFilePath);
   const { ready } = useModelLabel();
@@ -508,6 +510,7 @@ export function AiChatView({ id }: { id: string }) {
   }, [revealTurn, id, loaded, landOn]);
 
   const active = chat?.activeTurn ?? null;
+  const stopping = chat?.stopping ?? false;
   const error = chat?.error ?? "";
 
   useEffect(() => {
@@ -526,7 +529,7 @@ export function AiChatView({ id }: { id: string }) {
 
   const submit = () => {
     const text = draft.trim();
-    if (!text || !ready || !root || active) return;
+    if (!text || !ready || !root || active || !loaded) return;
     setDraft("");
     stuck.current = true;
     setAtBottom(true);
@@ -629,7 +632,7 @@ export function AiChatView({ id }: { id: string }) {
                 <span key={path} className="flex items-center gap-1 rounded-sm bg-panel px-1.5 py-0.5 text-[11px] text-fg-dim" title={path}>
                   <AtSign className="size-3 shrink-0 text-fg-faint" strokeWidth={1.75} />
                   <span className="max-w-[160px] truncate">{basename(path)}</span>
-                  <button type="button" onClick={() => useAi.getState().detach(path)} className="text-fg-faint hover:text-fg" aria-label={t("Remove")}>
+                  <button type="button" onClick={() => useAi.getState().detach(id, path)} className="text-fg-faint hover:text-fg" aria-label={t("Remove")}>
                     <X className="size-3" strokeWidth={2} />
                   </button>
                 </span>
@@ -663,7 +666,7 @@ export function AiChatView({ id }: { id: string }) {
 
 }
           <div className="flex items-center gap-2 pt-2">
-            <AttachButton />
+            <AttachButton session={id} />
             <ModelPicker />
             <span className="flex-1" />
             {
@@ -676,22 +679,24 @@ export function AiChatView({ id }: { id: string }) {
                 title={t("Stop")}
                 aria-label={t("Stop")}
                 data-stop=""
-                tabIndex={active ? 0 : -1}
+                aria-disabled={stopping}
+                tabIndex={active && !stopping ? 0 : -1}
                 aria-hidden={!active}
                 className={cn(
                   "absolute inset-0 flex items-center justify-center gap-1.5 rounded-md border border-line px-3 py-1 text-[11px] text-fg-dim",
                   "transition-opacity duration-100 hover:bg-hover hover:text-fg",
                   active ? "opacity-100" : "pointer-events-none opacity-0",
+                  stopping && "opacity-60",
                 )}
               >
                 <Square className="size-3" strokeWidth={2} fill="currentColor" />
-                {t("Stop")}
+                {stopping ? t("Stopping…") : t("Stop")}
               </button>
               <button
                 type="button"
                 onClick={submit}
 
-                disabled={!draft.trim() || !ready || !root}
+                disabled={!draft.trim() || !ready || !root || !loaded}
                 title={t("Send")}
                 aria-label={t("Send")}
                 tabIndex={active ? -1 : 0}

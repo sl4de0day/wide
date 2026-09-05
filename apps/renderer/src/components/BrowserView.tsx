@@ -25,9 +25,57 @@ function hostInScope(host: string, scope: string[]): boolean {
   });
 }
 
+const navigatedUrls = new Map<string, string>();
+const faviconCache = new Map<string, string>();
+const faviconPending = new Set<string>();
+
+const faviconScript = (url: string) => `(async () => {
+  try {
+    const response = await fetch(${JSON.stringify(url)}, { cache: "force-cache", credentials: "omit" });
+    if (!response.ok) return "";
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/") || blob.size > 65536) return "";
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    return "";
+  }
+})()`;
+
+function resolveFavicon(tabId: string, url: string): void {
+  if (!tabId || !/^https?:\/\//i.test(url)) return;
+  const cached = faviconCache.get(url);
+  if (cached) {
+    useBrowser.getState().ingest({ tabId, favicon: cached });
+    return;
+  }
+  if (faviconPending.has(url)) return;
+  faviconPending.add(url);
+  void bridge
+    .browserCdp(tabId, "Runtime.evaluate", { expression: faviconScript(url), awaitPromise: true, returnByValue: true })
+    .then((reply) => {
+      faviconPending.delete(url);
+      if (!reply.ok) return;
+      const value = (reply.result as { result?: { value?: string } } | undefined)?.result?.value;
+      if (typeof value !== "string" || !value) return;
+      if (faviconCache.size > 200) faviconCache.clear();
+      faviconCache.set(url, value);
+      useBrowser.getState().ingest({ tabId, favicon: value });
+    })
+    .catch(() => faviconPending.delete(url));
+}
+
+function bareHost(value: string): string {
+  return String(value || "").toLowerCase().replace(/:\d+$/, "");
+}
+
 function hostOf(url: string): string {
   try {
-    return new URL(url).host.toLowerCase();
+    return new URL(url).hostname.toLowerCase();
   } catch {
     return "";
   }
@@ -47,7 +95,7 @@ export function BrowserView() {
   const surface = useRef<HTMLDivElement>(null);
   const devtoolsSurface = useRef<HTMLDivElement>(null);
 
-  const shownUrls = useRef<Map<string, string>>(new Map());
+  const shownUrls = useRef<Map<string, string>>(navigatedUrls);
   const frame = useRef(0);
 
   const devtoolsOpenRef = useRef(false);
@@ -80,7 +128,7 @@ export function BrowserView() {
   const activeHost = useMemo(() => hostOf(activeUrl), [activeUrl]);
   const inScope = useMemo(() => hostInScope(activeHost, proxyScope), [activeHost, proxyScope]);
   const requestCount = useMemo(
-    () => (activeHost ? entries.filter((e) => e.host === activeHost).length : 0),
+    () => (activeHost ? entries.filter((e) => bareHost(e.host) === activeHost).length : 0),
     [entries, activeHost],
   );
 
@@ -164,7 +212,7 @@ export function BrowserView() {
         const [x, y, w, h] = box(surface.current);
 
         const state = useBrowser.getState();
-        const showPage = Boolean(state.active()?.url) && !devtoolsOpenRef.current;
+        const showPage = Boolean(state.active()?.url) && !devtoolsOpenRef.current && w > 0 && h > 0;
         bridge.browserPlace(state.activeId, x, y, w, h, showPage);
       }
       if (devtoolsOpenRef.current && devtoolsSurface.current) {
@@ -177,10 +225,6 @@ export function BrowserView() {
   };
 
   useEffect(() => {
-
-    for (const tab of useBrowser.getState().tabs) {
-      if (tab.url) shownUrls.current.set(tab.id, tab.url);
-    }
     place();
     const observer = new ResizeObserver(() => place());
     if (surface.current) observer.observe(surface.current);
@@ -208,6 +252,7 @@ export function BrowserView() {
       if (event.exitFullscreen) setFullscreen(false);
       if (event.download) setDownload(event.download);
       useBrowser.getState().ingest(event);
+      if (event.favicon) resolveFavicon(event.tabId || useBrowser.getState().activeId, event.favicon);
 
       const reportId = event.tabId || useBrowser.getState().activeId;
       const reportTab = useBrowser.getState().tabs.find((tab) => tab.id === reportId);
@@ -218,7 +263,7 @@ export function BrowserView() {
   useEffect(() => {
     place();
 
-  }, [drawer, showDevice]);
+  }, [drawer, showDevice, suggestions.length, download]);
 
   useEffect(() => {
     if (!download) return;
@@ -228,7 +273,11 @@ export function BrowserView() {
 
   useEffect(() => {
     devtoolsOpenRef.current = devtoolsOpen;
-    void bridge.browserDevtools(devtoolsOpen, useBrowser.getState().active()?.url ?? "");
+    void bridge.browserDevtools(
+      devtoolsOpen,
+      useBrowser.getState().active()?.url ?? "",
+      useBrowser.getState().activeId,
+    );
     place();
 
   }, [devtoolsOpen]);
@@ -267,6 +316,7 @@ export function BrowserView() {
   const closeTab = (id: string) => {
     bridge.browserClose(id);
     shownUrls.current.delete(id);
+
     useBrowser.getState().closeTab(id);
   };
 
@@ -375,7 +425,7 @@ export function BrowserView() {
           {loading ? <X className="size-4" strokeWidth={2} /> : <RotateCw className="size-4" strokeWidth={1.75} />}
         </button>
 
-        <div className="relative flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-line bg-panel px-2 focus-within:border-accent">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-line bg-panel px-2 focus-within:border-accent">
           {activeUrl && (
             <Lock
               className={cn("size-3 shrink-0", secure ? "text-emerald-400" : "text-fg-faint")}
@@ -411,29 +461,6 @@ export function BrowserView() {
             autoCorrect="off"
             className="min-w-0 flex-1 bg-transparent py-1.5 text-[12px] text-fg outline-none placeholder:text-fg-faint"
           />
-          {suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto rounded-md border border-line bg-panel shadow-lg">
-              {suggestions.map((s) => (
-                <button
-                  key={s.url}
-                  type="button"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    go(s.url);
-                  }}
-                  className="flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] hover:bg-hover"
-                >
-                  {s.bookmarked ? (
-                    <Star className="size-3 shrink-0 text-amber-400" strokeWidth={1.75} fill="currentColor" />
-                  ) : (
-                    <span className="size-3 shrink-0" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-fg">{s.title}</span>
-                  <span className="max-w-[45%] shrink-0 truncate text-[10px] text-fg-faint">{s.url}</span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         {
@@ -581,6 +608,30 @@ export function BrowserView() {
         </button>
       </div>
 
+      {suggestions.length > 0 && (
+        <div className="max-h-[min(16rem,40%)] shrink-0 overflow-auto border-b border-line bg-panel">
+          {suggestions.map((s) => (
+            <button
+              key={s.url}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                go(s.url);
+              }}
+              className="flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] hover:bg-hover"
+            >
+              {s.bookmarked ? (
+                <Star className="size-3 shrink-0 text-amber-400" strokeWidth={1.75} fill="currentColor" />
+              ) : (
+                <span className="size-3 shrink-0" />
+              )}
+              <span className="min-w-0 flex-1 truncate text-fg">{s.title}</span>
+              <span className="max-w-[45%] shrink-0 truncate text-[10px] text-fg-faint">{s.url}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {showDevice && <DeviceBar tabId={activeId} />}
 
       {find !== null && (
@@ -644,12 +695,18 @@ export function BrowserView() {
       </div>
 
       {download && (
-        <div className="absolute bottom-3 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-md border border-line bg-panel px-3 py-1.5 text-[11px] shadow-lg">
+        <div className="flex shrink-0 items-center gap-2 border-t border-line bg-panel px-3 py-1.5 text-[11px]">
           <Download className="size-3.5 shrink-0 text-emerald-400" strokeWidth={1.75} />
-          <span className="max-w-80 truncate text-fg" title={download.path || download.url}>
+          <span className="min-w-0 flex-1 truncate text-fg" title={download.path || download.url}>
             {download.path || download.url}
           </span>
-          <button type="button" onClick={() => setDownload(null)} className="text-fg-faint hover:text-fg">
+          <button
+            type="button"
+            onClick={() => setDownload(null)}
+            title={t("Close")}
+            aria-label={t("Close")}
+            className="shrink-0 text-fg-faint hover:text-fg"
+          >
             <X className="size-3" strokeWidth={2} />
           </button>
         </div>

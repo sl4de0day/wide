@@ -51,20 +51,62 @@ async function writeAiConfig(next) {
 
 let aiKeyCache = null;
 
+function aiKeysAreLegacy(blob) {
+  const isLegacy = electron.safeStorage.isLegacyEncrypted;
+  return typeof isLegacy === "function" && isLegacy.call(electron.safeStorage, blob);
+}
+
+function secretsNeedReseal() {
+  const isStale = electron.safeStorage.isStaleSeal;
+  return typeof isStale === "function" && isStale.call(electron.safeStorage) === true;
+}
+
+let aiKeysUnreadable = false;
+
 async function readAiKeys() {
   if (aiKeyCache) return aiKeyCache;
+  let rewrite = false;
   try {
     const blob = await promises.readFile(AI_KEYS_FILE());
     aiKeyCache = JSON.parse(electron.safeStorage.decryptString(blob));
-  } catch {
-
+    aiKeysUnreadable = false;
+    rewrite = aiKeysAreLegacy(blob) || secretsNeedReseal();
+  } catch (error) {
+    if (error && error.code !== "ENOENT") {
+      aiKeysUnreadable = true;
+      console.warn("[ai] The saved keys could not be read:", error.message);
+    }
     aiKeyCache = {};
   }
+  if (rewrite) await writeAiKeys(aiKeyCache);
   return aiKeyCache;
+}
+
+async function preserveUnreadable(file) {
+  for (let n = 1; n <= 20; n += 1) {
+    const kept = `${file}.unreadable-${n}`;
+    try {
+      await promises.access(kept);
+      continue;
+    } catch {
+      void 0;
+    }
+    try {
+      await promises.rename(file, kept);
+      console.warn(`[ai] The previous file could not be decrypted and was kept as ${kept}`);
+    } catch {
+      void 0;
+    }
+    return;
+  }
 }
 
 async function writeAiKeys(keys) {
   aiKeyCache = keys;
+  if (aiKeysUnreadable) {
+    aiKeysUnreadable = false;
+    await preserveUnreadable(AI_KEYS_FILE());
+  }
   try {
     await promises.writeFile(AI_KEYS_FILE(), electron.safeStorage.encryptString(JSON.stringify(keys)));
   } catch (error) {

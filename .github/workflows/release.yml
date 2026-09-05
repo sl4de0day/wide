@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build the installer and publish it
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies and configure CMake
+        run: npm run setup
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build and package
+        run: npm run package
+
+      - name: Backend smoke tests
+        run: npm run test:smoke
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\wide.iss'
+
+      - name: Publish checksums
+        shell: bash
+        run: |
+          cd release
+          sha256sum Wide-Setup-*.exe > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/Wide-Setup-*.exe \
+            release/SHA256SUMS \
+            --title "Wide ${GITHUB_REF_NAME#v}" \
+            --generate-notes

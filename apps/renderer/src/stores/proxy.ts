@@ -80,7 +80,7 @@ export const useProxy = create<ProxyState>((set, get) => ({
       running: Boolean(status.ok && status.running),
       port: status.ok ? (status.port ?? 0) : 0,
       scope: status.ok ? (status.scope ?? []) : [],
-      entries: traffic.ok ? (traffic.entries ?? []) : [],
+      entries: traffic.ok && (traffic.entries?.length ?? 0) > 0 ? (traffic.entries ?? []) : get().entries,
 
       intercepting: status.ok ? Boolean(status.intercepting) : false,
       interceptingResponses: status.ok ? Boolean(status.interceptingResponses) : false,
@@ -222,12 +222,16 @@ export const useProxy = create<ProxyState>((set, get) => ({
     try {
       const data = JSON.parse(json);
       if (!data || typeof data !== "object") return false;
+      const scope = Array.isArray(data.scope) ? data.scope : get().scope;
+      const rules = Array.isArray(data.rules) ? data.rules : get().rules;
       set({
         entries: Array.isArray(data.entries) ? data.entries : [],
-        scope: Array.isArray(data.scope) ? data.scope : get().scope,
-        rules: Array.isArray(data.rules) ? data.rules : get().rules,
+        scope,
+        rules,
         selected: null,
       });
+      void bridge.proxyScope(scope);
+      void bridge.proxyMatchReplace(rules);
       return true;
     } catch {
       return false;

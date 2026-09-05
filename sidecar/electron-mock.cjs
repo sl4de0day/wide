@@ -94,29 +94,160 @@ const shell = {
   async trashItem(p) { return bridge.hostRequest('shell:trashItem', { path: p }); },
 };
 
-function keyFile() { return path.join(userDataDir(), '.enc-key'); }
-function encKey() {
-  const kf = keyFile();
-  try { return fs.readFileSync(kf); } catch {}
-  const k = crypto.randomBytes(32);
-  try { fs.mkdirSync(path.dirname(kf), { recursive: true }); fs.writeFileSync(kf, k); } catch {}
-  return k;
+const ENC_MAGIC = Buffer.from('WSS1');
+const ENC_CONTEXT = 'wide.safeStorage.v1';
+const ENC_OPAQUE = 'The encrypted data could not be read.';
+
+function saltFile() { return path.join(userDataDir(), '.enc-salt'); }
+function legacyKeyFile() { return path.join(userDataDir(), '.enc-key'); }
+function legacyWrapFile() { return path.join(userDataDir(), '.enc-legacy'); }
+
+function machineGuid() {
+  if (process.platform !== 'win32') {
+    for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+      try { return fs.readFileSync(file, 'utf8').trim(); } catch {}
+    }
+    return '';
+  }
+  try {
+    const out = cp.execFileSync(
+      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe'),
+      ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'],
+      { encoding: 'utf8', windowsHide: true, timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const found = /MachineGuid\s+REG_\w+\s+(\S+)/i.exec(out);
+    return found ? found[1] : '';
+  } catch { return ''; }
 }
+
+let encSecretCache = null;
+function encSecrets() {
+  if (encSecretCache) return encSecretCache;
+  let host = '', user = '', home = '';
+  try { host = os.hostname(); } catch {}
+  try { user = os.userInfo().username; } catch {}
+  try { home = os.homedir(); } catch {}
+  const guid = machineGuid();
+  encSecretCache = guid
+    ? [
+        [ENC_CONTEXT, guid, '', user, home].join('\u0000'),
+        [ENC_CONTEXT, guid, host, user, home].join('\u0000'),
+        [ENC_CONTEXT, '', host, user, home].join('\u0000'),
+      ]
+    : [[ENC_CONTEXT, '', host, user, home].join('\u0000')];
+  return encSecretCache;
+}
+
+function encSalt() {
+  try {
+    const stored = fs.readFileSync(saltFile());
+    if (stored.length >= 16) return stored;
+  } catch {}
+  const salt = crypto.randomBytes(32);
+  try {
+    fs.writeFileSync(saltFile(), salt, { flag: 'wx' });
+  } catch {
+    try {
+      const raced = fs.readFileSync(saltFile());
+      if (raced.length >= 16) return raced;
+    } catch {}
+    throw new Error(ENC_OPAQUE);
+  }
+  const written = fs.readFileSync(saltFile());
+  if (!written.equals(salt)) throw new Error(ENC_OPAQUE);
+  return salt;
+}
+
+const encKeyCache = [];
+function encKeyAt(index) {
+  const secrets = encSecrets();
+  if (index >= secrets.length) return null;
+  if (!encKeyCache[index]) encKeyCache[index] = crypto.scryptSync(secrets[index], encSalt(), 32);
+  return encKeyCache[index];
+}
+
+function sealBuffer(key, data) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([c.update(data), c.final()]);
+  return Buffer.concat([ENC_MAGIC, iv, c.getAuthTag(), enc]);
+}
+
+function openBuffer(key, iv, tag, enc) {
+  const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(enc), d.final()]);
+}
+
+function isSealed(buf) {
+  return buf.length >= ENC_MAGIC.length + 28 && buf.subarray(0, ENC_MAGIC.length).equals(ENC_MAGIC);
+}
+
+let encStale = false;
+function unsealBuffer(buf) {
+  const body = buf.subarray(ENC_MAGIC.length);
+  const iv = body.subarray(0, 12), tag = body.subarray(12, 28), enc = body.subarray(28);
+  for (let index = 0; ; index += 1) {
+    const key = encKeyAt(index);
+    if (!key) break;
+    try {
+      const opened = openBuffer(key, iv, tag, enc);
+      encStale = index > 0;
+      return opened;
+    } catch {}
+  }
+  throw new Error(ENC_OPAQUE);
+}
+
+let legacyKeyCache;
+function legacyKey() {
+  if (legacyKeyCache !== undefined) return legacyKeyCache;
+  legacyKeyCache = null;
+  try {
+    const raw = fs.readFileSync(legacyKeyFile());
+    if (raw.length === 32) {
+      legacyKeyCache = raw;
+      try {
+        fs.writeFileSync(legacyWrapFile(), sealBuffer(encKeyAt(0), raw));
+        fs.unlinkSync(legacyKeyFile());
+      } catch {}
+      return legacyKeyCache;
+    }
+  } catch {}
+  try { legacyKeyCache = unsealBuffer(fs.readFileSync(legacyWrapFile())); } catch {}
+  return legacyKeyCache;
+}
+
+function migrateLegacyKey() {
+  let raw;
+  try {
+    raw = fs.readFileSync(legacyKeyFile());
+  } catch { return; }
+  if (raw.length !== 32) return;
+  try {
+    fs.writeFileSync(legacyWrapFile(), sealBuffer(encKeyAt(0), raw));
+    fs.unlinkSync(legacyKeyFile());
+    legacyKeyCache = raw;
+  } catch {}
+}
+
+try { migrateLegacyKey(); } catch {}
+
 const safeStorage = {
   isEncryptionAvailable() { return true; },
   encryptString(plain) {
-    const iv = crypto.randomBytes(12);
-    const c = crypto.createCipheriv('aes-256-gcm', encKey(), iv);
-    const enc = Buffer.concat([c.update(String(plain), 'utf8'), c.final()]);
-    return Buffer.concat([iv, c.getAuthTag(), enc]);
+    return sealBuffer(encKeyAt(0), Buffer.from(String(plain), 'utf8'));
   },
   decryptString(buf) {
+    encStale = false;
     const b = Buffer.from(buf);
-    const iv = b.subarray(0, 12), tag = b.subarray(12, 28), enc = b.subarray(28);
-    const d = crypto.createDecipheriv('aes-256-gcm', encKey(), iv);
-    d.setAuthTag(tag);
-    return Buffer.concat([d.update(enc), d.final()]).toString('utf8');
+    if (isSealed(b)) return unsealBuffer(b).toString('utf8');
+    const key = legacyKey();
+    if (!key) throw new Error(ENC_OPAQUE);
+    return openBuffer(key, b.subarray(0, 12), b.subarray(12, 28), b.subarray(28)).toString('utf8');
   },
+  isLegacyEncrypted(buf) { return !isSealed(Buffer.from(buf)); },
+  isStaleSeal() { return encStale; },
 };
 
 function userDataDir() {

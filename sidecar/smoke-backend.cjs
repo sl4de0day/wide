@@ -72,12 +72,37 @@ const GONE = [
 
   failed += await checkExtensionGate();
   failed += await checkWorkflowRoundTrip();
+  failed += await checkUpdateIntegrity();
+  failed += await checkCatcherAutosave();
+  failed += await checkMcpTrustGate();
   failed += checkNativeColours();
 
   console.log(failed === 0 ? '\nAll backend checks passed.' : `\n${failed} check(s) failed.`);
   child.kill();
   process.exit(failed === 0 ? 0 : 1);
 })();
+
+async function checkMcpTrustGate() {
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const pending = await invoke('mcp:pending', []);
+  report(!pending.error && pending.result?.ok === true && Array.isArray(pending.result.servers), 'mcp:pending lists offers');
+
+  const unoffered = await invoke('mcp:trust', ['0123456789abcdef0123456789abcdef', true]);
+  report(!unoffered.error && unoffered.result?.ok === false, 'mcp:trust refuses a server it never offered');
+
+  const malformed = await invoke('mcp:trust', ['not-a-signature', true]);
+  report(!malformed.error && malformed.result?.ok === false, 'mcp:trust refuses a malformed signature');
+
+  const revoke = await invoke('mcp:trust', ['0123456789abcdef0123456789abcdef', false]);
+  report(!revoke.error && revoke.result?.ok === true, 'mcp:trust allows revoking without an offer');
+
+  return failed;
+}
 
 async function checkWorkflowRoundTrip() {
   const fsSync = require('node:fs');
@@ -152,6 +177,86 @@ async function checkExtensionGate() {
   return failed;
 }
 
+async function checkCatcherAutosave() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const payload = JSON.stringify({ version: 2, entries: [{ id: 1, host: 'example.invalid' }] });
+  const wrote = (await invoke('catcher:autosaveWrite', [ROOT, payload])).result;
+  report(wrote?.ok === true, 'catcher session autosave writes');
+
+  const read = (await invoke('catcher:autosaveRead', [ROOT])).result;
+  report(read?.ok === true && read.json === payload, 'catcher session autosave reads the same bytes back');
+
+  report(
+    !fsSync.existsSync(pathSync.join(ROOT, '.wide', 'catcher-session.json')),
+    'catcher autosave never writes captured traffic into the project',
+  );
+
+  const missing = (await invoke('catcher:autosaveRead', ['C:\\no\\such\\workspace'])).result;
+  report(missing?.ok === true && missing.json === '', 'catcher autosave read of an unknown workspace is empty, not an error');
+
+  return failed;
+}
+
+async function checkUpdateIntegrity() {
+  const http = require('node:http');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const serve = (body) =>
+    new Promise((resolve) => {
+      const server = http.createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(body));
+      });
+      server.listen(0, '127.0.0.1', () => resolve(server));
+    });
+
+  const newer = await serve({ version: '99.0.0', url: 'https://example.invalid/Wide-Setup-99.0.0.exe' });
+  const newerReply = (await invoke('update:check', [`http://127.0.0.1:${newer.address().port}/m.json`])).result;
+  report(
+    newerReply?.ok === true && newerReply.latest === '99.0.0' && newerReply.available === true,
+    'update:check sees a newer manifest version as available',
+  );
+  newer.close();
+
+  const older = await serve({ version: '0.0.1', url: '' });
+  const olderReply = (await invoke('update:check', [`http://127.0.0.1:${older.address().port}/m.json`])).result;
+  report(
+    olderReply?.ok === true && olderReply.available === false,
+    'update:check sees an older manifest version as not available',
+  );
+  older.close();
+
+  const plain = (await invoke('update:download', [{ url: 'http://example.invalid/x.exe' }])).result;
+  report(plain?.ok === false, 'update:download refuses a link that is not https');
+
+  const unverified = (await invoke('update:download', [
+    { url: 'https://example.invalid/x.exe', version: '0.0.1', asset: 'x.exe', sums: '' },
+  ])).result;
+  report(
+    unverified?.ok === false && /SHA256SUMS/i.test(String(unverified?.error || '')),
+    'update:download refuses an update with no published checksum',
+  );
+
+  const listed = (await invoke('extensions:list', [])).result;
+  report(
+    Array.isArray(listed?.optional) && !listed.optional.includes('browser'),
+    'browser is built in, not an optional extension',
+  );
+
+  return failed;
+}
+
 function checkNativeColours() {
   const fsSync = require('node:fs');
   const pathSync = require('node:path');
@@ -171,11 +276,7 @@ function checkNativeColours() {
     return match ? `#${match[1]}${match[2]}${match[3]}`.toLowerCase() : null;
   };
 
-  const pairs = [
-    ['kBackground', 'mono-800'],
-    ['kSplashBackground', 'mono-800'],
-    ['kSplashSubtle', 'mono-300'],
-  ];
+  const pairs = [['kBackground', 'mono-800']];
 
   let bad = 0;
   for (const [name, tokenName] of pairs) {

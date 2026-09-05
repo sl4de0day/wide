@@ -205,7 +205,7 @@ export function MacrosOverlay() {
                   <input
                     value={rule.pattern}
                     onChange={(event) => setExtract(index, { pattern: event.target.value })}
-                    placeholder={t("csrf\"\\s*:\\s*\"([^\"]+)")}
+                    placeholder={"csrf\"\\s*:\\s*\"([^\"]+)"}
                     className="min-w-0 flex-1 rounded-sm border border-line bg-canvas px-1.5 py-1 font-mono text-[11px] text-fg outline-none focus:border-accent"
                   />
                   <button
@@ -252,7 +252,7 @@ export function MacrosOverlay() {
                     "rounded-sm px-1.5 py-0.5 font-mono text-[10px]",
                     result.ok ? "bg-emerald-500/10 text-emerald-300" : "bg-rose-500/10 text-rose-300",
                   )}
-                  title={result.error}
+                  title={t(result.error ?? "")}
                 >
                   #{index + 1} {result.ok ? `${result.status} · ${result.ms}ms` : t("failed")}
                 </span>

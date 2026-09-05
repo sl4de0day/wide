@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
 import { useToast, type ToastKind } from "@/stores/toast";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +12,7 @@ const TONE: Record<ToastKind, string> = {
 };
 
 export function Toasts() {
+  const t = useT();
   const toasts = useToast((s) => s.toasts);
   const dismiss = useToast((s) => s.dismiss);
 
@@ -23,7 +25,7 @@ export function Toasts() {
       <div key={id} className="wide-enter-side pointer-events-auto flex items-start gap-2 rounded-md border border-line bg-raised px-3 py-2 shadow-lg">
         <Icon className={cn("mt-0.5 size-3.5 shrink-0", TONE[kind])} strokeWidth={2} />
         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[11px] text-fg">{message}</span>
-        <button type="button" onClick={() => dismiss(id)} aria-label="Dismiss" className="shrink-0 rounded-sm p-0.5 text-fg-faint hover:bg-hover hover:text-fg">
+        <button type="button" onClick={() => dismiss(id)} aria-label={t("Dismiss")} className="shrink-0 rounded-sm p-0.5 text-fg-faint hover:bg-hover hover:text-fg">
           <X className="size-3" strokeWidth={2} />
         </button>
       </div>

@@ -3,29 +3,53 @@ import { create } from "zustand";
 
 import { useSettings } from "@/stores/settings";
 
-export type Language = "en" | "tr";
+export type Language = "en" | "tr" | "es" | "de" | "fr" | "it" | "ja" | "ko";
 
 export const LANGUAGES: readonly { id: Language; label: string }[] = [
   { id: "en", label: "English" },
   { id: "tr", label: "Türkçe" },
+  { id: "es", label: "Español" },
+  { id: "de", label: "Deutsch" },
+  { id: "fr", label: "Français" },
+  { id: "it", label: "Italiano" },
+  { id: "ja", label: "日本語" },
+  { id: "ko", label: "한국어" },
 ];
 
 export function isLanguage(value: unknown): value is Language {
-  return value === "en" || value === "tr";
+  return LANGUAGES.some((language) => language.id === value);
 }
 
 export type Values = Record<string, string | number>;
 
+type Dictionary = Record<string, string>;
+
+const LOADERS: Partial<Record<Language, () => Promise<Dictionary>>> = {
+  tr: () => import("./i18n.tr").then((m) => m.TR),
+  es: () => import("./i18n.es").then((m) => m.ES),
+  de: () => import("./i18n.de").then((m) => m.DE),
+  fr: () => import("./i18n.fr").then((m) => m.FR),
+  it: () => import("./i18n.it").then((m) => m.IT),
+  ja: () => import("./i18n.ja").then((m) => m.JA),
+  ko: () => import("./i18n.ko").then((m) => m.KO),
+};
+
 const useI18nReady = create<{ v: number }>(() => ({ v: 0 }));
-let trDict: Record<string, string> | null = null;
-let trLoading = false;
-function loadTr(): void {
-  if (trDict || trLoading) return;
-  trLoading = true;
-  void import("./i18n.tr").then((m) => {
-    trDict = m.TR;
-    useI18nReady.setState((s) => ({ v: s.v + 1 }));
-  });
+const dictionaries: Partial<Record<Language, Dictionary>> = {};
+const loading = new Set<Language>();
+
+async function loadDictionary(language: Language): Promise<void> {
+  const load = LOADERS[language];
+  if (!load || dictionaries[language] || loading.has(language)) return;
+  loading.add(language);
+  try {
+    dictionaries[language] = await load();
+    useI18nReady.setState((state) => ({ v: state.v + 1 }));
+  } catch {
+    void 0;
+  } finally {
+    loading.delete(language);
+  }
 }
 
 function fill(template: string, values?: Values): string {
@@ -36,8 +60,9 @@ function fill(template: string, values?: Values): string {
 }
 
 export function translate(language: Language, text: string, values?: Values): string {
-  const dict = language === "tr" ? trDict : null;
-  return fill(dict?.[text] ?? text, values);
+  const dictionary = dictionaries[language];
+  const found = dictionary && Object.prototype.hasOwnProperty.call(dictionary, text) ? dictionary[text] : undefined;
+  return fill(typeof found === "string" ? found : text, values);
 }
 
 export function t(text: string, values?: Values): string {
@@ -53,19 +78,11 @@ export function useT(): (text: string, values?: Values) => string {
 export function applyLanguage(): void {
   const language = useSettings.getState().language;
   document.documentElement.lang = language;
-  if (language === "tr") loadTr();
+  void loadDictionary(language);
 }
 
 export async function ensureLanguageLoaded(): Promise<void> {
   const language = useSettings.getState().language;
   document.documentElement.lang = language;
-  if (language !== "tr" || trDict) return;
-  trLoading = true;
-  try {
-    const m = await import("./i18n.tr");
-    trDict = m.TR;
-    useI18nReady.setState((s) => ({ v: s.v + 1 }));
-  } catch {
-    void 0;
-  }
+  await loadDictionary(language);
 }

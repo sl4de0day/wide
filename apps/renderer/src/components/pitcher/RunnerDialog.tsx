@@ -116,7 +116,7 @@ export function RunnerDialog({ collection, onClose }: { collection: Collection; 
                         {r.tests.length > 0 && (
                           <span className={fail > 0 ? "text-status-error" : "text-emerald-400"}>{r.tests.length - fail}/{r.tests.length}</span>
                         )}
-                        {r.error && <span className="text-status-error"> {r.error}</span>}
+                        {r.error && <span className="text-status-error"> {t(r.error)}</span>}
                       </td>
                     </tr>
                   );

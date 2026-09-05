@@ -131,7 +131,7 @@ export function EnginePanel() {
           onKeyDown={(event) => {
             if (event.key === "Enter") commit(address);
           }}
-          placeholder="http://127.0.0.1:… — or your own dev server"
+          placeholder={t("http://127.0.0.1:… — or your own dev server")}
           aria-label={t("Preview address")}
           title={
             addressError ??

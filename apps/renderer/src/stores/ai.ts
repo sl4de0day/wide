@@ -9,7 +9,10 @@ import {
   type AiModelFile,
   type AiSearchResult,
   type AiSessionMeta,
+  type Ok,
 } from "@/lib/bridge";
+import { t } from "@/lib/i18n";
+import { basename } from "@/lib/utils";
 import { AI_CHAT_PATH, useEditor } from "./editor";
 import { applyAiEdit, useAiEdits } from "./aiEdits";
 import { useWorkspace } from "./workspace";
@@ -42,6 +45,7 @@ export interface AiChat {
   history: AiMessage[];
 
   activeTurn: string | null;
+  stopping: boolean;
   error: string;
 
   loaded: boolean;
@@ -61,6 +65,7 @@ const emptyChat = (id: string, root: string): AiChat => ({
   turns: [],
   history: [],
   activeTurn: null,
+  stopping: false,
   error: "",
   loaded: false,
 });
@@ -89,9 +94,9 @@ interface AiState {
 
   revealTurn: { session: string; index: number } | null;
 
-  attachments: string[];
-  attach(path: string): void;
-  detach(path: string): void;
+  attachments: Record<string, string[]>;
+  attach(sessionId: string, path: string): void;
+  detach(sessionId: string, path: string): void;
 
   load(): Promise<void>;
   listSessions(): Promise<void>;
@@ -146,6 +151,37 @@ const patchChat = (
   return { ...chats, [id]: change(chat) };
 };
 
+const dropAttachments = (
+  attachments: Record<string, string[]>,
+  sessionId: string,
+): Record<string, string[]> => {
+  if (!attachments[sessionId]) return attachments;
+  const rest = { ...attachments };
+  delete rest[sessionId];
+  return rest;
+};
+
+function alternating(messages: AiMessage[]): AiMessage[] {
+  const merged: AiMessage[] = [];
+  for (const message of messages) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === message.role) {
+      merged[merged.length - 1] = {
+        ...last,
+        content: [last.content, message.content].filter(Boolean).join("\n\n"),
+      };
+      continue;
+    }
+    merged.push(message);
+  }
+  return merged;
+}
+
+const STOP_RETRY_MS = 300;
+const STOP_RETRIES = 200;
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export const useAi = create<AiState>((set, get) => ({
   config: null,
   keys: {},
@@ -164,7 +200,7 @@ export const useAi = create<AiState>((set, get) => ({
   error: "",
   busy: false,
   revealTurn: null,
-  attachments: [],
+  attachments: {},
 
   load: async () => {
     const [config, keys] = await Promise.all([bridge.aiConfig(), bridge.aiKeyStatus()]);
@@ -225,11 +261,15 @@ export const useAi = create<AiState>((set, get) => ({
 
   closeChat: (id) => {
     const chat = get().chats[id];
-    if (!chat || chat.activeTurn) return;
+    if (!chat) return;
+    if (chat.activeTurn) {
+      set((state) => ({ attachments: dropAttachments(state.attachments, id) }));
+      return;
+    }
     set((state) => {
       const chats = { ...state.chats };
       delete chats[id];
-      return { chats };
+      return { chats, attachments: dropAttachments(state.attachments, id) };
     });
   },
 
@@ -239,7 +279,11 @@ export const useAi = create<AiState>((set, get) => ({
     set((state) => {
       const chats = { ...state.chats };
       delete chats[id];
-      return { chats, sessions: state.sessions.filter((session) => session.id !== id) };
+      return {
+        chats,
+        attachments: dropAttachments(state.attachments, id),
+        sessions: state.sessions.filter((session) => session.id !== id),
+      };
     });
   },
 
@@ -262,9 +306,19 @@ export const useAi = create<AiState>((set, get) => ({
     return true;
   },
 
-  attach: (path) =>
-    set((state) => (state.attachments.includes(path) ? state : { attachments: [...state.attachments, path] })),
-  detach: (path) => set((state) => ({ attachments: state.attachments.filter((p) => p !== path) })),
+  attach: (sessionId, path) =>
+    set((state) => {
+      const held = state.attachments[sessionId] ?? [];
+      if (held.includes(path)) return state;
+      return { attachments: { ...state.attachments, [sessionId]: [...held, path] } };
+    }),
+  detach: (sessionId, path) =>
+    set((state) => ({
+      attachments: {
+        ...state.attachments,
+        [sessionId]: (state.attachments[sessionId] ?? []).filter((held) => held !== path),
+      },
+    })),
 
   ask: async (sessionId, text) => {
     const message = text.trim();
@@ -274,24 +328,46 @@ export const useAi = create<AiState>((set, get) => ({
     if (!config) return;
 
     const id = turnId(sessionId);
+    set((state) => ({
+      chats: patchChat(state.chats, sessionId, (current) => ({ ...current, activeTurn: id, stopping: false })),
+    }));
     const provider = config.tab === "local" ? "local" : config.provider;
     const model = config.tab === "local" ? config.localModel : config.cloudModel[config.provider] ?? "";
 
-    const attachments = get().attachments;
-    let contextBlock = "";
-    if (attachments.length > 0) {
-      const parts: string[] = [];
-      for (const path of attachments) {
+    const attachments = get().attachments[sessionId] ?? [];
+    const parts: string[] = [];
+    const missing: string[] = [];
+    for (const path of attachments) {
+      try {
         const file = await bridge.readFile(path);
-        if (file && file.content != null) parts.push(`=== ${path} ===\n${file.content}`);
+        if (file && !file.error && !file.tooLarge && file.content != null) {
+          parts.push(`=== ${path} ===\n${file.content}`);
+        } else {
+          missing.push(path);
+        }
+      } catch {
+        missing.push(path);
       }
-      if (parts.length) contextBlock = `Attached files for context:\n\n${parts.join("\n\n")}\n\n`;
-      set({ attachments: [] });
+    }
+    const contextBlock = parts.length ? `Attached files for context:\n\n${parts.join("\n\n")}\n\n` : "";
+    const unreadable = missing.length
+      ? t("{name} could not be opened.", { name: missing.map(basename).join(", ") })
+      : "";
+    if (attachments.length > 0) {
+      set((state) => ({
+        attachments: {
+          ...state.attachments,
+          [sessionId]: (state.attachments[sessionId] ?? []).filter((held) => !attachments.includes(held)),
+        },
+      }));
     }
 
     const projectRoot = chat.root || root();
+    let cut = chat.history.length;
+    while (cut > 0 && chat.history[cut - 1]?.role === "user") cut -= 1;
+    const answered = chat.history.slice(0, cut);
     const history: AiMessage[] = [...chat.history, { role: "user", content: message }];
-    const providerMessages: AiMessage[] = [...chat.history, { role: "user", content: contextBlock + message }];
+    const providerMessages = alternating([...answered, { role: "user", content: contextBlock + message }]);
 
     set((state) => ({
       chats: patchChat(state.chats, sessionId, (current) => ({
@@ -299,7 +375,8 @@ export const useAi = create<AiState>((set, get) => ({
         root: projectRoot,
         history,
         activeTurn: id,
-        error: "",
+        stopping: false,
+        error: unreadable,
         turns: [
           ...current.turns,
           { id: `${id}-user`, role: "user", text: message, thinking: "", steps: [], error: "", usage: null, streaming: false },
@@ -308,19 +385,27 @@ export const useAi = create<AiState>((set, get) => ({
       })),
     }));
 
-    const reply = await bridge.aiSend({
-      id,
-      root: projectRoot,
-      provider,
-      model,
-      messages: providerMessages,
-      system: systemPrompt(),
-    });
+    const reply = await bridge
+      .aiSend({
+        id,
+        root: projectRoot,
+        provider,
+        model,
+        messages: providerMessages,
+        system: systemPrompt(),
+      })
+      .catch(
+        (failure: unknown): Ok<{ answered?: boolean }> => ({
+          ok: false,
+          error: failure instanceof Error ? failure.message : String(failure),
+        }),
+      );
 
     set((state) => ({
       chats: patchChat(state.chats, sessionId, (current) => ({
         ...current,
         activeTurn: current.activeTurn === id ? null : current.activeTurn,
+        stopping: current.activeTurn === id ? false : current.stopping,
         turns: current.turns.map((turn) => (turn.id === id ? { ...turn, streaming: false } : turn)),
 
         error: reply.ok || reply.error === "no-key" || reply.error === "stopped"
@@ -329,13 +414,21 @@ export const useAi = create<AiState>((set, get) => ({
       })),
     }));
 
-    const finished = get().chats[sessionId]?.turns.find((turn) => turn.id === id);
-    if (!finished?.text) return;
+    const settled = get().chats[sessionId];
+    if (!settled || settled.activeTurn) return;
+    if (settled.history[settled.history.length - 1]?.role !== "user") return;
 
-    const next = [...(get().chats[sessionId]?.history ?? []), { role: "assistant" as const, content: finished.text }];
-    set((state) => ({ chats: patchChat(state.chats, sessionId, (current) => ({ ...current, history: next })) }));
+    const answer = settled.turns.find((turn) => turn.id === id)?.text ?? "";
+    const next = answer
+      ? [...settled.history, { role: "assistant" as const, content: answer }]
+      : settled.history;
+    if (answer) {
+      set((state) => ({ chats: patchChat(state.chats, sessionId, (current) => ({ ...current, history: next })) }));
+    }
 
-    const saved = await bridge.aiSaveSession(sessionId, projectRoot, next);
+    const saved = await bridge
+      .aiSaveSession(sessionId, projectRoot, next)
+      .catch((): Ok<{ session?: AiSessionMeta }> => ({ ok: false }));
 
     if (saved.ok && saved.session) {
       const meta = saved.session;
@@ -347,11 +440,28 @@ export const useAi = create<AiState>((set, get) => ({
   },
 
   stop: async (sessionId) => {
-    const id = get().chats[sessionId]?.activeTurn;
-    if (!id) return;
-    await bridge.aiStop(id);
+    const chat = get().chats[sessionId];
+    const id = chat?.activeTurn;
+    if (!chat || !id || chat.stopping) return;
     set((state) => ({
-      chats: patchChat(state.chats, sessionId, (current) => ({ ...current, activeTurn: null })),
+      chats: patchChat(state.chats, sessionId, (current) =>
+        current.activeTurn === id ? { ...current, stopping: true } : current,
+      ),
+    }));
+
+    for (let attempt = 0; attempt < STOP_RETRIES; attempt += 1) {
+      const reply = await bridge.aiStop(id).catch((): Ok<{ stopped?: boolean }> => ({ ok: false }));
+      if (reply.stopped) return;
+      if (get().chats[sessionId]?.activeTurn !== id) return;
+      await pause(STOP_RETRY_MS);
+    }
+
+    set((state) => ({
+      chats: patchChat(state.chats, sessionId, (current) =>
+        current.activeTurn === id
+          ? { ...current, activeTurn: null, stopping: false, error: "The assistant could not be stopped." }
+          : current,
+      ),
     }));
   },
 
@@ -438,15 +548,18 @@ export function subscribeAiEvents(): () => void {
       if (useAiEdits.getState().reviewEnabled) {
         void useAiEdits.getState().queue({ path: event.path, root: event.root ?? "", content: event.content });
       } else {
-        applyAiEdit(event.path, event.root ?? "", event.content);
+        applyAiEdit(event.path, event.root ?? "", event.content, event.existed === true);
       }
       return;
     }
 
     const sessionId = sessionOf(event.id);
+    const settles = event.type === "done";
     useAi.setState((state) => ({
       chats: patchChat(state.chats, sessionId, (chat) => ({
         ...chat,
+        activeTurn: settles && chat.activeTurn === event.id ? null : chat.activeTurn,
+        stopping: settles && chat.activeTurn === event.id ? false : chat.stopping,
         turns: chat.turns.map((turn) => {
           if (turn.id !== event.id) return turn;
           switch (event.type) {

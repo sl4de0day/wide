@@ -65,12 +65,18 @@ function HeaderTable({ rows }: { rows: [string, string][] }) {
 
 
 
-function WsComposer({ id }: { id: number }) {
+function WsComposer({ id, seed }: { id: number; seed?: { text: string; direction: "up" | "down" } | null }) {
   const t = useT();
   const [text, setText] = useState("");
   const [direction, setDirection] = useState<"up" | "down">("up");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!seed) return;
+    setText(seed.text);
+    setDirection(seed.direction);
+  }, [seed]);
 
   const send = async () => {
     if (!text || busy) return;
@@ -113,7 +119,7 @@ function WsComposer({ id }: { id: number }) {
         placeholder={t("A text frame to inject…")}
         className="w-full resize-none rounded-sm border border-line bg-bg px-2 py-1 font-mono text-[11px] text-fg outline-none focus:border-accent"
       />
-      {error && <p className="mt-1 text-[10px] text-status-error">{error}</p>}
+      {error && <p className="mt-1 text-[10px] text-status-error">{t(error)}</p>}
       <div className="mt-1 flex justify-end">
         <button
           type="button"
@@ -131,6 +137,7 @@ function WsComposer({ id }: { id: number }) {
 function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) {
   const t = useT();
   const [tab, setTab] = useState<"request" | "response">("request");
+  const [wsSeed, setWsSeed] = useState<{ text: string; direction: "up" | "down" } | null>(null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col border-t border-line">
@@ -323,7 +330,14 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
                     {frame.direction === "up" ? "▲" : "▼"}
                   </span>
                   {frame.kind === "text" ? (
-                    <span className="min-w-0 flex-1 break-all font-mono text-[11px] text-fg">{frame.text}</span>
+                    <button
+                      type="button"
+                      title={t("Load this frame into the composer")}
+                      onClick={() => setWsSeed({ text: frame.text ?? "", direction: frame.direction })}
+                      className="min-w-0 flex-1 break-all text-left font-mono text-[11px] text-fg transition-colors duration-100 hover:text-fg-bright"
+                    >
+                      {frame.text}
+                    </button>
                   ) : (
                     <span className="font-mono text-[11px] text-fg-faint">
                       {frame.kind === "binary" ? t("{bytes} bytes (binary)", { bytes: frame.bytes ?? 0 }) : t("close")}
@@ -333,7 +347,7 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
               ))
             )}
           </div>
-          <WsComposer id={entry.id} />
+          <WsComposer id={entry.id} seed={wsSeed} />
         </div>
       ) : (
       <>
@@ -365,7 +379,7 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
             )}
           </>
         ) : entry.error ? (
-          <p className="text-[11px] text-status-error">{entry.error}</p>
+          <p className="text-[11px] text-status-error">{t(entry.error)}</p>
         ) : (
           <>
             <HeaderTable rows={entry.resHeaders} />
@@ -920,7 +934,7 @@ export function ProxyPanel() {
           onClick={() => useProxy.setState({ error: "" })}
           className="wide-enter-fade shrink-0 border-b border-line px-3 py-1.5 text-left text-[11px] text-status-error"
         >
-          {error}
+          {t(error)}
         </button>
       )}
 

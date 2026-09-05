@@ -85,7 +85,7 @@ export function SequencerView() {
             </button>
           )}
         </div>
-        {error && <p className="mt-1 text-[11px] text-status-error">{error}</p>}
+        {error && <p className="mt-1 text-[11px] text-status-error">{t(error)}</p>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">

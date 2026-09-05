@@ -10,19 +10,25 @@ interface UpdateState {
   current: string;
   latest: string;
   url: string;
+  asset: string;
+  sums: string;
   notes: string;
   error: string | null;
 
   dismissed: boolean;
   configured: boolean;
+  blocked: boolean;
   installing: "idle" | "download" | "install";
   booting: boolean;
   check(): Promise<void>;
   boot(): Promise<void>;
+  stage(): Promise<void>;
   open(): void;
   install(): Promise<void>;
   dismiss(): void;
 }
+
+const INSTALLER_RE = /^https:\/\/.*\.exe$/i;
 
 export const useUpdate = create<UpdateState>((set, get) => ({
   checking: false,
@@ -30,10 +36,13 @@ export const useUpdate = create<UpdateState>((set, get) => ({
   current: "",
   latest: "",
   url: "",
+  asset: "",
+  sums: "",
   notes: "",
   error: null,
   dismissed: false,
   configured: false,
+  blocked: false,
   installing: "idle",
   booting: true,
 
@@ -51,8 +60,11 @@ export const useUpdate = create<UpdateState>((set, get) => ({
       current: reply.current ?? "",
       latest: reply.latest ?? "",
       url: reply.url ?? "",
+      asset: reply.asset ?? "",
+      sums: reply.sums ?? "",
       notes: reply.notes ?? "",
       available: Boolean(reply.available),
+      blocked: Boolean(reply.blocked),
       dismissed: false,
     });
   },
@@ -63,30 +75,37 @@ export const useUpdate = create<UpdateState>((set, get) => ({
   },
 
   install: async () => {
-    const { url, installing } = get();
+    const { url, installing, latest, asset, sums } = get();
     if (!url || installing !== "idle") return;
-    if (!/^https:\/\/.*\.exe$/i.test(url)) {
+    if (!INSTALLER_RE.test(url)) {
       void bridge.updateOpen(url);
       return;
     }
     set({ installing: "download", error: null });
-    const dl = await bridge.updateDownload(url);
+    const dl = await bridge.updateDownload({ url, version: latest, asset, sums });
     if (!dl.ok || !dl.path) {
       set({ installing: "idle", error: dl.error ?? "The update could not be downloaded." });
       return;
     }
     set({ installing: "install" });
-    const run = await bridge.updateInstall(dl.path);
+    const run = await bridge.updateInstall({ path: dl.path, version: latest });
     if (!run.ok) {
       set({ installing: "idle", error: run.error ?? "The update could not be installed." });
     }
   },
 
+  stage: async () => {
+    const { url, latest, asset, sums, available, blocked, installing } = get();
+    if (!available || blocked || installing !== "idle") return;
+    if (!url || !INSTALLER_RE.test(url)) return;
+    await bridge.updateDownload({ url, version: latest, asset, sums });
+  },
+
   boot: async () => {
     try {
       await Promise.race([get().check(), new Promise((resolve) => setTimeout(resolve, 12000))]);
-      const { available, url } = get();
-      if (available && url && /^https:\/\/.*\.exe$/i.test(url)) {
+      const { available, blocked, url } = get();
+      if (available && !blocked && url && INSTALLER_RE.test(url)) {
         await get().install();
         if (get().installing !== "idle") return;
       }

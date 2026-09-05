@@ -11,9 +11,10 @@ interface Flow {
 }
 
 const HOOK = `(function(){
-  if (window.__wideDomInvaderInstalled) return; window.__wideDomInvaderInstalled = true;
-  window.__wideDomInvader = window.__wideDomInvader || [];
-  var log = window.__wideDomInvader;
+  if (window.__wideDomInvaderInstalled) return;
+  var log = [];
+  try { window.__wideDomInvader = log; } catch(e){ return; }
+  if (window.__wideDomInvader !== log) return;
   function tainted(v){
     try {
       v = String(v);
@@ -36,10 +37,17 @@ const HOOK = `(function(){
     } catch(e){}
   });
   try { var dw = document.write; document.write = function(v){ record("document.write", v); return dw.apply(document, arguments); }; } catch(e){}
-  try { var _e = window.eval; window.eval = function(v){ record("eval", v); return _e(v); }; } catch(e){}
   ["setTimeout","setInterval"].forEach(function(fn){ try { var o = window[fn]; window[fn] = function(h){ if (typeof h === "string") record(fn + "(string)", h); return o.apply(window, arguments); }; } catch(e){} });
   try { var sa = Element.prototype.setAttribute; Element.prototype.setAttribute = function(n, v){ if (/^(src|href)$/i.test(n)) record("setAttribute(" + n + ")", v); return sa.apply(this, arguments); }; } catch(e){}
+  window.__wideDomInvaderInstalled = true;
 })();`;
+
+const READ = `JSON.stringify({ armed: window.__wideDomInvaderInstalled === true && Array.isArray(window.__wideDomInvader), flows: window.__wideDomInvader || [] })`;
+
+interface Snapshot {
+  armed: boolean;
+  flows: Flow[];
+}
 
 export function DomInvaderPanel({ tabId }: { tabId: string }) {
   const t = useT();
@@ -48,31 +56,81 @@ export function DomInvaderPanel({ tabId }: { tabId: string }) {
 
   useEffect(() => {
     let alive = true;
+    let busy = false;
+    let scriptId = "";
 
-    void bridge.browserCdp(tabId, "Page.addScriptToEvaluateOnNewDocument", { source: HOOK });
-    void bridge.browserCdp(tabId, "Runtime.evaluate", { expression: HOOK });
-    setArmed(true);
-    const poll = async () => {
-      const r = await bridge.browserCdp(tabId, "Runtime.evaluate", {
-        expression: "JSON.stringify(window.__wideDomInvader||[])",
-        returnByValue: true,
-      });
-      if (!alive) return;
+    setFlows([]);
+    setArmed(false);
+
+    const drop = async () => {
+      const identifier = scriptId;
+      scriptId = "";
+      if (identifier) await bridge.browserCdp(tabId, "Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    };
+
+    const arm = async () => {
+      await drop();
+      const added = await bridge.browserCdp(tabId, "Page.addScriptToEvaluateOnNewDocument", { source: HOOK });
+      const identifier = added.ok ? (added.result as { identifier?: string } | undefined)?.identifier : undefined;
+      if (typeof identifier === "string") scriptId = identifier;
+      if (!alive) {
+        void drop();
+        return;
+      }
+      await bridge.browserCdp(tabId, "Runtime.evaluate", { expression: HOOK });
+    };
+
+    const read = async (): Promise<Snapshot | null> => {
+      const reply = await bridge.browserCdp(tabId, "Runtime.evaluate", { expression: READ, returnByValue: true });
+      if (!reply.ok) return null;
+      const raw = (reply.result as { result?: { value?: string } } | undefined)?.result?.value;
+      if (typeof raw !== "string") return null;
       try {
-        const raw = (r.result as { result?: { value?: string } } | undefined)?.result?.value;
-        if (typeof raw === "string") {
-          const parsed = JSON.parse(raw) as Flow[];
-          if (Array.isArray(parsed)) setFlows(parsed);
-        }
+        const parsed = JSON.parse(raw) as Partial<Snapshot>;
+        const raws: unknown[] = Array.isArray(parsed.flows) ? parsed.flows : [];
+        const flows = raws.slice(0, 200).map((item) => {
+          const row = (item ?? {}) as Record<string, unknown>;
+          return {
+            sink: typeof row.sink === "string" ? row.sink.slice(0, 200) : "?",
+            value: typeof row.value === "string" ? row.value.slice(0, 300) : "",
+            source: typeof row.source === "string" ? row.source.slice(0, 200) : "",
+            at: typeof row.at === "number" && Number.isFinite(row.at) ? row.at : 0,
+          };
+        });
+        return { armed: parsed.armed === true, flows };
       } catch {
-
+        return null;
       }
     };
+
+    const poll = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        let snapshot = await read();
+        if (alive && snapshot && (!snapshot.armed || !scriptId)) {
+          await arm();
+          snapshot = await read();
+        }
+        if (!alive || !snapshot) return;
+        const next = snapshot.armed ? snapshot.flows : [];
+        setArmed(snapshot.armed);
+        setFlows((prev) =>
+          prev.length === next.length && prev.every((row, i) => row.at === next[i].at && row.sink === next[i].sink)
+            ? prev
+            : next,
+        );
+      } finally {
+        busy = false;
+      }
+    };
+
     const id = setInterval(() => void poll(), 1500);
     void poll();
     return () => {
       alive = false;
       clearInterval(id);
+      void drop();
     };
   }, [tabId]);
 

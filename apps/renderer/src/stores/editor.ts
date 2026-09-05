@@ -132,6 +132,12 @@ function isInside(path: string, parent: string): boolean {
   return a.startsWith(b.endsWith("/") ? b : `${b}/`);
 }
 
+export function repointPath(path: string, oldPath: string, newPath: string): string {
+  if (path === oldPath) return newPath;
+  if (isInside(path, oldPath)) return newPath + path.slice(oldPath.length);
+  return path;
+}
+
 export const useEditor = create<EditorState>((set, get) => ({
   tabs: [],
   activePath: null,
@@ -420,11 +426,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   consumeReplace: () => set({ pendingReplace: null }),
 
   relocate: (oldPath, newPath) => {
-    const repoint = (path: string) => {
-      if (path === oldPath) return newPath;
-      if (isInside(path, oldPath)) return newPath + path.slice(oldPath.length);
-      return path;
-    };
+    const repoint = (path: string) => repointPath(path, oldPath, newPath);
     set((state) => ({
       tabs: state.tabs.map((tab) => {
         if (tab.kind !== "file") return tab;
@@ -435,6 +437,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
       lastFilePath: state.lastFilePath ? repoint(state.lastFilePath) : state.lastFilePath,
     }));
+    void import("./aiEdits").then((module) => module.useAiEdits.getState().relocate(oldPath, newPath));
   },
 
   formatActive: async () => {

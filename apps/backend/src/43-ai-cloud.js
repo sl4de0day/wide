@@ -10,7 +10,12 @@ const AI_HOSTS = {
 
 function aiRequest({ host, path: requestPath, headers, body, signal }) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("stopped"));
+      return;
+    }
     const payload = JSON.stringify(body);
+    let stream = null;
     const request = node_https.request(
       {
         host,
@@ -22,23 +27,29 @@ function aiRequest({ host, path: requestPath, headers, body, signal }) {
           ...headers,
         },
         timeout: AI_REQUEST_TIMEOUT_MS,
+        signal,
       },
-      (response) => resolve(response)
+      (response) => {
+        stream = response;
+        resolve(response);
+      }
     );
     request.on("timeout", () => {
-      request.destroy();
-      reject(new Error("The provider did not answer in time."));
+      const failure = new Error("The provider did not answer in time.");
+      if (stream) stream.destroy(failure);
+      else reject(failure);
+      request.destroy(failure);
     });
     request.on("error", reject);
-    signal?.addEventListener("abort", () => request.destroy(), { once: true });
     request.end(payload);
   });
 }
 
 async function* aiLines(response) {
   let buffer = "";
+  response.setEncoding("utf8");
   for await (const chunk of response) {
-    buffer += chunk.toString("utf8");
+    buffer += chunk;
     let at;
     while ((at = buffer.indexOf("\n")) >= 0) {
       yield buffer.slice(0, at).replace(/\r$/, "");
@@ -50,8 +61,9 @@ async function* aiLines(response) {
 
 async function aiErrorBody(response) {
   let text = "";
+  response.setEncoding("utf8");
   for await (const chunk of response) {
-    if (text.length < 8192) text += chunk.toString("utf8");
+    if (text.length < 8192) text += chunk;
   }
   try {
     const parsed = JSON.parse(text);
@@ -124,7 +136,7 @@ async function* aiStreamDeepSeek({ key, model, system, messages, tools, signal }
   }
 
   for (const call of partialCalls.values()) {
-    yield { type: "tool_use", id: call.id, name: call.name, input: aiParseArgs(call.args) };
+    yield* aiToolUse(call);
   }
 }
 
@@ -182,7 +194,7 @@ async function* aiStreamClaude({ key, model, system, messages, tools, signal }) 
     } else if (event.type === "content_block_stop") {
       const slot = blocks.get(event.index);
       if (slot?.kind === "tool_use") {
-        yield { type: "tool_use", id: slot.id, name: slot.name, input: aiParseArgs(slot.args) };
+        yield* aiToolUse(slot);
       }
     } else if (event.type === "message_delta") {
       const output = event.usage?.output_tokens ?? 0;
@@ -244,7 +256,7 @@ async function* aiStreamGemini({ key, model, system, steps, tools, signal }) {
       }
     } else if (event.event_type === "step.stop") {
       const call = calls.get(event.index);
-      if (call) yield { type: "tool_use", id: call.id, name: call.name, input: aiParseArgs(call.args) };
+      if (call) yield* aiToolUse(call);
     } else if (event.event_type === "interaction.completed") {
       const usage = event.interaction?.usage ?? {};
       yield {
@@ -260,13 +272,19 @@ async function* aiStreamGemini({ key, model, system, steps, tools, signal }) {
 }
 
 function aiParseArgs(text) {
-  if (!text) return {};
+  if (!text) return { ok: true, input: {} };
   try {
-    return JSON.parse(text);
+    const input = JSON.parse(text);
+    if (!input || typeof input !== "object" || Array.isArray(input)) return { ok: false, input: {} };
+    return { ok: true, input };
   } catch {
-
-    return {};
+    return { ok: false, input: {} };
   }
+}
+
+function* aiToolUse(call) {
+  const parsed = aiParseArgs(call.args);
+  yield { type: "tool_use", id: call.id, name: call.name, input: parsed.input, truncated: !parsed.ok };
 }
 
 async function aiVerifyKey(provider, key) {
@@ -290,6 +308,7 @@ async function aiVerifyKey(provider, key) {
       });
       if (models.statusCode !== 200) return { ok: false, error: await aiErrorBody(models) };
       let text = "";
+      models.setEncoding("utf8");
       for await (const chunk of models) text += chunk;
       const parsed = JSON.parse(text);
       return { ok: true, models: (parsed.data ?? []).map((entry) => entry.id) };

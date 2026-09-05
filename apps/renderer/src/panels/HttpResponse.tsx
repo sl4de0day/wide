@@ -68,7 +68,7 @@ export function HttpResponse() {
         {sending && <p className="pt-2 text-[12px] italic text-fg-dim">{t("Sending…")}</p>}
 
         {response && !response.ok && (
-          <p className="pt-2 text-[12px] text-status-error">{response.error}</p>
+          <p className="pt-2 text-[12px] text-status-error">{t(response.error)}</p>
         )}
 
         {response?.ok && (

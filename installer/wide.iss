@@ -1,5 +1,5 @@
-#define AppName "Wide"
-#define AppVersion "0.45926"
+﻿#define AppName "Wide"
+#define AppVersion "0.55926"
 #define AppPublisher "sl4de"
 #define AppRepo "https://github.com/sl4de0day/wide"
 
@@ -25,6 +25,7 @@ SetupIconFile=..\native-host\assets\wide.ico
 UninstallDisplayIcon={app}\wide.exe
 UninstallDisplayName={#AppName}
 WizardStyle=modern
+ShowLanguageDialog=yes
 Compression=lzma2/max
 SolidCompression=yes
 CloseApplications=yes
@@ -33,9 +34,56 @@ ChangesAssociations=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "german"; MessagesFile: "compiler:Languages\German.isl"
+Name: "french"; MessagesFile: "compiler:Languages\French.isl"
+Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+
+[CustomMessages]
+english.DesktopIcon=Create a desktop shortcut
+english.ShortcutsGroup=Additional shortcuts:
+english.LaunchApp=Launch Wide
+english.WideLocale=en
+turkish.DesktopIcon=Masaüstü kısayolu oluştur
+turkish.ShortcutsGroup=Ek kısayollar:
+turkish.LaunchApp=Wide'ı başlat
+turkish.WideLocale=tr
+spanish.DesktopIcon=Crear un acceso directo en el escritorio
+spanish.ShortcutsGroup=Accesos directos adicionales:
+spanish.LaunchApp=Iniciar Wide
+spanish.WideLocale=es
+german.DesktopIcon=Verknüpfung auf dem Desktop erstellen
+german.ShortcutsGroup=Zusätzliche Verknüpfungen:
+german.LaunchApp=Wide starten
+german.WideLocale=de
+french.DesktopIcon=Créer un raccourci sur le Bureau
+french.ShortcutsGroup=Raccourcis supplémentaires :
+french.LaunchApp=Lancer Wide
+french.WideLocale=fr
+italian.DesktopIcon=Crea un collegamento sul desktop
+italian.ShortcutsGroup=Collegamenti aggiuntivi:
+italian.LaunchApp=Avvia Wide
+italian.WideLocale=it
+japanese.DesktopIcon=デスクトップにショートカットを作成する
+japanese.ShortcutsGroup=追加のショートカット:
+japanese.LaunchApp=Wide を起動する
+japanese.WideLocale=ja
+korean.DesktopIcon=바탕 화면에 바로 가기 만들기
+korean.ShortcutsGroup=추가 바로 가기:
+korean.LaunchApp=Wide 실행
+korean.WideLocale=ko
+
+[INI]
+Filename: "{app}\wide.ini"; Section: "Setup"; Key: "Language"; String: "{cm:WideLocale}"
+
+[UninstallDelete]
+Type: files; Name: "{app}\wide.ini"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:ShortcutsGroup}"
 
 [Files]
 Source: "..\dist\wide\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -47,7 +95,7 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#AppName}"; Filename: "{app}\wide.exe"; IconFilename: "{app}\assets\wide.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\wide.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\wide.exe"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\wide.exe"; Flags: nowait runasoriginaluser skipifnotsilent
 
 [Code]

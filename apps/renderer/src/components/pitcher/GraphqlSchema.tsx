@@ -69,7 +69,7 @@ export function GraphqlSchema({ req, onInsert }: { req: PitcherRequest; onInsert
         </button>
         {schema && <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter types…")} className="ml-auto w-32 rounded-sm border border-line bg-canvas px-1.5 py-0.5 text-[10px] text-fg outline-none focus:border-accent" />}
       </div>
-      {error && <p className="px-2 py-1 font-mono text-[10px] text-status-error">{error}</p>}
+      {error && <p className="px-2 py-1 font-mono text-[10px] text-status-error">{t(error)}</p>}
       {schema && (
         <div className="max-h-56 overflow-auto p-1">
           {rootField(schema.queryType, t("Query"))}

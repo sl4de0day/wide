@@ -129,7 +129,7 @@ function DraftRow({ row, top }: { row: VisibleRow; top: number }) {
           error ? "border-status-error" : "border-accent",
         )}
       />
-      {error && <span className="pointer-events-none shrink-0 truncate text-[10px] text-status-error" title={error}>{error}</span>}
+      {error && <span className="pointer-events-none shrink-0 truncate text-[10px] text-status-error" title={t(error)}>{t(error)}</span>}
     </div>
   );
 }

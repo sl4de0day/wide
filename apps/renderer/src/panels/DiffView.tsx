@@ -73,7 +73,7 @@ export function DiffView({ relPath, staged }: { relPath: string; staged: boolean
       </div>
       <div className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-relaxed">
         {error ? (
-          <p className="px-3 py-3 text-status-error">{error}</p>
+          <p className="px-3 py-3 text-status-error">{t(error)}</p>
         ) : diff == null ? (
           <p className="px-3 py-3 text-fg-faint">{t("Loading…")}</p>
         ) : rows.length === 0 ? (
