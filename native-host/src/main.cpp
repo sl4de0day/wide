@@ -4,6 +4,8 @@
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
+#include <objidl.h>
+#include <gdiplus.h>
 #include <wrl.h>
 #include <wil/com.h>
 #include <WebView2.h>
@@ -46,9 +48,6 @@ constexpr int kMinWidth = 720;
 constexpr int kMinHeight = 480;
 
 constexpr COLORREF kBackground = RGB(0x3b, 0x42, 0x52);
-constexpr COLORREF kSplashBackground = RGB(0x3b, 0x42, 0x52);
-
-constexpr COLORREF kSplashSubtle = RGB(0x9a, 0xa6, 0xbd);
 
 wil::com_ptr<ICoreWebView2Controller> g_controller;
 wil::com_ptr<ICoreWebView2> g_webview;
@@ -1290,121 +1289,107 @@ void InitWebView(HWND hwnd) {
 
 HWND g_splash = nullptr;
 
-int g_fontsLoaded = 0;
+ULONG_PTR g_gdiplusToken = 0;
 
-void LoadSplashFonts() {
-  const wchar_t* files[] = {L"fonts\\Inter-Regular.ttf",
-                            L"fonts\\Inter-Bold.ttf"};
-  for (const wchar_t* f : files) {
-    std::wstring p = ResolveAssetPath(f);
-    if (!p.empty() && AddFontResourceExW(p.c_str(), FR_PRIVATE, nullptr) > 0)
-      ++g_fontsLoaded;
+bool PaintSplashLogo(HWND h, int size) {
+  using namespace Gdiplus;
+
+  std::wstring logoPath = ResolveAssetPath(L"wide-logo.png");
+  if (logoPath.empty()) return false;
+
+  Bitmap source(logoPath.c_str());
+  if (source.GetLastStatus() != Ok) return false;
+
+  BITMAPINFO info = {};
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = size;
+  info.bmiHeader.biHeight = -size;
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  info.bmiHeader.biCompression = BI_RGB;
+
+  HDC screen = GetDC(nullptr);
+  void* bits = nullptr;
+  HBITMAP dib =
+      CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+  if (!dib || !bits) {
+    if (dib) DeleteObject(dib);
+    ReleaseDC(nullptr, screen);
+    return false;
   }
-}
+  ZeroMemory(bits, static_cast<size_t>(size) * static_cast<size_t>(size) * 4);
 
-void UnloadSplashFonts() {
-  if (!g_fontsLoaded) return;
-  const wchar_t* files[] = {L"fonts\\Inter-Regular.ttf",
-                            L"fonts\\Inter-Bold.ttf"};
-  for (const wchar_t* f : files) {
-    std::wstring p = ResolveAssetPath(f);
-    if (!p.empty()) RemoveFontResourceExW(p.c_str(), FR_PRIVATE, nullptr);
+  {
+    Bitmap target(size, size, size * 4, PixelFormat32bppPARGB,
+                  static_cast<BYTE*>(bits));
+    Graphics graphics(&target);
+    graphics.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    graphics.SetPixelOffsetMode(PixelOffsetModeHalf);
+    graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+    graphics.Clear(Color(0, 0, 0, 0));
+    graphics.DrawImage(&source, 0, 0, size, size);
   }
-  g_fontsLoaded = 0;
-}
 
-const wchar_t* SplashFace() {
-  return g_fontsLoaded == 2 ? L"Inter 18pt" : L"Segoe UI";
+  HDC mem = CreateCompatibleDC(screen);
+  HGDIOBJ previous = SelectObject(mem, dib);
+
+  RECT wr;
+  GetWindowRect(h, &wr);
+  POINT topLeft = {wr.left, wr.top};
+  SIZE extent = {size, size};
+  POINT origin = {0, 0};
+  BLENDFUNCTION blend = {};
+  blend.BlendOp = AC_SRC_OVER;
+  blend.SourceConstantAlpha = 255;
+  blend.AlphaFormat = AC_SRC_ALPHA;
+
+  BOOL ok = UpdateLayeredWindow(h, screen, &topLeft, &extent, mem, &origin, 0,
+                                &blend, ULW_ALPHA);
+
+  SelectObject(mem, previous);
+  DeleteDC(mem);
+  DeleteObject(dib);
+  ReleaseDC(nullptr, screen);
+  return ok != FALSE;
 }
 
 LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-  if (m == WM_PAINT) {
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(h, &ps);
-    RECT rc;
-    GetClientRect(h, &rc);
-    HBRUSH bg = CreateSolidBrush(kSplashBackground);
-    FillRect(hdc, &rc, bg);
-    DeleteObject(bg);
-    SetBkMode(hdc, TRANSPARENT);
-    UINT d = GetDpiForWindow(h);
-    if (!d) d = 96;
-
-    const int markSize = MulDiv(73, d, 96);
-    HICON mark = static_cast<HICON>(
-        LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APPICON),
-                   IMAGE_ICON, markSize, markSize, LR_DEFAULTCOLOR));
-
-    const int titleHeight = MulDiv(52, d, 96);
-    const int gap = MulDiv(14, d, 96);
-    const int block = (mark ? markSize + gap : 0) + titleHeight;
-
-    int y = (rc.bottom - block) / 2 - MulDiv(14, d, 96);
-
-    if (mark) {
-      DrawIconEx(hdc, (rc.right - markSize) / 2, y, mark, markSize, markSize, 0,
-                 nullptr, DI_NORMAL);
-      DestroyIcon(mark);
-      y += markSize + gap;
-    }
-
-    HFONT title = CreateFontW(titleHeight, 0, 0, 0, FW_BOLD, FALSE, FALSE,
-                              FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                              DEFAULT_PITCH | FF_DONTCARE, SplashFace());
-    HFONT old = (HFONT)SelectObject(hdc, title);
-    SetTextColor(hdc, RGB(0xff, 0xff, 0xff));
-    RECT tr = rc;
-    tr.top = y;
-    tr.bottom = y + titleHeight;
-    DrawTextW(hdc, L"Wide", -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(hdc, old);
-    DeleteObject(title);
-
-    HFONT sub = CreateFontW(MulDiv(15, d, 96), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
-                            FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                            DEFAULT_PITCH | FF_DONTCARE, SplashFace());
-    old = (HFONT)SelectObject(hdc, sub);
-    SetTextColor(hdc, kSplashSubtle);
-    RECT sr = rc;
-    sr.top = rc.bottom - MulDiv(60, d, 96);
-    DrawTextW(hdc, L"Yükleniyor…", -1, &sr,
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(hdc, old);
-    DeleteObject(sub);
-    EndPaint(h, &ps);
-    return 0;
-  }
   return DefWindowProc(h, m, w, l);
 }
 
 void CreateSplash(HINSTANCE hi) {
-  LoadSplashFonts();
+  Gdiplus::GdiplusStartupInput startup;
+  if (Gdiplus::GdiplusStartup(&g_gdiplusToken, &startup, nullptr) !=
+      Gdiplus::Ok) {
+    g_gdiplusToken = 0;
+    return;
+  }
+
   WNDCLASSW wc = {};
   wc.lpfnWndProc = SplashProc;
   wc.hInstance = hi;
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-  wc.hbrBackground = CreateSolidBrush(kSplashBackground);
+  wc.hbrBackground = nullptr;
   wc.lpszClassName = L"WideSplash";
   RegisterClassW(&wc);
+
   UINT dpi = GetDpiForSystem();
   int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+  int size = MulDiv(219, dpi, 96);
 
-  int w = MulDiv(620, dpi, 96), h = MulDiv(344, dpi, 96);
-  g_splash = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                             L"WideSplash", L"", WS_POPUP, (sw - w) / 2,
-                             (sh - h) / 2, w, h, nullptr, nullptr, hi, nullptr);
-  BOOL dark = TRUE;
-  DwmSetWindowAttribute(g_splash,  20, &dark,
-                        sizeof(dark));
+  g_splash = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                             L"WideSplash", L"", WS_POPUP, (sw - size) / 2,
+                             (sh - size) / 2, size, size, nullptr, nullptr, hi,
+                             nullptr);
+  if (!g_splash) return;
 
-  const DWORD kCornerPreference = 33;
-  const DWORD kRound = 2;
-  DwmSetWindowAttribute(g_splash, kCornerPreference, &kRound, sizeof(kRound));
+  if (!PaintSplashLogo(g_splash, size)) {
+    DestroyWindow(g_splash);
+    g_splash = nullptr;
+    return;
+  }
 
-  ShowWindow(g_splash, SW_SHOW);
-  UpdateWindow(g_splash);
+  ShowWindow(g_splash, SW_SHOWNOACTIVATE);
 }
 
 void DestroySplash() {
@@ -1412,7 +1397,10 @@ void DestroySplash() {
     DestroyWindow(g_splash);
     g_splash = nullptr;
   }
-  UnloadSplashFonts();
+  if (g_gdiplusToken) {
+    Gdiplus::GdiplusShutdown(g_gdiplusToken);
+    g_gdiplusToken = 0;
+  }
 }
 
 void RestartSidecar(HWND hwnd) {

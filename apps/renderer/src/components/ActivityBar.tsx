@@ -4,12 +4,14 @@ import {
   Bug,
   CircleAlert,
   Folder,
+  Globe,
   Hammer,
   NotebookPen,
   Puzzle,
   Radar,
   Search,
   Send,
+  Settings,
   Terminal,
 } from "lucide-react";
 import { lazy, type ComponentType } from "react";
@@ -22,7 +24,7 @@ import { ProblemsPanel } from "@/panels/ProblemsPanel";
 import { SearchPanel } from "@/panels/SearchPanel";
 import { StructurePanel } from "@/panels/StructurePanel";
 import { ToolsPanel } from "@/panels/ToolsPanel";
-import { CATCHER_PATH, PITCHER_PATH, useEditor } from "@/stores/editor";
+import { BROWSER_PATH, CATCHER_PATH, PITCHER_PATH, SETTINGS_PATH, useEditor } from "@/stores/editor";
 import { useExtensions } from "@/stores/extensions";
 
 const BuildPanel = lazy(() => import("@/panels/BuildPanel").then((m) => ({ default: m.BuildPanel })));
@@ -146,6 +148,20 @@ const PITCHER_BUTTON: ToolButton = {
   open: () => useEditor.getState().openPitcher(),
 };
 
+const BROWSER_BUTTON: ToolButton = {
+  id: "browser",
+  label: "Browser",
+  icon: Globe,
+  open: () => useEditor.getState().openBrowser(),
+};
+
+const SETTINGS_BUTTON: ToolButton = {
+  id: "settings",
+  label: "Settings",
+  icon: Settings,
+  open: () => useEditor.getState().openSettings(),
+};
+
 function ActivityButton({
   panel,
   active,
@@ -228,6 +244,7 @@ export function ActivityBar({
       {}
       <ToolBarButton tool={CATCHER_BUTTON} active={activePath === CATCHER_PATH} />
       <ToolBarButton tool={PITCHER_BUTTON} active={activePath === PITCHER_PATH} />
+      <ToolBarButton tool={BROWSER_BUTTON} active={activePath === BROWSER_PATH} />
       {topExtension.length > 0 && <div className="my-1 h-px w-5 shrink-0 bg-line" />}
       {topExtension.map((panel) => (
         <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />
@@ -236,6 +253,7 @@ export function ActivityBar({
       {bottom.map((panel) => (
         <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />
       ))}
+      <ToolBarButton tool={SETTINGS_BUTTON} active={activePath === SETTINGS_PATH} />
     </nav>
   );
 }

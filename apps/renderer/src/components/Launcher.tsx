@@ -147,9 +147,9 @@ export function Launcher() {
           <img
             src={logo}
             alt="Wide"
-            width={44}
-            height={44}
-            className="block size-11 shrink-0 select-none"
+            width={88}
+            height={88}
+            className="block size-[88px] shrink-0 select-none"
             draggable={false}
           />
           <div className="min-w-0">

@@ -16,7 +16,8 @@
   font-display: swap;
 }
 
-:root {
+:root,
+[data-theme="default"] {
 
   --mono-1000: #232831;
   --mono-950: #292f3a;

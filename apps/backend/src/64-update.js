@@ -1,4 +1,4 @@
-const WIDE_VERSION = "0.35926";
+const WIDE_VERSION = "0.45926";
 const WIDE_REPO = "sl4de0day/wide";
 const WIDE_ASSET_RE = /Wide-Setup-.*\.exe$/i;
 

@@ -143,25 +143,23 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
       {tabs.map((tab) => (
         <div
           key={tab.path}
+          onClick={() => setActive(tab.path)}
           onContextMenu={(e) => { e.preventDefault(); setTabMenu({ path: tab.path, x: e.clientX, y: e.clientY }); }}
           onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void requestCloseTab(tab.path); } }}
           className={cn(
-            "group flex shrink-0 items-center gap-2 border-r border-line px-3 text-[12px]",
+            "group flex shrink-0 cursor-pointer items-center gap-2 border-r border-line px-3 text-[12px]",
             tab.path === activePath ? "bg-canvas text-fg-bright" : "text-fg-dim hover:bg-hover",
           )}
         >
-          <button type="button" onClick={() => setActive(tab.path)} className="truncate">
-            {
-
-}
+          <span className="truncate">
             {tab.kind === "file" ? tab.name : t(tab.name)}
-          </button>
+          </span>
           {hasCleaner && tab.kind === "file" && commentLanguageFor(tab.name) && (
             <button
               type="button"
               title={t("Remove comments")}
               aria-label={t("Remove comments from {name}", { name: tab.name })}
-              onClick={() => void clean(tab.path)}
+              onClick={(e) => { e.stopPropagation(); void clean(tab.path); }}
               className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg-bright"
             >
               <Eraser className="size-3" strokeWidth={1.75} />
@@ -177,7 +175,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
                 type="button"
                 title={command}
                 aria-label={t("Run {name}", { name: tab.name })}
-                onClick={() => void run(tab.path, command)}
+                onClick={(e) => { e.stopPropagation(); void run(tab.path, command); }}
                 className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-status-ok"
               >
                 <Play className="size-3" strokeWidth={2} fill="currentColor" />
@@ -190,7 +188,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
             aria-label={t("Close {name}", {
               name: tab.kind === "file" ? tab.name : t(tab.name),
             })}
-            onClick={() => void requestCloseTab(tab.path)}
+            onClick={(e) => { e.stopPropagation(); void requestCloseTab(tab.path); }}
             className="flex size-4 items-center justify-center rounded-sm text-fg-dim hover:bg-hover hover:text-fg"
           >
             {isDirty(tab) ? <span className="text-[16px] leading-none">•</span> : <X className="size-3" strokeWidth={2} />}

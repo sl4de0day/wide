@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { bridge, type RemoteConfig } from "@/lib/bridge";
 import { LANGUAGES, useT, type Language } from "@/lib/i18n";
-import { BASE_THEME, THEMES, type ThemeId } from "@/lib/themes";
+import { THEMES, type ThemeId } from "@/lib/themes";
 import { formatCombo, shortcutFor, useCommandPalette } from "@/stores/commands";
 import { cn } from "@/lib/utils";
 import { useEditor } from "@/stores/editor";
@@ -137,7 +137,7 @@ function ThemePicker({
         >
           <span
 
-            data-theme={theme.id === BASE_THEME ? undefined : theme.id}
+            data-theme={theme.id}
             className="flex shrink-0 overflow-hidden rounded-sm border border-line"
             aria-hidden="true"
           >

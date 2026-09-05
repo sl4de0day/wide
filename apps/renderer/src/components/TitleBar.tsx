@@ -1,12 +1,10 @@
-import { ChevronDown, Command, GitBranch, Globe, Search, Settings } from "lucide-react";
+import { ChevronDown, GitBranch } from "lucide-react";
 import type { ReactNode } from "react";
 
 import logo from "@/assets/wide-logo.png";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useCodeberg } from "@/stores/codeberg";
-import { useCommandPalette } from "@/stores/commands";
-import { useEditor } from "@/stores/editor";
 import { useExtensions } from "@/stores/extensions";
 import { useWorkspace } from "@/stores/workspace";
 
@@ -36,8 +34,7 @@ function TitleButton({
   );
 }
 
-export function TitleBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }) {
-  const openSettings = useEditor((state) => state.openSettings);
+export function TitleBar() {
   const rootName = useWorkspace((state) => state.rootName);
 
   const workflowName = useWorkspace((state) => state.workflowName);
@@ -48,7 +45,6 @@ export function TitleBar({ onOpenPanel }: { onOpenPanel: (id: string) => void })
     state.status?.repository ? (state.status.branch?.name ?? "") : "",
   );
 
-  const openBrowser = useEditor((state) => state.openBrowser);
   const openFolder = useWorkspace((state) => state.openFolder);
   const t = useT();
 
@@ -94,19 +90,6 @@ export function TitleBar({ onOpenPanel }: { onOpenPanel: (id: string) => void })
       )}
 
       <div className="flex-1" />
-
-      <TitleButton title={t("Open a web page inside Wide")} onClick={openBrowser}>
-        <Globe className="size-3.5" strokeWidth={1.5} />
-      </TitleButton>
-      <TitleButton title={t("Command palette — every action (Ctrl+Shift+P)")} onClick={() => useCommandPalette.getState().openPalette()}>
-        <Command className="size-3.5" strokeWidth={1.5} />
-      </TitleButton>
-      <TitleButton title={t("Search in project (Ctrl+Shift+F)")} onClick={() => onOpenPanel("search")}>
-        <Search className="size-3.5" strokeWidth={1.5} />
-      </TitleButton>
-      <TitleButton title={t("Settings")} onClick={openSettings}>
-        <Settings className="size-3.5" strokeWidth={1.5} />
-      </TitleButton>
     </header>
   );
 }

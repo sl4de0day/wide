@@ -154,16 +154,9 @@ function addSecurityFindingsForActiveFile(): number {
 }
 
 function BootGate() {
-  const installing = useUpdate((state) => state.installing);
-  const t = useT();
-  const label = installing === "idle" ? t("Checking for updates…") : t("Updating Wide…");
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5" style={{ background: "#3b4252" }}>
-      <img src={logo} alt="Wide" width={72} height={72} className="size-[72px] select-none" draggable={false} />
-      <div className="flex items-center gap-2.5" style={{ color: "#9aa6bd" }}>
-        <span className="size-4 animate-spin rounded-full border-2" style={{ borderColor: "#9aa6bd", borderTopColor: "transparent" }} />
-        <span className="text-[12px]">{label}</span>
-      </div>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: "#3b4252" }}>
+      <img src={logo} alt="Wide" width={216} height={216} className="size-[216px] select-none animate-pulse" draggable={false} />
     </div>
   );
 }
@@ -586,7 +579,7 @@ export default function App() {
     <div className="relative flex h-full flex-col bg-canvas">
       <RemoteFallbackNotice />
       <SssfDegradedNotice />
-      <TitleBar onOpenPanel={openPanel} />
+      <TitleBar />
       <div className="flex min-h-0 flex-1">
         <ActivityBar isActive={isActive} onSelect={togglePanel} />
         {activeSide && <SidePanel>{panelsFor("top", activeSide)}</SidePanel>}
