@@ -2,6 +2,7 @@ import { marked } from "marked";
 import { useEffect, useMemo, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
+import { useT } from "@/lib/i18n";
 import { useEditor } from "@/stores/editor";
 
 const STYLE = `
@@ -21,6 +22,7 @@ a{color:#0969da}
 `;
 
 export function MarkdownPreview({ sourcePath }: { sourcePath: string }) {
+  const t = useT();
   const liveContent = useEditor((state) => {
     const tab = state.tabs.find((t) => t.path === sourcePath && t.kind === "file");
     return tab && tab.kind === "file" ? tab.content : null;
@@ -49,5 +51,5 @@ export function MarkdownPreview({ sourcePath }: { sourcePath: string }) {
     return `<!doctype html><html><head><meta charset="utf-8"><style>${STYLE}</style></head><body>${html}</body></html>`;
   }, [liveContent, diskContent]);
 
-  return <iframe title="Markdown preview" sandbox="" srcDoc={doc} className="h-full w-full border-0 bg-canvas" />;
+  return <iframe title={t("Markdown preview")} sandbox="" srcDoc={doc} className="h-full w-full border-0 bg-canvas" />;
 }

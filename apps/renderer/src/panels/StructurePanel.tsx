@@ -1,11 +1,11 @@
 import { Braces, FunctionSquare, Hash, Variable, type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
 import { bridge, type OutlineNode } from "@/lib/bridge";
 import { languageInstalled } from "@/editor/languages";
 import { useT } from "@/lib/i18n";
-import { extname } from "@/lib/utils";
+import { cn, extname } from "@/lib/utils";
 import { useActiveTab, useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
 
@@ -198,6 +198,13 @@ function flattenOutline(nodes: OutlineNode[], depth = 0): { node: OutlineNode; d
   return rows;
 }
 
+function offsetOf(content: string, line: number, column: number): number {
+  const lines = content.split("\n");
+  let offset = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i += 1) offset += lines[i].length + 1;
+  return offset + Math.max(0, column - 1);
+}
+
 export function StructurePanel() {
   const tab = useActiveTab();
   const root = useWorkspace((state) => state.root);
@@ -239,32 +246,71 @@ export function StructurePanel() {
     };
   }, [file?.path, file?.content, ext, root]);
 
+  const cursor = useEditor((state) => state.cursor);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+
   const regexSymbols = useMemo(
     () => (file && nodes === null ? outline(file.content, ext) : []),
     [file?.path, file?.content, ext, nodes === null],
   );
 
-  const rows = nodes ? flattenOutline(nodes) : [];
-  const isEmpty = nodes ? rows.length === 0 : regexSymbols.length === 0;
+  const cursorOffset = useMemo(() => (file ? offsetOf(file.content, cursor.line, cursor.column) : 0), [file?.content, cursor.line, cursor.column]);
+
+  const allRows = useMemo(() => (nodes ? flattenOutline(nodes) : []), [nodes]);
+  const rows = q ? allRows.filter((r) => r.node.name.toLowerCase().includes(q)) : allRows;
+  const syms = q ? regexSymbols.filter((s) => s.name.toLowerCase().includes(q)) : regexSymbols;
+
+  const activeNodeOffset = useMemo(() => {
+    let best = -1;
+    for (const { node } of rows) if (node.offset <= cursorOffset && node.offset > best) best = node.offset;
+    return best;
+  }, [rows, cursorOffset]);
+  const activeLine = useMemo(() => {
+    let best = -1;
+    for (const s of syms) if (s.line <= cursor.line && s.line > best) best = s.line;
+    return best;
+  }, [syms, cursor.line]);
+
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeNodeOffset, activeLine]);
+
+  const isEmpty = nodes ? rows.length === 0 : syms.length === 0;
+  const hasSymbols = nodes ? allRows.length > 0 : regexSymbols.length > 0;
 
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t("Structure")} />
+      {file && hasSymbols && (
+        <div className="shrink-0 border-b border-line px-2 py-1.5">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("Filter symbols…")}
+            spellCheck={false}
+            className="w-full rounded-sm border border-line bg-panel px-2 py-1 text-[12px] text-fg outline-none transition-colors duration-100 focus:border-accent placeholder:text-fg-faint"
+          />
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto py-1">
         {!file ? (
           <p className="px-3 py-3 text-[12px] text-fg-faint">{t("Open a file to see its outline.")}</p>
         ) : isEmpty ? (
-          <p className="px-3 py-3 text-[12px] text-fg-faint">{t("Nothing to outline in this file.")}</p>
+          <p className="px-3 py-3 text-[12px] text-fg-faint">{hasSymbols ? t("No symbols match the filter.") : t("Nothing to outline in this file.")}</p>
         ) : nodes ? (
           rows.map(({ node, depth }, index) => {
             const Icon = outlineIcon(node.kind);
+            const active = node.offset === activeNodeOffset;
             return (
               <button
                 key={`${node.name}-${node.offset}-${index}`}
+                ref={active ? activeRef : undefined}
                 type="button"
                 onClick={() => void revealOffset(file.path, node.offset)}
                 title={node.name}
-                className="flex w-full items-center gap-2 px-3 text-left text-[12px] text-fg transition-colors duration-100 hover:bg-hover"
+                className={cn("flex w-full items-center gap-2 px-3 text-left text-[12px] transition-colors duration-100 hover:bg-hover", active ? "bg-selected text-fg-bright" : "text-fg")}
                 style={{ height: "var(--h-row)", paddingLeft: `${12 + depth * 14}px` }}
               >
                 <Icon className="size-3 shrink-0 text-fg-dim" strokeWidth={1.5} />
@@ -273,14 +319,16 @@ export function StructurePanel() {
             );
           })
         ) : (
-          regexSymbols.map((symbol, index) => {
+          syms.map((symbol, index) => {
             const Icon = ICONS[symbol.kind];
+            const active = symbol.line === activeLine;
             return (
               <button
                 key={`${symbol.name}-${symbol.line}-${index}`}
+                ref={active ? activeRef : undefined}
                 type="button"
                 onClick={() => void revealAt(file.path, symbol.line)}
-                className="flex w-full items-center gap-2 px-3 text-left text-[12px] text-fg transition-colors duration-100 hover:bg-hover"
+                className={cn("flex w-full items-center gap-2 px-3 text-left text-[12px] transition-colors duration-100 hover:bg-hover", active ? "bg-selected text-fg-bright" : "text-fg")}
                 style={{ height: "var(--h-row)" }}
               >
                 <Icon className="size-3 shrink-0 text-fg-dim" strokeWidth={1.5} />

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { bridge, type RemoteProfile } from "@/lib/bridge";
+import { bridge, type DockerContainer, type RemoteProfile } from "@/lib/bridge";
 
 const ACTIVE_KEY = "wide.remote.active";
 
@@ -25,18 +25,26 @@ interface RemoteState {
   profiles: RemoteProfile[];
   activeId: string | null;
   loaded: boolean;
+  containers: DockerContainer[];
+  activeContainer: string | null;
+  dockerError: string | null;
 
   load(): Promise<void>;
   save(profile: Partial<RemoteProfile>): Promise<RemoteProfile | null>;
   remove(id: string): Promise<void>;
   setActive(id: string | null): void;
   activeProfile(): RemoteProfile | null;
+  loadContainers(): Promise<void>;
+  setActiveContainer(id: string | null): void;
 }
 
 export const useRemote = create<RemoteState>((set, get) => ({
   profiles: [],
   activeId: readActive(),
   loaded: false,
+  containers: [],
+  activeContainer: null,
+  dockerError: null,
 
   load: async () => {
     const reply = await bridge.remoteList();
@@ -67,11 +75,22 @@ export const useRemote = create<RemoteState>((set, get) => ({
 
   setActive: (id) => {
     writeActive(id);
-    set({ activeId: id });
+    set({ activeId: id, activeContainer: id ? null : get().activeContainer });
   },
 
   activeProfile: () => {
     const { profiles, activeId } = get();
     return profiles.find((p) => p.id === activeId) ?? null;
+  },
+
+  loadContainers: async () => {
+    const reply = await bridge.dockerList();
+    if (reply.ok) set({ containers: reply.containers ?? [], dockerError: null });
+    else set({ containers: [], dockerError: reply.error ?? "Docker is not available." });
+  },
+
+  setActiveContainer: (id) => {
+    set({ activeContainer: id, activeId: id ? null : get().activeId });
+    if (id) writeActive(null);
   },
 }));

@@ -96,7 +96,53 @@ function runSsh(profile, remoteCommand, options) {
   });
 }
 
+function runDocker(args, options) {
+  const opts = options || {};
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = node_child_process.spawn("docker", args, { windowsHide: true });
+    } catch (error) {
+      resolve({ code: -1, stdout: "", stderr: String((error && error.message) || error) });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      resolve({ code: -1, stdout, stderr: stderr || "The docker command timed out." });
+    }, opts.timeout || 20000);
+    child.stdout.on("data", (c) => { if (stdout.length < 4 * 1024 * 1024) stdout += c.toString("utf8"); });
+    child.stderr.on("data", (c) => { if (stderr.length < 65536) stderr += c.toString("utf8"); });
+    child.on("error", (error) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ code: -1, stdout, stderr: String((error && error.message) || error) }); } });
+    child.on("close", (code) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ code: code == null ? -1 : code, stdout, stderr }); } });
+    if (typeof opts.input === "string") { try { child.stdin.end(opts.input); } catch {} } else { try { child.stdin.end(); } catch {} }
+  });
+}
+
 function registerRemoteHandlers() {
+  electron.ipcMain.handle("docker:list", async () => {
+    const result = await runDocker(["ps", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}"], { timeout: 15000 });
+    if (result.code !== 0) {
+      return { ok: false, error: /ENOENT|not recognized|not found/i.test(result.stderr) ? "Docker is not installed or not on PATH." : (result.stderr || "docker ps failed.").trim() };
+    }
+    const containers = [];
+    for (const line of result.stdout.split("\n")) {
+      const parts = line.replace(/\r$/, "").split("\t");
+      if (parts.length >= 3 && parts[0]) containers.push({ id: parts[0], name: parts[1] || parts[0], image: parts[2] || "", status: parts[3] || "" });
+    }
+    return { ok: true, containers };
+  });
+
+  electron.ipcMain.handle("docker:exec", async (_event, id, command) => {
+    if (typeof id !== "string" || !id || typeof command !== "string" || !command) return { ok: false, error: "No container command." };
+    const result = await runDocker(["exec", id, "sh", "-c", command], { timeout: 60000 });
+    return { ok: result.code === 0, code: result.code, stdout: result.stdout, stderr: result.stderr };
+  });
+
   electron.ipcMain.handle("remote:list", async () => {
     return { ok: true, profiles: (await readRemoteProfiles()).map(normalizeRemoteProfile).filter(Boolean) };
   });
@@ -157,6 +203,49 @@ function registerRemoteHandlers() {
     const result = await runSsh(profile, `cat -- ${remoteShellQuote(filePath)}`, { timeout: 30000, batch: true });
     if (result.code !== 0) return { ok: false, error: (result.stderr || "Could not read that file.").trim() };
     return { ok: true, content: result.stdout };
+  });
+
+  electron.ipcMain.handle("remote:mkdir", async (_event, input, dir) => {
+    const profile = normalizeRemoteProfile(input);
+    if (!profile || typeof dir !== "string" || !dir) return { ok: false, error: "No directory path." };
+    const result = await runSsh(profile, `mkdir -p -- ${remoteShellQuote(dir)}`, { timeout: 20000, batch: true });
+    return result.code === 0 ? { ok: true } : { ok: false, error: (result.stderr || "Could not create the directory.").trim() };
+  });
+
+  electron.ipcMain.handle("remote:newFile", async (_event, input, filePath) => {
+    const profile = normalizeRemoteProfile(input);
+    if (!profile || typeof filePath !== "string" || !filePath) return { ok: false, error: "No file path." };
+    const q = remoteShellQuote(filePath);
+    const result = await runSsh(profile, `if [ -e ${q} ]; then echo exists 1>&2; exit 1; else : > ${q}; fi`, { timeout: 20000, batch: true });
+    return result.code === 0 ? { ok: true } : { ok: false, error: (result.stderr || "Could not create the file.").trim() };
+  });
+
+  electron.ipcMain.handle("remote:delete", async (_event, input, target) => {
+    const profile = normalizeRemoteProfile(input);
+    if (!profile || typeof target !== "string" || !target) return { ok: false, error: "No path." };
+    const result = await runSsh(profile, `rm -rf -- ${remoteShellQuote(target)}`, { timeout: 20000, batch: true });
+    return result.code === 0 ? { ok: true } : { ok: false, error: (result.stderr || "Could not delete that path.").trim() };
+  });
+
+  electron.ipcMain.handle("remote:rename", async (_event, input, from, to) => {
+    const profile = normalizeRemoteProfile(input);
+    if (!profile || typeof from !== "string" || typeof to !== "string" || !from || !to) return { ok: false, error: "No paths." };
+    const result = await runSsh(profile, `mv -- ${remoteShellQuote(from)} ${remoteShellQuote(to)}`, { timeout: 20000, batch: true });
+    return result.code === 0 ? { ok: true } : { ok: false, error: (result.stderr || "Could not rename that path.").trim() };
+  });
+
+  electron.ipcMain.handle("remote:grep", async (_event, input, dir, query) => {
+    const profile = normalizeRemoteProfile(input);
+    if (!profile || typeof query !== "string" || !query.trim()) return { ok: false, error: "No search text." };
+    const where = typeof dir === "string" && dir ? dir : profile.cwd || ".";
+    const cmd = `grep -rIni --binary-files=without-match -e ${remoteShellQuote(query)} -- ${remoteShellQuote(where)} 2>/dev/null | head -n 500`;
+    const result = await runSsh(profile, cmd, { timeout: 30000, batch: true });
+    const matches = [];
+    for (const line of result.stdout.split("\n")) {
+      const m = /^(.+?):(\d+):(.*)$/.exec(line.replace(/\r$/, ""));
+      if (m) matches.push({ file: m[1], line: Number(m[2]), text: m[3].slice(0, 400) });
+    }
+    return { ok: true, matches };
   });
 
   electron.ipcMain.handle("remote:writeFile", async (_event, input, filePath, content) => {

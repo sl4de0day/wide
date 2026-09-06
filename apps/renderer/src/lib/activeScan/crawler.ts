@@ -7,6 +7,14 @@ export interface CrawlOptions {
   signal?: { cancelled: boolean };
   onFound?: (requestText: string, url: string) => void;
   onProgress?: (visited: number, queued: number) => void;
+  sessionHeaders?: [string, string][];
+}
+
+function mergeSession(headers: [string, string][], session: [string, string][]): [string, string][] {
+  if (!session.length) return headers;
+  const used = new Set(session.map(([k]) => k.toLowerCase()));
+  const kept = headers.filter(([k]) => !used.has(k.toLowerCase()));
+  return [...kept, ...session];
 }
 
 const LINK_RE = /(?:href|src|action)\s*=\s*["']([^"'#]+)["']/gi;
@@ -128,6 +136,7 @@ export async function crawl(seedUrl: string, opts: CrawlOptions = {}): Promise<s
     if (depth >= maxDepth) continue;
     const req = parseHttpMessage(getRequestText(url));
     if (!req) continue;
+    req.headers = mergeSession(req.headers, opts.sessionHeaders ?? []);
     let reply;
     try {
       reply = await bridge.proxyReplay(req, { followRedirects: true });

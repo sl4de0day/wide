@@ -147,7 +147,7 @@ function Setup({
   );
 }
 
-export function CodebergPanel() {
+export function CodebergPanel({ builtin }: { builtin?: boolean; onOpenPanel?: (id: string) => void } = {}) {
   const t = useT();
   const root = useWorkspace((state) => state.root);
   const status = useCodeberg((state) => state.status);
@@ -188,7 +188,7 @@ export function CodebergPanel() {
   const act = useCodeberg.getState;
 
   const header = (
-    <PanelHeader title={provider.name}>
+    <PanelHeader title={builtin ? t("Source Control") : provider.name}>
       <span className="flex-1" />
       <button
         type="button"

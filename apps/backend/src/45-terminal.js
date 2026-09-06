@@ -64,8 +64,14 @@ function registerTerminalHandlers() {
     if (!nodePty) return { error: "The terminal is not available here (no pty for this platform)." };
     const requested = options?.cwd || process.cwd();
     let file, args, shellCwd, label;
+    const container = options?.container;
     const remote = options?.remote;
-    if (remote && typeof remote.host === "string" && remote.host) {
+    if (container && typeof container.id === "string" && container.id) {
+      file = "docker";
+      args = ["exec", "-it", container.id, container.shell || "sh"];
+      shellCwd = undefined;
+      label = `docker ${container.name || container.id}`;
+    } else if (remote && typeof remote.host === "string" && remote.host) {
       const sargs = [];
       if (remote.port && Number(remote.port) !== 22) sargs.push("-p", String(remote.port));
       if (remote.keyPath) sargs.push("-i", remote.keyPath);

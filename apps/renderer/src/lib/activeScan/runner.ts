@@ -31,12 +31,44 @@ export interface ScanControls {
   onProgress?: (done: number, total: number) => void;
   onIssue?: (issue: ScanIssue) => void;
   signal?: { cancelled: boolean };
+  sessionHeaders?: [string, string][];
+}
+
+export function applySessionHeaders(requestText: string, session: [string, string][]): string {
+  if (!session.length) return requestText;
+  const nl = requestText.includes("\r\n") ? "\r\n" : "\n";
+  const parts = requestText.split(/\r?\n/);
+  let sep = parts.length;
+  for (let i = 1; i < parts.length; i += 1) {
+    if (parts[i].trim() === "") {
+      sep = i;
+      break;
+    }
+  }
+  const headerLines = parts.slice(1, sep);
+  const rest = parts.slice(sep);
+  const wanted = new Map(session.map(([k, v]) => [k.toLowerCase(), v]));
+  const used = new Set<string>();
+  const out: string[] = [];
+  for (const line of headerLines) {
+    const m = /^([^:]+):/.exec(line);
+    const key = m ? m[1].trim().toLowerCase() : "";
+    if (key && wanted.has(key)) {
+      out.push(`${m![1].trim()}: ${wanted.get(key)}`);
+      used.add(key);
+    } else {
+      out.push(line);
+    }
+  }
+  for (const [k, v] of session) if (!used.has(k.toLowerCase())) out.push(`${k}: ${v}`);
+  return [parts[0], ...out, ...rest].join(nl);
 }
 
 let issueSeq = 0;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function runScan(requestText: string, controls: ScanControls = {}, oast?: OastHook): Promise<ScanIssue[]> {
+export async function runScan(rawRequest: string, controls: ScanControls = {}, oast?: OastHook): Promise<ScanIssue[]> {
+  const requestText = applySessionHeaders(rawRequest, controls.sessionHeaders ?? []);
   const base = parseHttpMessage(requestText);
   if (!base) return [];
   const points = enumerateInsertionPoints(requestText);

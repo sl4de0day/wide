@@ -47,6 +47,11 @@ function startWebtoolsServer() {
         return;
       }
       const mime = MIME[node_path.extname(file).toLowerCase()] || "application/octet-stream";
+      if (node_path.extname(file).toLowerCase() === ".html" && /cyberchef/i.test(file)) {
+        const seed = '<script data-wide-cc-theme="1">try{var o=JSON.parse(localStorage.getItem("options")||"{}")||{};if(!o.theme){o.theme="dark";localStorage.setItem("options",JSON.stringify(o));}document.documentElement.className=o.theme;}catch(e){}</script>';
+        const html = data.toString("utf8");
+        if (/<head(\s[^>]*)?>/i.test(html)) data = Buffer.from(html.replace(/<head(\s[^>]*)?>/i, (m) => m + seed), "utf8");
+      }
       response.writeHead(200, { "Content-Type": mime, "Cache-Control": "no-store" });
       response.end(data);
     });

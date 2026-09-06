@@ -3,10 +3,11 @@ import type { PitcherRequest } from "@/stores/pitcher";
 
 import { resolveVars } from "./vars";
 
-export type CodeLang = "curl" | "fetch" | "axios" | "python" | "go";
+export type CodeLang = "curl" | "powershell" | "fetch" | "axios" | "python" | "go";
 
 export const CODE_LANGS: { id: CodeLang; label: string }[] = [
   { id: "curl", label: "cURL" },
+  { id: "powershell", label: "PowerShell" },
   { id: "fetch", label: "JavaScript · fetch" },
   { id: "axios", label: "JavaScript · axios" },
   { id: "python", label: "Python · requests" },
@@ -78,6 +79,22 @@ function toCurl(e: Effective): string {
   return lines.join(" \\\n");
 }
 
+const psq = (s: string) => `'${s.replace(/'/g, "''")}'`;
+
+function toPowerShell(e: Effective): string {
+  let out = "";
+  if (e.headers.length) out += `$headers = @{\n${e.headers.map(([k, v]) => `  ${psq(k)} = ${psq(v)}`).join("\n")}\n}\n`;
+  if (e.body) out += `$body = ${psq(e.body)}\n`;
+  const headerArg = e.headers.length ? " -Headers $headers" : "";
+  const bodyArg = e.body ? " -Body $body" : "";
+  out += `$response = Invoke-RestMethod -Method ${e.method} -Uri ${psq(e.url)}${headerArg}${bodyArg}\n$response`;
+  return out;
+}
+
+export function curlFromParts(method: string, url: string, headers: [string, string][], body: string): string {
+  return toCurl({ method: (method || "GET").toUpperCase(), url, headers: headers.filter(([k]) => k), body: body || null });
+}
+
 function toFetch(e: Effective): string {
   const headers = e.headers.length ? `\n  headers: ${JSON.stringify(Object.fromEntries(e.headers), null, 2).replace(/\n/g, "\n  ")},` : "";
   const body = e.body ? `\n  body: ${dq(e.body)},` : "";
@@ -108,6 +125,8 @@ export function generateCode(req: PitcherRequest, vars: Record<string, string>, 
   switch (lang) {
     case "curl":
       return toCurl(e);
+    case "powershell":
+      return toPowerShell(e);
     case "fetch":
       return toFetch(e);
     case "axios":

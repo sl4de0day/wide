@@ -82,6 +82,8 @@ electron.app.whenReady().then(async () => {
   registerTsHandlers();
   registerProjectHandlers();
   registerTerminalHandlers();
+  registerTestHandlers();
+  registerOsvHandlers();
   registerEngineHandlers();
   registerHttpHandlers();
   registerFormatHandlers();

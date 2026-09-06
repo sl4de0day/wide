@@ -38,3 +38,107 @@ const OSV_SNAPSHOT = {
     { name: "github.com/gin-gonic/gin", lt: "1.9.1", id: "CVE-2023-29401", cwe: "CWE-494", sev: "medium", note: "unsafe filename handling in Context.FileAttachment" },
   ],
 };
+
+function osvFilePath(root) {
+  return node_path.join(root, ".wide", "osv.json");
+}
+
+function osvCountEntries(doc) {
+  if (!doc || typeof doc !== "object") return 0;
+  if (Array.isArray(doc)) return doc.length;
+  if (Array.isArray(doc.entries)) return doc.entries.length;
+  if (Array.isArray(doc.vulns)) return doc.vulns.length;
+  let n = 0;
+  for (const eco of ["npm", "pip", "maven", "go"]) if (Array.isArray(doc[eco])) n += doc[eco].length;
+  return n;
+}
+
+function osvCollectFromScanner(doc) {
+  const out = [];
+  const results = doc && Array.isArray(doc.results) ? doc.results : [];
+  for (const result of results) {
+    const packages = result && Array.isArray(result.packages) ? result.packages : [];
+    for (const pkg of packages) {
+      const vulns = pkg && Array.isArray(pkg.vulnerabilities) ? pkg.vulnerabilities : [];
+      for (const vuln of vulns) if (vuln && typeof vuln === "object") out.push(vuln);
+    }
+  }
+  return out;
+}
+
+function osvCollectFromAny(doc) {
+  if (Array.isArray(doc)) return doc;
+  if (doc && Array.isArray(doc.results)) return osvCollectFromScanner(doc);
+  if (doc && Array.isArray(doc.entries)) return doc.entries;
+  if (doc && Array.isArray(doc.vulns)) return doc.vulns;
+  return [];
+}
+
+function runOsvScanner(root) {
+  return new Promise((resolve) => {
+    const win = process.platform === "win32";
+    const args = ["--format", "json", "-r", "."];
+    let child;
+    try {
+      if (win) {
+        child = node_child_process.spawn(["osv-scanner", ...args].join(" "), { cwd: root, shell: true, windowsHide: true });
+      } else {
+        child = node_child_process.spawn("osv-scanner", args, { cwd: root, windowsHide: true });
+      }
+    } catch (error) {
+      resolve({ output: "", error: String((error && error.message) || error) });
+      return;
+    }
+    let output = "";
+    let err = "";
+    child.stdout.on("data", (c) => { if (output.length < 8 * 1024 * 1024) output += c.toString("utf8"); });
+    child.stderr.on("data", (c) => { if (err.length < 65536) err += c.toString("utf8"); });
+    child.on("error", (error) => resolve({ output, error: String((error && error.message) || error) }));
+    child.on("close", () => resolve({ output, error: err }));
+  });
+}
+
+function registerOsvHandlers() {
+  electron.ipcMain.handle("osv:info", async (_event, root) => {
+    if (!root || typeof root !== "string") return { ok: false };
+    try {
+      const raw = await promises.readFile(osvFilePath(root), "utf8");
+      const doc = JSON.parse(raw);
+      let updatedAt = doc && doc.updatedAt ? doc.updatedAt : null;
+      if (!updatedAt) {
+        const stat = await promises.stat(osvFilePath(root));
+        updatedAt = new Date(stat.mtimeMs).toISOString();
+      }
+      return { ok: true, exists: true, updatedAt, count: osvCountEntries(doc) };
+    } catch {
+      return { ok: true, exists: false };
+    }
+  });
+
+  electron.ipcMain.handle("osv:refresh", async (_event, root, dumpPath) => {
+    if (!root || typeof root !== "string") return { ok: false, error: "No project." };
+    let entries = [];
+    if (dumpPath && typeof dumpPath === "string") {
+      try {
+        entries = osvCollectFromAny(JSON.parse(await promises.readFile(dumpPath, "utf8")));
+      } catch {
+        return { ok: false, error: "That OSV dump could not be read." };
+      }
+    } else {
+      const res = await runOsvScanner(root);
+      try {
+        entries = osvCollectFromScanner(JSON.parse(res.output));
+      } catch {
+        return { ok: false, error: res.error && /ENOENT|not recognized|not found/i.test(res.error) ? "osv-scanner is not installed or not on PATH." : "osv-scanner produced no readable JSON." };
+      }
+    }
+    const doc = { tool: "osv-scanner", updatedAt: new Date().toISOString(), entries };
+    try {
+      await promises.mkdir(node_path.join(root, ".wide"), { recursive: true });
+      await promises.writeFile(osvFilePath(root), JSON.stringify(doc, null, 2), "utf8");
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+    return { ok: true, count: entries.length };
+  });
+}

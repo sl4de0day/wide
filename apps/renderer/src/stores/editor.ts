@@ -20,6 +20,19 @@ export const CYBERCHEF_PATH = "wide://cyberchef";
 
 export const MD_PREVIEW_PATH = "wide://mdpreview/";
 
+export const REMOTE_PATH = "wide://remote/";
+
+export function remoteTabPath(profileId: string, remotePath: string): string {
+  return REMOTE_PATH + profileId + (remotePath.startsWith("/") ? remotePath : "/" + remotePath);
+}
+
+export function parseRemoteTab(path: string): { id: string; remotePath: string } {
+  const rest = path.slice(REMOTE_PATH.length);
+  const cut = rest.indexOf("/");
+  if (cut === -1) return { id: rest, remotePath: "/" };
+  return { id: rest.slice(0, cut), remotePath: rest.slice(cut) };
+}
+
 export const EXTENSION_PATH = "wide://extension/";
 
 export const AI_CHAT_PATH = "wide://ai/";
@@ -200,6 +213,30 @@ export const useEditor = create<EditorState>((set, get) => ({
     const existing = get().tabs.find((tab) => tab.path === path);
     if (existing) {
       set({ activePath: path, lastFilePath: path });
+      return true;
+    }
+    if (path.startsWith(REMOTE_PATH)) {
+      const { id, remotePath } = parseRemoteTab(path);
+      const { useRemote } = await import("./remote");
+      const profile = useRemote.getState().profiles.find((p) => p.id === id);
+      if (!profile) return false;
+      const reply = await bridge.remoteReadFile(profile, remotePath);
+      if (!reply.ok) {
+        const { toast } = await import("./toast");
+        toast.error(reply.error ? t(reply.error) : t("Could not read the remote file."));
+        return false;
+      }
+      const content = reply.content ?? "";
+      const tab: FileTab = {
+        kind: "file",
+        path,
+        name: basename(remotePath),
+        content,
+        savedContent: content,
+        tooLarge: false,
+        size: content.length,
+      };
+      set((state) => ({ tabs: [...state.tabs, tab], activePath: path, lastFilePath: path }));
       return true;
     }
     const media = mediaTypeFor(path);
@@ -477,6 +514,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     ),
 
   reloadFromDisk: async (path) => {
+    if (path.startsWith(REMOTE_PATH)) return;
     if (!get().tabs.some((tab) => tab.path === path)) return;
     try {
       const file = await bridge.readFile(path);
@@ -494,7 +532,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   checkDiskChanges: async () => {
-    const files = get().tabs.filter((tab): tab is FileTab => tab.kind === "file" && !tab.tooLarge);
+    const files = get().tabs.filter((tab): tab is FileTab => tab.kind === "file" && !tab.tooLarge && !tab.path.startsWith(REMOTE_PATH));
     if (files.length === 0) return;
     let warned = false;
     for (const tab of files) {
@@ -519,7 +557,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
     if (warned) {
       const { toast } = await import("./toast");
-      toast.error("A file open in the editor changed on disk. Your unsaved version is kept — reload it to take the disk copy.");
+      toast.error(t("A file open in the editor changed on disk. Your unsaved version is kept — reload it to take the disk copy."));
     }
   },
 
@@ -577,6 +615,28 @@ export const useEditor = create<EditorState>((set, get) => ({
     const tab = tabs.find((item) => item.path === activePath);
     if (!tab || tab.kind !== "file" || tab.content === tab.savedContent) return;
 
+    if (tab.path.startsWith(REMOTE_PATH)) {
+      const { id, remotePath } = parseRemoteTab(tab.path);
+      const { useRemote } = await import("./remote");
+      const { toast } = await import("./toast");
+      const profile = useRemote.getState().profiles.find((p) => p.id === id);
+      if (!profile) {
+        toast.error(t("That remote host is no longer configured."));
+        return;
+      }
+      const reply = await bridge.remoteWriteFile(profile, remotePath, tab.content);
+      if (reply.ok) {
+        set((state) => ({
+          tabs: state.tabs.map((item) =>
+            item.path === tab.path && item.kind === "file" ? { ...item, savedContent: tab.content } : item,
+          ),
+        }));
+      } else {
+        toast.error(reply.error ? t(reply.error) : t("Could not save the remote file."));
+      }
+      return;
+    }
+
     const { useSettings } = await import("./settings");
     if (useSettings.getState().formatOnSave) {
       const formatted = await get().formatActive();
@@ -590,9 +650,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (live && live.kind === "file" && live.diskChanged) {
       const { confirm } = await import("./confirm");
       const ok = await confirm({
-        title: "This file changed on disk",
-        message: "Saving will overwrite the newer copy on disk with your version. Overwrite it?",
-        confirmLabel: "Overwrite",
+        title: t("This file changed on disk"),
+        message: t("Saving will overwrite the newer copy on disk with your version. Overwrite it?"),
+        confirmLabel: t("Overwrite"),
         danger: true,
       });
       if (!ok) return;

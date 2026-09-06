@@ -518,7 +518,7 @@ export function IntruderView() {
                   </button>
                   {PRESETS.map((preset) => (
                     <button key={preset.label} type="button" onClick={() => setWordlistAt(i, preset.make())} className="rounded-sm border border-line px-1 py-0.5 text-[9px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-                      {preset.label}
+                      {t(preset.label)}
                     </button>
                   ))}
                 </div>

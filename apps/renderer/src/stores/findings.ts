@@ -210,3 +210,91 @@ export function findingsReport(findings: Finding[]): string {
   }
   return lines.join("\n");
 }
+
+export function findingsReportJson(findings: Finding[]): string {
+  const items = findings.map((f) => ({ title: f.title, severity: f.severity, location: f.location, detail: f.detail, status: f.status ?? "open" }));
+  return JSON.stringify({ tool: "Wide", version: 1, exportedAt: new Date().toISOString(), findings: items }, null, 2);
+}
+
+type ImportedFinding = Omit<Finding, "id" | "at">;
+
+const SARIF_SEVERITY: Record<string, Severity> = { error: "high", warning: "medium", note: "info", none: "info" };
+const SCAN_SEVERITY: Record<string, Severity> = { error: "high", warning: "medium", info: "info" };
+
+function coerceSeverity(value: unknown): Severity {
+  const s = String(value ?? "").toLowerCase();
+  if ((SEVERITIES as string[]).includes(s)) return s as Severity;
+  if (s in SARIF_SEVERITY) return SARIF_SEVERITY[s];
+  return "info";
+}
+
+function fromSarif(doc: { runs?: unknown[] }): ImportedFinding[] {
+  const out: ImportedFinding[] = [];
+  for (const run of Array.isArray(doc.runs) ? doc.runs : []) {
+    const results = (run as { results?: unknown[] })?.results;
+    for (const raw of Array.isArray(results) ? results : []) {
+      const r = raw as {
+        ruleId?: string;
+        level?: string;
+        message?: { text?: string };
+        locations?: { physicalLocation?: { artifactLocation?: { uri?: string }; region?: { startLine?: number } } }[];
+      };
+      const loc = r.locations?.[0]?.physicalLocation;
+      const uri = loc?.artifactLocation?.uri ?? "";
+      const line = loc?.region?.startLine;
+      out.push({
+        title: r.ruleId || (r.message?.text ?? "Imported finding").slice(0, 80),
+        severity: SARIF_SEVERITY[String(r.level ?? "warning").toLowerCase()] ?? "medium",
+        location: uri ? `${uri}${line ? `:${line}` : ""}` : "",
+        detail: r.message?.text ?? "",
+        status: "open",
+      });
+    }
+  }
+  return out;
+}
+
+function fromWideFinding(f: Record<string, unknown>): ImportedFinding {
+  const scanSev = typeof f.severity === "string" && f.severity in SCAN_SEVERITY && !(SEVERITIES as string[]).includes(f.severity)
+    ? SCAN_SEVERITY[f.severity]
+    : coerceSeverity(f.severity);
+  const location = typeof f.location === "string" ? f.location : f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "";
+  return {
+    title: String(f.title || f.ruleId || f.message || "Imported finding").slice(0, 200),
+    severity: scanSev,
+    location,
+    detail: String(f.detail ?? f.message ?? ""),
+    status: typeof f.status === "string" && (FINDING_STATUSES as string[]).includes(f.status) ? (f.status as FindingStatus) : "open",
+  };
+}
+
+export function parseImportedFindings(text: string): ImportedFinding[] {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (doc && typeof doc === "object" && Array.isArray((doc as { runs?: unknown[] }).runs)) return fromSarif(doc as { runs?: unknown[] });
+  const list = Array.isArray(doc)
+    ? doc
+    : Array.isArray((doc as { findings?: unknown[] })?.findings)
+      ? (doc as { findings: unknown[] }).findings
+      : Array.isArray((doc as { results?: unknown[] })?.results)
+        ? (doc as { results: unknown[] }).results
+        : [];
+  return list.filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === "object").map(fromWideFinding);
+}
+
+const fingerprint = (f: { title: string; location: string; severity: Severity }): string => `${f.severity}|${f.title}|${f.location}`;
+
+export function diffFindings(current: Finding[], incoming: ImportedFinding[]): { added: number; resolved: number; common: number } {
+  const cur = new Set(current.map(fingerprint));
+  const inc = new Set(incoming.map(fingerprint));
+  let added = 0;
+  let common = 0;
+  for (const key of cur) (inc.has(key) ? common++ : added++);
+  let resolved = 0;
+  for (const key of inc) if (!cur.has(key)) resolved++;
+  return { added, resolved, common };
+}

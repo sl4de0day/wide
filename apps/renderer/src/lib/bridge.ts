@@ -513,6 +513,24 @@ export interface RemoteDirEntry {
   dir: boolean;
 }
 
+export interface DockerContainer {
+  id: string;
+  name: string;
+  image: string;
+  status: string;
+}
+
+export interface TestCase {
+  name: string;
+  line: number;
+}
+
+export interface TestFile {
+  file: string;
+  rel: string;
+  cases: TestCase[];
+}
+
 
 export interface DebugProperty {
   name: string;
@@ -875,7 +893,7 @@ export interface HostApi {
   ): Promise<{ actions: CodeAction[] }>;
 
 
-  terminalStart(options: { cols: number; rows: number; cwd?: string; shell?: string; remote?: RemoteProfile }): Promise<TerminalSession>;
+  terminalStart(options: { cols: number; rows: number; cwd?: string; shell?: string; remote?: RemoteProfile; container?: { id: string; name?: string; shell?: string } }): Promise<TerminalSession>;
   terminalWrite(id: number, data: string): Promise<unknown>;
   terminalResize(id: number, cols: number, rows: number): Promise<unknown>;
   terminalDispose(id: number): Promise<unknown>;
@@ -1061,6 +1079,19 @@ export interface HostApi {
   remoteListDir(profile: Partial<RemoteProfile>, dir: string): Promise<Ok<{ path?: string; entries?: RemoteDirEntry[] }>>;
   remoteReadFile(profile: Partial<RemoteProfile>, filePath: string): Promise<Ok<{ content?: string }>>;
   remoteWriteFile(profile: Partial<RemoteProfile>, filePath: string, content: string): Promise<Ok<Record<string, never>>>;
+  remoteMkdir(profile: Partial<RemoteProfile>, dir: string): Promise<Ok<Record<string, never>>>;
+  remoteNewFile(profile: Partial<RemoteProfile>, filePath: string): Promise<Ok<Record<string, never>>>;
+  remoteDelete(profile: Partial<RemoteProfile>, target: string): Promise<Ok<Record<string, never>>>;
+  remoteRename(profile: Partial<RemoteProfile>, from: string, to: string): Promise<Ok<Record<string, never>>>;
+  remoteGrep(profile: Partial<RemoteProfile>, dir: string, query: string): Promise<Ok<{ matches?: { file: string; line: number; text: string }[] }>>;
+  dockerList(): Promise<Ok<{ containers?: DockerContainer[] }>>;
+  dockerExec(id: string, command: string): Promise<Ok<{ code?: number; stdout?: string; stderr?: string }>>;
+
+  testDiscover(root: string): Promise<Ok<{ framework?: string | null; files?: TestFile[] }>>;
+  testRun(root: string, framework: string, target: { rel?: string; name?: string }): Promise<Ok<{ code?: number; output?: string; failures?: string[] }>>;
+
+  osvInfo(root: string): Promise<Ok<{ exists?: boolean; updatedAt?: string; count?: number }>>;
+  osvRefresh(root: string, dumpPath?: string): Promise<Ok<{ count?: number }>>;
 
 
 
@@ -1420,6 +1451,17 @@ const fallback = {
   remoteListDir: async () => (warn(), { ok: false, error: "No bridge" }),
   remoteReadFile: async () => (warn(), { ok: false, error: "No bridge" }),
   remoteWriteFile: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteMkdir: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteNewFile: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteDelete: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteRename: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteGrep: async () => (warn(), { ok: false, error: "No bridge" }),
+  dockerList: async () => (warn(), { ok: false, error: "No bridge" }),
+  dockerExec: async () => (warn(), { ok: false, error: "No bridge" }),
+  testDiscover: async () => (warn(), { ok: false, error: "No bridge" }),
+  testRun: async () => (warn(), { ok: false, error: "No bridge" }),
+  osvInfo: async () => (warn(), { ok: false, error: "No bridge" }),
+  osvRefresh: async () => (warn(), { ok: false, error: "No bridge" }),
   updateCheck: async () => (warn(), { ok: false, error: "No bridge" }),
   updateOpen: async () => (warn(), { ok: false, error: "No bridge" }),
   updateDownload: async () => (warn(), { ok: false, error: "No bridge" }),

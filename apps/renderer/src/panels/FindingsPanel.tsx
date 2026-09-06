@@ -1,11 +1,11 @@
-import { ClipboardCopy, FileDown, Filter, Plus, Printer, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, RotateCw, Trash2, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
 import { bridge, type ProjectScanFinding } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
-import { FINDING_STATUSES, findingsReport, findingsReportHtml, SEVERITIES, useFindings, type Finding, type FindingStatus, type Severity } from "@/stores/findings";
+import { diffFindings, FINDING_STATUSES, findingsReport, findingsReportHtml, findingsReportJson, parseImportedFindings, SEVERITIES, useFindings, type Finding, type FindingStatus, type Severity } from "@/stores/findings";
 import { useProjectScan } from "@/stores/projectScan";
 import { toast } from "@/stores/toast";
 import { useWorkspace } from "@/stores/workspace";
@@ -106,6 +106,41 @@ export function FindingsPanel() {
   const scanCount = useProjectScan((state) => state.findings.length);
   const canReport = findings.length > 0 || scanCount > 0;
   const [hideResolved, setHideResolved] = useState(false);
+  const [osv, setOsv] = useState<{ exists?: boolean; updatedAt?: string; count?: number } | null>(null);
+  const [osvBusy, setOsvBusy] = useState(false);
+
+  useEffect(() => {
+    const root = useWorkspace.getState().root;
+    if (!root) {
+      setOsv(null);
+      return;
+    }
+    let alive = true;
+    void bridge.osvInfo(root).then((reply) => {
+      if (alive && reply.ok) setOsv({ exists: reply.exists, updatedAt: reply.updatedAt, count: reply.count });
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const refreshOsv = async () => {
+    const root = useWorkspace.getState().root;
+    if (!root) {
+      toast.error(t("Open a project first."));
+      return;
+    }
+    setOsvBusy(true);
+    const reply = await bridge.osvRefresh(root);
+    setOsvBusy(false);
+    if (reply.ok) {
+      toast.success(t("Vulnerability database refreshed: {count} advisories.", { count: reply.count ?? 0 }));
+      const info = await bridge.osvInfo(root);
+      if (info.ok) setOsv({ exists: info.exists, updatedAt: info.updatedAt, count: info.count });
+    } else {
+      toast.error(reply.error ? t(reply.error) : t("Could not refresh the vulnerability database."));
+    }
+  };
   const shown = useMemo(
     () => (hideResolved ? findings.filter((f) => f.status !== "fixed" && f.status !== "false-positive") : findings),
     [findings, hideResolved],
@@ -129,13 +164,48 @@ export function FindingsPanel() {
       toast.error(t("Open a project to save the report."));
       return;
     }
-    const target = `${root}/wide-findings-report.html`;
-    const written = await bridge.writeFile(target, findingsReportHtml(gatherReport()));
+    const report = gatherReport();
+    const written = await bridge.writeFile(`${root}/wide-findings-report.html`, findingsReportHtml(report));
+    await bridge.writeFile(`${root}/wide-findings-report.json`, findingsReportJson(report));
     if (written.error) toast.error(t(written.error));
-    else toast.success(t("Report saved to wide-findings-report.html."));
+    else toast.success(t("Report saved to wide-findings-report.html and .json."));
   };
 
   const printReport = () => printHtml(findingsReportHtml(gatherReport()));
+
+  const importFindings = async () => {
+    const picked = await bridge.openFile();
+    if (!picked) return;
+    const file = await bridge.readFile(picked.path);
+    if (file.error) {
+      toast.error(t(file.error));
+      return;
+    }
+    const parsed = parseImportedFindings(file.content);
+    if (!parsed.length) {
+      toast.error(t("No findings found in that file."));
+      return;
+    }
+    for (const f of parsed) useFindings.getState().add(f);
+    toast.success(t("Imported findings: {count}", { count: parsed.length }));
+  };
+
+  const compareFindings = async () => {
+    const picked = await bridge.openFile();
+    if (!picked) return;
+    const file = await bridge.readFile(picked.path);
+    if (file.error) {
+      toast.error(t(file.error));
+      return;
+    }
+    const parsed = parseImportedFindings(file.content);
+    if (!parsed.length) {
+      toast.error(t("No findings found in that file."));
+      return;
+    }
+    const diff = diffFindings(gatherReport(), parsed);
+    toast.success(t("Compared: {added} new, {resolved} resolved, {common} unchanged.", { added: diff.added, resolved: diff.resolved, common: diff.common }));
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -154,6 +224,14 @@ export function FindingsPanel() {
         {canReport && (
           <button type="button" onClick={printReport} title={t("Print / PDF")} aria-label={t("Print / PDF")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
             <Printer className="size-3.5" strokeWidth={1.5} />
+          </button>
+        )}
+        <button type="button" onClick={() => void importFindings()} title={t("Import findings (SARIF or JSON)")} aria-label={t("Import findings (SARIF or JSON)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
+          <Upload className="size-3.5" strokeWidth={1.5} />
+        </button>
+        {canReport && (
+          <button type="button" onClick={() => void compareFindings()} title={t("Compare with a saved report")} aria-label={t("Compare with a saved report")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
+            <GitCompareArrows className="size-3.5" strokeWidth={1.5} />
           </button>
         )}
         {findings.length > 0 && (
@@ -224,6 +302,18 @@ export function FindingsPanel() {
             </div>
           ))
         )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-1.5">
+        <DatabaseZap className="size-3 shrink-0 text-fg-faint" strokeWidth={1.75} />
+        <span className="min-w-0 flex-1 truncate text-[10px] text-fg-faint" title={t("Offline OSV advisory database used by the dependency scan.")}>
+          {osv?.exists && osv.updatedAt
+            ? t("OSV database: {date}", { date: new Date(osv.updatedAt).toLocaleDateString() })
+            : t("OSV database: built-in snapshot")}
+        </span>
+        <button type="button" onClick={() => void refreshOsv()} disabled={osvBusy} title={t("Refresh the OSV database (runs osv-scanner)")} aria-label={t("Refresh the OSV database")} className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-40">
+          <RotateCw className={cn("size-3", osvBusy && "animate-spin")} strokeWidth={1.75} />
+        </button>
       </div>
     </div>
   );

@@ -30,9 +30,32 @@ interface ScannerState {
   cancelAll(): void;
   clear(): void;
   select(id: string | null): void;
+
+  session: string;
+  setSession(text: string): void;
 }
 
 let taskSeq = 0;
+
+const SESSION_KEY = "wide.scanner.session";
+function loadSession(): string {
+  try {
+    return localStorage.getItem(SESSION_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+function parseSession(text: string): [string, string][] {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const i = l.indexOf(":");
+      return i === -1 ? null : ([l.slice(0, i).trim(), l.slice(i + 1).trim()] as [string, string]);
+    })
+    .filter((p): p is [string, string] => Boolean(p && p[0]));
+}
 
 function labelFor(requestText: string): string {
   const first = requestText.split("\n")[0] ?? "";
@@ -50,6 +73,16 @@ export const useScanner = create<ScannerState>((set, get) => ({
   tasks: [],
   issues: [],
   selected: null,
+  session: loadSession(),
+
+  setSession: (text) => {
+    try {
+      localStorage.setItem(SESSION_KEY, text);
+    } catch {
+      void 0;
+    }
+    set({ session: text });
+  },
 
   scan: (requestText) => {
     const id = `t${(taskSeq += 1)}`;
@@ -81,6 +114,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
       requestText,
       {
         signal,
+        sessionHeaders: parseSession(get().session),
         onProgress: (done, total) => set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, done, total } : t)) })),
         onIssue: (issue) => {
           set((s) => ({
@@ -114,6 +148,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
     set((s) => ({ tasks: [task, ...s.tasks] }));
     void crawl(seedUrl, {
       signal,
+      sessionHeaders: parseSession(get().session),
       onProgress: (visited, queued) =>
         set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, done: visited, total: Math.max(visited + queued, visited) } : t)) })),
     }).then((found) => {

@@ -5,6 +5,7 @@ import {
   CircleAlert,
   FlaskConical,
   Folder,
+  GitBranch,
   Globe,
   Hammer,
   NotebookPen,
@@ -15,6 +16,7 @@ import {
   Server,
   Settings,
   Terminal,
+  TestTube2,
 } from "lucide-react";
 import { lazy, type ComponentType } from "react";
 
@@ -40,6 +42,10 @@ const AiPanel = lazy(() => import("@/panels/AiPanel").then((m) => ({ default: m.
 const DebugPanel = lazy(() => import("@/panels/DebugPanel").then((m) => ({ default: m.DebugPanel })));
 const FindingsPanel = lazy(() => import("@/panels/FindingsPanel").then((m) => ({ default: m.FindingsPanel })));
 const RemotePanel = lazy(() => import("@/panels/RemotePanel").then((m) => ({ default: m.RemotePanel })));
+const SourceControlPanel = lazy(() =>
+  import("@/panels/CodebergPanel").then((m) => ({ default: () => <m.CodebergPanel builtin /> })),
+);
+const TestsPanel = lazy(() => import("@/panels/TestsPanel").then((m) => ({ default: m.TestsPanel })));
 
 function AiMark({ className }: { className?: string; strokeWidth?: number }) {
   const mark = extensionById("ai-assistant");
@@ -86,6 +92,7 @@ export const PANELS: PanelDef[] = [
   { id: "project", label: "Explorer", icon: Folder, component: FileTree, place: "top" },
   { id: "search", label: "Search", icon: Search, component: SearchPanel, place: "top" },
   { id: "structure", label: "Structure", icon: Boxes, component: StructurePanel, place: "top" },
+  { id: "source-control", label: "Source Control", icon: GitBranch, component: SourceControlPanel, place: "top" },
   { id: "build", label: "Build", icon: Hammer, component: BuildPanel, place: "bottom" },
 
   { id: "tools", label: "Extensions", icon: Puzzle, component: ToolsPanel, place: "top" },
@@ -123,6 +130,7 @@ export const PANELS: PanelDef[] = [
     place: "top",
   },
   { id: "problems", label: "Problems", icon: CircleAlert, component: ProblemsPanel, place: "bottom" },
+  { id: "tests", label: "Tests", icon: TestTube2, component: TestsPanel, place: "bottom" },
   { id: "debug", label: "Debug", icon: Bug, component: DebugPanel, place: "bottom" },
   { id: "remote", label: "Remote", icon: Server, component: RemotePanel, place: "bottom" },
   { id: "terminal", label: "Terminal", icon: Terminal, component: TerminalPanel, place: "bottom" },

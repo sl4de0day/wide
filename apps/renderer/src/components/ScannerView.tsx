@@ -1,4 +1,4 @@
-import { Network, Play, Repeat2, Square, Trash2 } from "lucide-react";
+import { KeyRound, Network, Play, Repeat2, Square, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { parseHttpMessage } from "@/lib/httpMessage";
@@ -24,6 +24,8 @@ export function ScannerView() {
   const selected = useScanner((s) => s.selected);
   const [draft, setDraft] = useState("");
   const [crawlSeed, setCrawlSeed] = useState("");
+  const session = useScanner((s) => s.session);
+  const [showSession, setShowSession] = useState(false);
   const chosen = issues.find((i) => i.id === selected) ?? null;
 
   const sortedIssues = [...issues].sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
@@ -82,6 +84,23 @@ export function ScannerView() {
             <Network className="size-3" strokeWidth={2} />
             {t("Crawl")}
           </button>
+        </div>
+        <div className="mt-2">
+          <button type="button" onClick={() => setShowSession((v) => !v)} className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-fg-faint transition-colors duration-100 hover:text-fg">
+            <KeyRound className="size-3" strokeWidth={1.75} />
+            {t("Authenticated session")}
+            {session.trim() && <span className="text-emerald-400">•</span>}
+          </button>
+          {showSession && (
+            <textarea
+              value={session}
+              onChange={(e) => useScanner.getState().setSession(e.target.value)}
+              placeholder={"Authorization: Bearer …\nCookie: session=…"}
+              spellCheck={false}
+              rows={2}
+              className="mt-1 w-full resize-y rounded-sm border border-line bg-canvas px-2 py-1 font-mono text-[11px] text-fg outline-none focus:border-accent placeholder:text-fg-faint"
+            />
+          )}
         </div>
       </div>
 

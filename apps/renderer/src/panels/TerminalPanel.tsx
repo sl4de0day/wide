@@ -79,9 +79,12 @@ export function TerminalPanel() {
 
     const start = () => {
       if (idRef.current !== null) return;
-      const remote = useRemote.getState().activeProfile() ?? undefined;
+      const remoteState = useRemote.getState();
+      const containerId = remoteState.activeContainer;
+      const container = containerId ? { id: containerId, name: remoteState.containers.find((c) => c.id === containerId)?.name } : undefined;
+      const remote = container ? undefined : remoteState.activeProfile() ?? undefined;
       void bridge
-        .terminalStart({ cols: term.cols, rows: term.rows, cwd: root ?? undefined, shell: useSettings.getState().terminalShell, remote })
+        .terminalStart({ cols: term.cols, rows: term.rows, cwd: root ?? undefined, shell: useSettings.getState().terminalShell, remote, container })
         .then((session) => {
           if (disposed) return;
           if (session?.error || !session?.id) {
@@ -106,7 +109,7 @@ export function TerminalPanel() {
     });
 
     const offRemote = useRemote.subscribe((next, prev) => {
-      if (next.activeId === prev.activeId) return;
+      if (next.activeId === prev.activeId && next.activeContainer === prev.activeContainer) return;
       const current = idRef.current;
       idRef.current = null;
       if (current !== null) void bridge.terminalDispose(current);
