@@ -1,6 +1,6 @@
 {
   "name": "wide",
-  "version": "0.66926",
+  "version": "0.76926",
   "description": "Wide — a security-first IDE for the web stack. Native C++ (Win32 + WebView2) host, React renderer, Node backend sidecar. Electron-free.",
   "private": true,
   "workspaces": [
@@ -21,7 +21,8 @@
     "test:smoke": "node sidecar/smoke-backend.cjs",
     "start": "node scripts/start.cjs",
     "scan": "node scripts/scan.cjs",
-    "pitcher": "node scripts/pitcher-run.cjs"
+    "pitcher": "node scripts/pitcher-run.cjs",
+    "catcher": "node scripts/catcher-run.cjs"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.14",

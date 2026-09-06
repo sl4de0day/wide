@@ -404,16 +404,34 @@ void BrowserWireEvents(const std::wstring& tabId) {
   }
 }
 
+std::wstring PortableRoot() {
+  static std::wstring cached;
+  static bool computed = false;
+  if (computed) return cached;
+  computed = true;
+  wchar_t exe[MAX_PATH * 2] = {};
+  if (GetModuleFileNameW(nullptr, exe, MAX_PATH * 2) == 0) return cached;
+  fs::path dir = fs::path(exe).parent_path();
+  std::error_code ec;
+  if (fs::exists(dir / L"portable", ec) || fs::exists(dir / L"wide.portable", ec)) cached = dir.wstring();
+  return cached;
+}
+
 std::wstring BrowserUserDataFolder() {
-  PWSTR base = nullptr;
   std::wstring folder;
-  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base)) && base) {
-    folder = (fs::path(base) / L"wide" / L"Browser").wstring();
-    CoTaskMemFree(base);
+  std::wstring portable = PortableRoot();
+  if (!portable.empty()) {
+    folder = (fs::path(portable) / L"data" / L"Browser").wstring();
   } else {
-    wchar_t tmp[MAX_PATH] = {};
-    GetTempPathW(MAX_PATH, tmp);
-    folder = (fs::path(tmp) / L"wide-browser").wstring();
+    PWSTR base = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base)) && base) {
+      folder = (fs::path(base) / L"wide" / L"Browser").wstring();
+      CoTaskMemFree(base);
+    } else {
+      wchar_t tmp[MAX_PATH] = {};
+      GetTempPathW(MAX_PATH, tmp);
+      folder = (fs::path(tmp) / L"wide-browser").wstring();
+    }
   }
   std::error_code ec;
   fs::create_directories(folder, ec);
@@ -1074,34 +1092,46 @@ void InjectScript(const std::string& code) {
 }
 
 std::wstring UserDataFolder() {
-  PWSTR local = nullptr;
-  std::wstring base;
-  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
-    base = local;
-    CoTaskMemFree(local);
+  std::wstring portable = PortableRoot();
+  fs::path folder;
+  if (!portable.empty()) {
+    folder = fs::path(portable) / L"data" / L"WebView2";
   } else {
-    wchar_t tmp[MAX_PATH] = {};
-    GetTempPathW(MAX_PATH, tmp);
-    base = tmp;
+    PWSTR local = nullptr;
+    std::wstring base;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+      base = local;
+      CoTaskMemFree(local);
+    } else {
+      wchar_t tmp[MAX_PATH] = {};
+      GetTempPathW(MAX_PATH, tmp);
+      base = tmp;
+    }
+    folder = fs::path(base) / L"wide" / L"WebView2";
   }
-  fs::path folder = fs::path(base) / L"wide" / L"WebView2";
   std::error_code ec;
   fs::create_directories(folder, ec);
   return folder.wstring();
 }
 
 std::wstring RemoteConfigPath() {
-  PWSTR local = nullptr;
-  std::wstring base;
-  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
-    base = local;
-    CoTaskMemFree(local);
+  std::wstring portable = PortableRoot();
+  fs::path folder;
+  if (!portable.empty()) {
+    folder = fs::path(portable) / L"data";
   } else {
-    wchar_t tmp[MAX_PATH] = {};
-    GetTempPathW(MAX_PATH, tmp);
-    base = tmp;
+    PWSTR local = nullptr;
+    std::wstring base;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+      base = local;
+      CoTaskMemFree(local);
+    } else {
+      wchar_t tmp[MAX_PATH] = {};
+      GetTempPathW(MAX_PATH, tmp);
+      base = tmp;
+    }
+    folder = fs::path(base) / L"wide";
   }
-  fs::path folder = fs::path(base) / L"wide";
   std::error_code ec;
   fs::create_directories(folder, ec);
   return (folder / L"remote.json").wstring();

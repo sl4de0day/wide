@@ -902,6 +902,8 @@ export interface HostApi {
 
   browserCdp(tabId: string, method: string, params?: Record<string, unknown>): Promise<Ok<{ result?: unknown }>>;
 
+  securityTestRule(pattern: string, flags: string, sample: string): Promise<Ok<{ matches?: { line: number; text: string }[] }>>;
+
   webtoolsCyberchef(): Promise<Ok<{ url?: string }>>;
 
   webtoolsWappalyzer(): Promise<Ok<{ technologies?: Record<string, unknown>; categories?: Record<string, unknown> }>>;
@@ -1344,6 +1346,7 @@ const fallback = {
   browserClose: () => warn(),
   browserDevtools: async () => (warn(), { ok: false, error: "No bridge" }),
   browserCdp: async () => (warn(), { ok: false, error: "No bridge" }),
+  securityTestRule: async () => (warn(), { ok: false, error: "No bridge" }),
   webtoolsCyberchef: async () => (warn(), { ok: false, error: "No bridge" }),
   webtoolsWappalyzer: async () => (warn(), { ok: false, error: "No bridge" }),
   oastStart: async () => (warn(), { ok: false, error: "No bridge" }),

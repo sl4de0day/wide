@@ -5,7 +5,9 @@ import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { analyze, PAGE_SIGNAL_SCRIPT, type Detection, type DetectionInput } from "@/lib/wappalyzer";
 import { loadWappalyzerRuleset } from "@/lib/wappalyzerRuleset";
+import { useFindings } from "@/stores/findings";
 import { useProxy } from "@/stores/proxy";
+import { toast } from "@/stores/toast";
 
 interface PageSignals {
   html: string;
@@ -71,6 +73,18 @@ export function WappalyzerPanel({ tabId, url }: { tabId: string; url: string }) 
     void scan();
   }, [scan]);
 
+  const sendToFindings = () => {
+    let added = 0;
+    for (const tech of detections) {
+      const title = tech.version ? `${tech.name} ${tech.version}` : tech.name;
+      const exists = useFindings.getState().findings.some((f) => f.title === title && f.location === url);
+      if (exists) continue;
+      useFindings.getState().add({ title, severity: "info", location: url, detail: tech.categories.join(", ") });
+      added += 1;
+    }
+    toast.success(t("Added {count} findings", { count: added }));
+  };
+
   return (
     <div className="flex h-full flex-col bg-canvas">
       <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-1.5">
@@ -78,16 +92,27 @@ export function WappalyzerPanel({ tabId, url }: { tabId: string; url: string }) 
           {t("Technologies")}
           {detections.length > 0 && <span className="ml-1.5 text-fg-faint">{detections.length}</span>}
         </span>
-        <button
-          type="button"
-          onClick={() => void scan()}
-          disabled={busy}
-          title={t("Rescan")}
-          aria-label={t("Rescan")}
-          className="rounded-sm p-1 text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-50"
-        >
-          {busy ? <LoaderCircle className="size-3.5 animate-spin" strokeWidth={1.75} /> : <RotateCw className="size-3.5" strokeWidth={1.75} />}
-        </button>
+        <div className="flex items-center gap-2">
+          {detections.length > 0 && (
+            <button
+              type="button"
+              onClick={sendToFindings}
+              className="rounded-sm border border-line px-2 py-0.5 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+            >
+              {t("Send all to Findings")}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void scan()}
+            disabled={busy}
+            title={t("Rescan")}
+            aria-label={t("Rescan")}
+            className="rounded-sm p-1 text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-50"
+          >
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" strokeWidth={1.75} /> : <RotateCw className="size-3.5" strokeWidth={1.75} />}
+          </button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {error ? (

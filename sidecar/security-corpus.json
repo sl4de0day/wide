@@ -1,0 +1,14 @@
+[
+  { "id": "taint/command", "ext": "js", "positive": "const c = req.query.c;\nexec(c);\n", "negative": "exec(\"ls -la\");\n" },
+  { "id": "taint/path", "ext": "js", "positive": "const p = req.query.p;\nfs.readFile(p);\n", "negative": "fs.readFile(\"/etc/hosts\");\n" },
+  { "id": "taint/sql", "ext": "js", "positive": "const sql = req.query.sql;\ndb.query( sql );\n", "negative": "db.query(\"SELECT 1\");\n" },
+  { "id": "taint/ssrf", "ext": "js", "positive": "const u = req.query.u;\nfetch(u);\n", "negative": "fetch(\"https://api.example.com\");\n" },
+  { "id": "taint/redirect", "ext": "js", "positive": "const r = req.query.r;\nres.redirect(r);\n", "negative": "res.redirect(\"/home\");\n" },
+  { "id": "taint/xss", "ext": "js", "positive": "const h = req.query.h;\nel.innerHTML = h;\n", "negative": "el.innerHTML = \"static\";\n" },
+  { "id": "taint/ssti", "ext": "js", "positive": "const t = req.query.t;\nejs.render(t);\n", "negative": "ejs.render(\"<p>hi</p>\");\n" },
+  { "id": "taint/eval", "ext": "js", "positive": "const e = req.query.e;\neval(e);\n", "negative": "eval(\"1 + 1\");\n" },
+  { "id": "taint/nosql", "ext": "js", "positive": "const q = req.body.q;\nUser.find({ q: q });\n", "negative": "User.find({ active: true });\n" },
+  { "id": "iac-docker-run-as-root", "ext": "dockerfile", "positive": "USER root\n", "negative": "USER node\n" },
+  { "id": "iac-k8s-privileged", "ext": "yaml", "positive": "securityContext:\n  privileged: true\n", "negative": "securityContext:\n  privileged: false\n" },
+  { "id": "iac-env-secret-value", "ext": "env", "positive": "DB_PASSWORD=s3cr3tValue\n", "negative": "DB_PASSWORD=changeme\n" }
+]

@@ -1,14 +1,28 @@
 import { LoaderCircle, RotateCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
+import { useCyberchef } from "@/stores/cyberchef";
+
+function toBase64(text: string): string {
+  try {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  } catch {
+    return "";
+  }
+}
 
 export function CyberChefView() {
   const t = useT();
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const input = useCyberchef((state) => state.input);
+  const seq = useCyberchef((state) => state.seq);
 
   const load = useCallback(() => {
     let alive = true;
@@ -27,8 +41,14 @@ export function CyberChefView() {
 
   useEffect(() => load(), [load]);
 
-  if (url) {
-    return <iframe title="CyberChef" src={url} className="h-full w-full border-0 bg-canvas" />;
+  const src = useMemo(() => {
+    if (!url) return "";
+    if (seq > 0 && input) return `${url}?w=${seq}#input=${toBase64(input)}`;
+    return url;
+  }, [url, input, seq]);
+
+  if (src) {
+    return <iframe title="CyberChef" src={src} className="h-full w-full border-0 bg-canvas" />;
   }
 
   return (

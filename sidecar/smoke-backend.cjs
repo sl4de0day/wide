@@ -76,6 +76,10 @@ const GONE = [
   failed += await checkCatcherAutosave();
   failed += await checkMcpTrustGate();
   failed += await checkSecurityScanControls();
+  failed += await checkSecurityCorpus();
+  failed += await checkSca();
+  failed += await checkTaintFlow();
+  failed += await checkCustomRules();
   failed += checkNativeColours();
 
   console.log(failed === 0 ? '\nAll backend checks passed.' : `\n${failed} check(s) failed.`);
@@ -152,6 +156,148 @@ async function checkSecurityScanControls() {
   await invoke('security:baseline', [dir, 'clear']);
   const cleared = await invoke('security:scanProject', [dir]);
   report((cleared.result?.findings ?? []).length > 0, 'clearing the baseline brings them back');
+
+  try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return failed;
+}
+
+async function checkSecurityCorpus() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  let corpus = [];
+  try {
+    corpus = require('./security-corpus.json');
+  } catch {
+    report(false, 'security corpus could not be loaded');
+    return failed;
+  }
+
+  const dir = pathSync.join(osSync.tmpdir(), `wide-corpus-${process.pid}`);
+  const src = pathSync.join(dir, 'src');
+  fsSync.mkdirSync(src, { recursive: true });
+  const safe = (id) => id.replace(/[^a-z0-9]+/gi, '_');
+  for (const entry of corpus) {
+    fsSync.writeFileSync(pathSync.join(src, `${safe(entry.id)}_pos.${entry.ext}`), entry.positive, 'utf8');
+    fsSync.writeFileSync(pathSync.join(src, `${safe(entry.id)}_neg.${entry.ext}`), entry.negative, 'utf8');
+  }
+
+  const scan = await invoke('security:scanProject', [dir]);
+  const findings = scan.result?.findings ?? [];
+  for (const entry of corpus) {
+    const posHit = findings.some((f) => String(f.file).includes(`${safe(entry.id)}_pos.`) && f.ruleId === entry.id);
+    const negHit = findings.some((f) => String(f.file).includes(`${safe(entry.id)}_neg.`) && f.ruleId === entry.id);
+    report(posHit, `corpus: ${entry.id} flags its positive sample`);
+    report(!negHit, `corpus: ${entry.id} ignores its negative sample`);
+  }
+
+  try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return failed;
+}
+
+async function checkTaintFlow() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const dir = pathSync.join(osSync.tmpdir(), `wide-taintflow-${process.pid}`);
+  const src = pathSync.join(dir, 'src');
+  fsSync.mkdirSync(src, { recursive: true });
+  fsSync.writeFileSync(pathSync.join(src, 'multiline.js'), 'const c = req.query.c;\nexec(\n  "a",\n  "b",\n  c\n);\n', 'utf8');
+  fsSync.writeFileSync(pathSync.join(src, 'sanitized.js'), 'let x = req.query.x;\nx = escape(x);\nexec(x);\n', 'utf8');
+  fsSync.writeFileSync(pathSync.join(src, 'raw.js'), 'let y = req.query.y;\nexec(y);\n', 'utf8');
+
+  const scan = await invoke('security:scanProject', [dir]);
+  const findings = scan.result?.findings ?? [];
+  const hits = (needle) => findings.filter((f) => String(f.file).includes(needle) && f.ruleId === 'taint/command');
+  report(hits('multiline.js').length > 0, 'multi-line: a sink arg beyond the 3-line window is caught');
+  report(hits('sanitized.js').length === 0, 'taint dies after a sanitizer reassigns the variable');
+  report(hits('raw.js').length > 0, 'unsanitized taint still flags (control)');
+
+  try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return failed;
+}
+
+async function checkCustomRules() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const dir = pathSync.join(osSync.tmpdir(), `wide-customrule-${process.pid}`);
+  fsSync.mkdirSync(pathSync.join(dir, 'src'), { recursive: true });
+  fsSync.mkdirSync(pathSync.join(dir, '.wide'), { recursive: true });
+  fsSync.writeFileSync(pathSync.join(dir, 'src', 'app.js'), 'dangerousThing(userInput);\nsafeThing(x);\n', 'utf8');
+  fsSync.writeFileSync(
+    pathSync.join(dir, '.wide', 'security.json'),
+    JSON.stringify({ rules: [{ id: 'no-dangerous', pattern: 'dangerousThing\\(', message: 'Do not use dangerousThing', severity: 'high', langs: ['js'] }] }),
+    'utf8',
+  );
+
+  const scan = await invoke('security:scanProject', [dir]);
+  const findings = scan.result?.findings ?? [];
+  report(findings.some((f) => f.ruleId === 'custom/no-dangerous'), 'custom rule from security.json fires');
+
+  const test = await invoke('security:testRule', ['dangerousThing\\(', '', 'a\ndangerousThing()\nb']);
+  report(test.result?.ok === true && (test.result.matches ?? []).some((m) => m.line === 2), 'security:testRule reports the matching line');
+  const bad = await invoke('security:testRule', ['(', '', 'x']);
+  report(bad.result?.ok === false, 'security:testRule rejects an invalid pattern');
+
+  try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return failed;
+}
+
+async function checkSca() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const dir = pathSync.join(osSync.tmpdir(), `wide-sca-${process.pid}`);
+  const src = pathSync.join(dir, 'src');
+  fsSync.mkdirSync(src, { recursive: true });
+  fsSync.writeFileSync(pathSync.join(src, 'package.json'), JSON.stringify({ dependencies: { lodash: '4.17.20', express: '4.18.2' } }), 'utf8');
+  fsSync.writeFileSync(pathSync.join(src, 'requirements.txt'), 'pyyaml==5.3\nrequests==2.31.0\n', 'utf8');
+  fsSync.writeFileSync(
+    pathSync.join(src, 'pom.xml'),
+    '<project><dependencies><dependency><artifactId>log4j-core</artifactId><version>2.14.1</version></dependency></dependencies></project>',
+    'utf8'
+  );
+  fsSync.writeFileSync(
+    pathSync.join(src, 'package-lock.json'),
+    JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/minimist': { version: '1.2.5' } } }),
+    'utf8'
+  );
+  fsSync.writeFileSync(pathSync.join(src, 'go.mod'), 'module x\n\nrequire github.com/dgrijalva/jwt-go v3.2.0\n', 'utf8');
+
+  const scan = await invoke('security:scanProject', [dir]);
+  const findings = scan.result?.findings ?? [];
+  const has = (id) => findings.some((f) => f.ruleId === id);
+  report(has('vuln-dep-cve-2021-23337'), 'SCA flags vulnerable lodash in package.json');
+  report(has('vuln-dep-cve-2020-14343'), 'SCA flags vulnerable PyYAML in requirements.txt');
+  report(has('vuln-dep-cve-2021-44228'), 'SCA flags Log4Shell in pom.xml');
+  report(has('vuln-dep-cve-2021-44906'), 'SCA flags vulnerable minimist in package-lock.json');
+  report(has('vuln-dep-cve-2020-26160'), 'SCA flags vulnerable jwt-go in go.mod');
+  report(!has('vuln-dep-cve-2023-32681'), 'SCA leaves a patched dependency (requests 2.31.0) alone');
 
   try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
   return failed;

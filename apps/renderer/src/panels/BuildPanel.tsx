@@ -1,11 +1,41 @@
-import { Bug, Play, RotateCw } from "lucide-react";
+import { Bug, Play, RotateCw, TestTube } from "lucide-react";
 import { useEffect } from "react";
 
 import { PanelHeader, panelButtonClass } from "@/components/SidePanel";
+import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useRun } from "@/stores/run";
+import { toast } from "@/stores/toast";
 import { useWorkspace } from "@/stores/workspace";
+
+async function detectTestCommand(root: string): Promise<string | null> {
+  const read = async (p: string): Promise<string | null> => {
+    try {
+      const r = await bridge.readFile(`${root}/${p}`);
+      return r.error ? null : r.content;
+    } catch {
+      return null;
+    }
+  };
+  const pkg = await read("package.json");
+  if (pkg) {
+    try {
+      const j = JSON.parse(pkg);
+      if (j.scripts && typeof j.scripts.test === "string") return "npm test";
+      const deps = { ...j.dependencies, ...j.devDependencies };
+      if (deps.vitest) return "npx vitest run";
+      if (deps.jest) return "npx jest";
+      if (deps.mocha) return "npx mocha";
+    } catch {
+      void 0;
+    }
+  }
+  if ((await read("pyproject.toml")) || (await read("pytest.ini")) || (await read("setup.cfg"))) return "pytest";
+  if (await read("go.mod")) return "go test ./...";
+  if (await read("Cargo.toml")) return "cargo test";
+  return null;
+}
 
 export function BuildPanel({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
   const scripts = useRun((state) => state.scripts);
@@ -29,10 +59,29 @@ export function BuildPanel({ onOpenPanel }: { onOpenPanel?: (id: string) => void
     debugScript(name);
     onOpenPanel?.("terminal");
   };
+  const runTests = async () => {
+    if (!root) return;
+    const cmd = await detectTestCommand(root);
+    if (!cmd) {
+      toast.error(t("No test framework detected in this project."));
+      return;
+    }
+    useRun.getState().send(cmd);
+    onOpenPanel?.("terminal");
+  };
 
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t("Build")}>
+        <button
+          type="button"
+          title={t("Run tests")}
+          aria-label={t("Run tests")}
+          onClick={() => void runTests()}
+          className={panelButtonClass}
+        >
+          <TestTube className="size-3.5" strokeWidth={1.5} />
+        </button>
         <button
           type="button"
           title={t("Reload scripts")}

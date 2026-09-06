@@ -39,9 +39,17 @@ const CLIKE: Pattern[] = [
   { re: /^\s*(?:(?:public|private|protected|internal)\s+)?(?:val|var|const)\s+([A-Za-z0-9_]+)/, kind: "const" },
 ];
 
+const C_LIKE: Pattern[] = [
+  { re: /^\s*(?:typedef\s+)?(?:struct|union|enum|class)\s+([A-Za-z0-9_]+)/, kind: "class" },
+  { re: /^\s*(?:[A-Za-z_][\w:<>,*&\s]+?\s[*&]?)([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{?\s*$/, kind: "function" },
+  { re: /^\s*#define\s+([A-Za-z0-9_]+)/, kind: "const" },
+];
+
 const LANGUAGE_PATTERNS: Record<string, Pattern[]> = {
 
   js: JS, jsx: JS, mjs: JS, cjs: JS, ts: JS, tsx: JS, mts: JS, cts: JS,
+
+  c: C_LIKE, h: C_LIKE, cpp: C_LIKE, cc: C_LIKE, cxx: C_LIKE, hpp: C_LIKE, hh: C_LIKE,
 
   php: [
     { re: /^\s*(?:abstract\s+|final\s+)*(?:class|interface|trait|enum)\s+([A-Za-z0-9_]+)/, kind: "class" },
@@ -121,7 +129,7 @@ const LANGUAGE_PATTERNS: Record<string, Pattern[]> = {
 const ALIASES: Record<string, string> = {
   pyi: "py", pyw: "py",
   phtml: "php", php3: "php", php4: "php", php5: "php", phps: "php",
-  exs: "ex", hrl: "erl",
+  exs: "ex", hrl: "erl", mdx: "md",
   ddl: "sql", dml: "sql",
   graphqls: "graphql", gql: "graphql",
   wast: "wat",

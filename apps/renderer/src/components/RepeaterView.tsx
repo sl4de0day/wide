@@ -9,6 +9,8 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useCatcher } from "@/stores/catcher";
 import { useComparer } from "@/stores/comparer";
+import { useCyberchef } from "@/stores/cyberchef";
+import { useExtensions } from "@/stores/extensions";
 import { useDecoder } from "@/stores/decoder";
 import { repeaterSeeds } from "@/stores/editor";
 import { useIntruder } from "@/stores/intruder";
@@ -46,6 +48,7 @@ function withContentLength(message: ReturnType<typeof parseHttpMessage>): Return
 
 export function RepeaterView({ id }: { id: string }) {
   const t = useT();
+  const hasCyberchef = useExtensions((state) => state.installed.has("cyberchef"));
   const seed = useMemo(() => repeaterSeeds.get(id) ?? null, [id]);
   const [text, setText] = useState(() => (seed ? serializeHttpMessage(seed) : "GET https://\n\n"));
   const [reply, setReply] = useState<Reply | null>(null);
@@ -215,6 +218,11 @@ export function RepeaterView({ id }: { id: string }) {
               <button type="button" onClick={() => useComparer.getState().send(reply.body)} className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
                 {t("Comparer")}
               </button>
+              {hasCyberchef && (
+                <button type="button" onClick={() => useCyberchef.getState().send(reply.body)} className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
+                  {t("CyberChef")}
+                </button>
+              )}
             </>
           )}
         </div>

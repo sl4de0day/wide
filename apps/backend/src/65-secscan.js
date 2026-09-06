@@ -20,6 +20,10 @@ function registerSecScanHandlers() {
     graphql: "graphql", graphqls: "graphql", gql: "graphql",
     html: "html", htm: "html", xhtml: "html",
     css: "css", scss: "css", less: "css", pcss: "css", postcss: "css",
+    yaml: "yaml", yml: "yaml",
+    tf: "terraform", tfvars: "terraform",
+    dockerfile: "dockerfile",
+    env: "env",
   };
   const SEC_MAX_FILES = 6000;
   const SEC_MAX_BYTES = 512 * 1024;
@@ -128,7 +132,34 @@ function registerSecScanHandlers() {
     exclude: [],
     includeTests: false,
     minConfidence: "low",
+    customRules: [],
   };
+
+  function parseCustomRules(list) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const raw of list) {
+      if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || typeof raw.pattern !== "string") continue;
+      let re;
+      try {
+        re = new RegExp(raw.pattern, typeof raw.flags === "string" ? raw.flags.replace(/[^gimsuy]/g, "") : "");
+      } catch {
+        continue;
+      }
+      const langs = Array.isArray(raw.langs) && raw.langs.length ? raw.langs.filter((v) => typeof v === "string") : EVERY_LANG;
+      out.push({
+        id: `custom/${raw.id}`,
+        langs,
+        re,
+        severity: ["info", "low", "medium", "high", "critical", "warning", "error"].includes(raw.severity) ? raw.severity : "warning",
+        confidence: ["low", "medium", "high"].includes(raw.confidence) ? raw.confidence : "medium",
+        cwe: typeof raw.cwe === "string" ? raw.cwe : "",
+        message: typeof raw.message === "string" && raw.message ? raw.message : raw.id,
+        custom: true,
+      });
+    }
+    return out;
+  }
 
   async function readSecConfig(root) {
     if (!root || typeof root !== "string") return SEC_DEFAULT_CONFIG;
@@ -167,6 +198,7 @@ function registerSecScanHandlers() {
         .filter(Boolean),
       includeTests: parsed.includeTests === true,
       minConfidence: SEC_RANK[parsed.minConfidence] === undefined ? "low" : parsed.minConfidence,
+      customRules: parseCustomRules(parsed.rules),
     };
     SEC_CONFIG_CACHE.set(root, { stamp, config });
     return config;
@@ -202,6 +234,36 @@ function registerSecScanHandlers() {
   }
 
 
+  function secBracketDepth(s) {
+    let d = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch === "(" || ch === "[") d += 1;
+      else if (ch === ")" || ch === "]") d -= 1;
+    }
+    return d;
+  }
+
+  function logicalSpans(lines) {
+    const spans = [];
+    let i = 0;
+    while (i < lines.length) {
+      const start = i;
+      let depth = secBracketDepth(lines[i]);
+      let end = i;
+      while (depth > 0 && end + 1 < lines.length && end - start < 6) {
+        end += 1;
+        depth += secBracketDepth(lines[end]);
+      }
+      if (end > start) {
+        const text = lines.slice(start, end + 1).join(" ");
+        if (text.length <= 2000) spans.push({ start, text });
+      }
+      i = end + 1;
+    }
+    return spans;
+  }
+
   function collectTainted(lines, seed) {
     const tainted = new Set(seed || []);
 
@@ -223,6 +285,10 @@ function registerSecScanHandlers() {
       const n = String(name).replace(/^[$@]/, "");
       if (/^[A-Za-z_][\w]*$/.test(n)) tainted.add(n);
     };
+    const kill = (name) => {
+      const n = String(name).replace(/^[$@]/, "");
+      tainted.delete(n);
+    };
     const stmts = [];
     for (const line of lines) {
       if (line.length > SEC_MAX_LINE) continue;
@@ -232,16 +298,16 @@ function registerSecScanHandlers() {
     }
     for (const line of stmts) {
       let km, kre = /\b(?:const|let|var|val)\s+([A-Za-z_$][\w$]*)\s*=\s*([^=][^;]*)/g;
-      while ((km = kre.exec(line))) { if (isSrc(km[2])) add(km[1]); }
+      while ((km = kre.exec(line))) { if (isSrc(km[2])) add(km[1]); else if (SANITISER_RE.test(km[2])) kill(km[1]); }
       let m = /\b(?:const|let|var)\s*\{\s*([^}]+)\}\s*=\s*([^=].*)$/.exec(line);
       if (m) {
         if (isSrc(m[2])) for (const raw of m[1].split(",")) add(raw.split(":").pop().trim().replace(/\s.*$/, ""));
         continue;
       }
       m = /^\s*([A-Za-z_]\w*)\s*:=\s*([^=].*)$/.exec(line);
-      if (m) { if (isSrc(m[2])) add(m[1]); continue; }
+      if (m) { if (isSrc(m[2])) add(m[1]); else if (SANITISER_RE.test(m[2])) kill(m[1]); continue; }
       m = /^\s*(?:[\w$.<>\[\],:&*]+\s+)*[$@]?([A-Za-z_]\w*)\s*=\s*([^=].*)$/.exec(line);
-      if (m) { if (isSrc(m[2])) add(m[1]); continue; }
+      if (m) { if (isSrc(m[2])) add(m[1]); else if (SANITISER_RE.test(m[2])) kill(m[1]); continue; }
     }
     return tainted;
   }
@@ -2601,6 +2667,44 @@ function registerSecScanHandlers() {
     { id: "internal-secret-return", langs: ["py", "js", "go", "java", "php", "rb", "cs"], severity: "warning", cwe: "CWE-306",
       re: /["'](?:flag|secret|api[_-]?key|token|password|passwd|private[_-]?key)["']\s*:\s*(?:os\.getenv|getenv|process\.env|System\.getenv|ENV\[|Environment\.GetEnvironmentVariable)\b/i,
       message: "An endpoint returns a secret from the environment — this internal service must authenticate the caller itself (do not rely on an upstream proxy; a broken trust boundary hands the secret to anyone who reaches it)." },
+
+    { id: "iac-docker-run-as-root", langs: ["dockerfile"], severity: "warning", cwe: "CWE-250",
+      re: /^\s*USER\s+root\b/i,
+      message: "The container runs as root (USER root). A process that is compromised then has root inside the container; drop to a non-root user with a dedicated USER." },
+    { id: "iac-docker-add-remote", langs: ["dockerfile"], severity: "warning", cwe: "CWE-829",
+      re: /^\s*ADD\s+https?:\/\//i,
+      message: "ADD fetches a remote URL over the network with no integrity check, so a change or a MITM at the source lands in the image. Use COPY with a checked-in artifact, or RUN a download that verifies a checksum." },
+    { id: "iac-docker-curl-pipe-shell", langs: ["dockerfile", "sh", "yaml"], severity: "warning", cwe: "CWE-494",
+      re: /\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b/i,
+      message: "A downloaded script is piped straight into a shell (curl … | sh), running unverified remote code. Download to a file, verify it, then run it." },
+    { id: "iac-docker-latest-tag", langs: ["dockerfile"], severity: "info", cwe: "CWE-1104",
+      re: /^\s*FROM\s+\S+:latest\b/i,
+      message: "A base image pinned to :latest is not reproducible and can pull in unexpected (or backdoored) changes on the next build. Pin a specific tag or digest." },
+
+    { id: "iac-env-secret-value", langs: ["env"], severity: "warning", cwe: "CWE-798",
+      re: /^\s*[A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY)[A-Za-z0-9_]*\s*=\s*\S+/i,
+      notMatch: /=\s*(?:$|["']?(?:changeme|change_me|example|your[_-]?|xxx+|placeholder|dummy|<|\$\{))/i,
+      message: "A real secret is assigned in an environment file. If this file is committed, the credential is in version control; keep secrets out of the repo and load them from a secret store." },
+
+    { id: "iac-k8s-privileged", langs: ["yaml"], severity: "error", cwe: "CWE-250",
+      re: /\bprivileged\s*:\s*true\b/i,
+      message: "A privileged container has full access to the host devices and kernel — a container escape becomes host compromise. Remove privileged: true and grant only the specific capabilities needed." },
+    { id: "iac-k8s-host-namespace", langs: ["yaml"], severity: "warning", cwe: "CWE-668",
+      re: /\b(?:hostNetwork|hostPID|hostIPC)\s*:\s*true\b/i,
+      message: "Sharing the host network, PID or IPC namespace removes container isolation and exposes host processes and interfaces to the workload." },
+    { id: "iac-k8s-allow-priv-esc", langs: ["yaml"], severity: "warning", cwe: "CWE-250",
+      re: /\ballowPrivilegeEscalation\s*:\s*true\b/i,
+      message: "allowPrivilegeEscalation: true lets a process gain more privileges than its parent (e.g. via setuid binaries). Set it to false in the security context." },
+    { id: "iac-k8s-run-as-root", langs: ["yaml"], severity: "warning", cwe: "CWE-250",
+      re: /\brunAsUser\s*:\s*0\b/,
+      message: "runAsUser: 0 runs the container as root. Set a non-zero user and runAsNonRoot: true." },
+
+    { id: "iac-tf-open-ingress", langs: ["terraform"], severity: "warning", cwe: "CWE-284",
+      re: /cidr_blocks?\s*=\s*\[[^\]]*"0\.0\.0\.0\/0"/,
+      message: "A security-group/firewall rule allows 0.0.0.0/0 — the resource is reachable from the entire internet. Restrict the CIDR to the addresses that actually need access." },
+    { id: "iac-tf-public-acl", langs: ["terraform"], severity: "warning", cwe: "CWE-732",
+      re: /\bacl\s*=\s*"public-read(?:-write)?"/,
+      message: "A public-read/-write ACL exposes the object store's contents (and, with -write, lets anyone modify them) to the public. Keep the bucket private and grant access explicitly." },
   ];
 
   function splitArgs(s) {
@@ -2687,12 +2791,16 @@ function registerSecScanHandlers() {
     const tainted = collectTainted(lines);
     const nameRe = tainted.size ? new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b") : null;
     const osFile = node_path.normalize(file);
+    const emitted = new Set();
     const emit = (n, col, rule) => {
       if (out.length >= SEC_MAX_FINDINGS) return;
       if (settings.disable.has(rule.id)) return;
+      const key = rule.id + ":" + n;
+      if (emitted.has(key)) return;
       const confidence = rule.confidence || "high";
       if ((SEC_RANK[confidence] ?? 2) < floor) return;
       if (secSuppressed(suppressions, n, rule.id)) return;
+      emitted.add(key);
       const severity = settings.severity[rule.id] || rule.severity || "warning";
       out.push({
         ruleId: rule.id,
@@ -2719,6 +2827,12 @@ function registerSecScanHandlers() {
         if (rule.id === "hardcoded-secret-literal" && !looksLikeSecretValue(line)) continue;
         emit(i + 1, m.index, rule);
       }
+      for (const rule of settings.customRules || []) {
+        if (!rule.langs.includes(lang)) continue;
+        rule.re.lastIndex = 0;
+        const m = rule.re.exec(line);
+        if (m) emit(i + 1, m.index, rule);
+      }
       if (nameRe) {
         for (const sink of TAINT_SINKS) {
           sink.re.lastIndex = 0;
@@ -2727,6 +2841,43 @@ function registerSecScanHandlers() {
           const win = (line + " " + (lines[i + 1] || "") + " " + (lines[i + 2] || "")).replace(sink.re, "");
           if (nameRe.test(win)) {
             emit(i + 1, m.index, {
+              id: sink.id,
+              cwe: sink.cwe,
+              severity: sink.confidence === "low" ? "warning" : "error",
+              confidence: sink.confidence || "medium",
+              message: sink.message,
+            });
+          }
+        }
+      }
+    }
+    let spanSeen = 0;
+    for (const span of logicalSpans(lines)) {
+      spanSeen += 1;
+      if (spanSeen % SEC_YIELD_LINES === 0) await new Promise((r) => setImmediate(r));
+      const text = span.text;
+      if (text.length > SEC_MAX_LINE * 2 || isSecComment(text)) continue;
+      for (const rule of RULES) {
+        if (!rule.langs.includes(lang)) continue;
+        rule.re.lastIndex = 0;
+        const m = rule.re.exec(text);
+        if (!m || secRuleSuppressed(rule, text)) continue;
+        if (rule.id === "hardcoded-secret-literal" && !looksLikeSecretValue(text)) continue;
+        emit(span.start + 1, 0, rule);
+      }
+      for (const rule of settings.customRules || []) {
+        if (!rule.langs.includes(lang)) continue;
+        rule.re.lastIndex = 0;
+        const m = rule.re.exec(text);
+        if (m) emit(span.start + 1, 0, rule);
+      }
+      if (nameRe) {
+        for (const sink of TAINT_SINKS) {
+          sink.re.lastIndex = 0;
+          const m = sink.re.exec(text);
+          if (!m) continue;
+          if (nameRe.test(text.replace(sink.re, ""))) {
+            emit(span.start + 1, 0, {
               id: sink.id,
               cwe: sink.cwe,
               severity: sink.confidence === "low" ? "warning" : "error",
@@ -2937,6 +3088,153 @@ function registerSecScanHandlers() {
     if (maj === 13 || maj === 14) return true;
     return false;
   }
+  const SEC_MANIFESTS = new Set(["requirements.txt", "pom.xml", "package-lock.json", "go.mod"]);
+
+  const SEC_VULN_DB = {
+    npm: [
+      { name: "lodash", lt: "4.17.21", id: "CVE-2021-23337", cwe: "CWE-1321", sev: "high", note: "prototype pollution and command injection via template" },
+      { name: "minimist", lt: "1.2.6", id: "CVE-2021-44906", cwe: "CWE-1321", sev: "high", note: "prototype pollution" },
+      { name: "axios", lt: "1.6.0", id: "CVE-2023-45857", cwe: "CWE-918", sev: "medium", note: "SSRF / credential leak following redirects" },
+      { name: "node-fetch", lt: "2.6.7", id: "CVE-2022-0235", cwe: "CWE-200", sev: "medium", note: "leaks cookies and Authorization across a redirect" },
+      { name: "ejs", lt: "3.1.7", id: "CVE-2022-29078", cwe: "CWE-94", sev: "high", note: "server-side template injection / RCE" },
+      { name: "jsonwebtoken", lt: "9.0.0", id: "CVE-2022-23529", cwe: "CWE-327", sev: "medium", note: "insecure key handling and verification" },
+      { name: "semver", lt: "7.5.2", id: "CVE-2022-25883", cwe: "CWE-1333", sev: "medium", note: "ReDoS in range parsing" },
+    ],
+    pip: [
+      { name: "jinja2", lt: "2.11.3", id: "CVE-2020-28493", cwe: "CWE-1333", sev: "medium", note: "ReDoS in the urlize filter" },
+      { name: "pyyaml", lt: "5.4", id: "CVE-2020-14343", cwe: "CWE-20", sev: "high", note: "arbitrary code execution via yaml.load" },
+      { name: "requests", lt: "2.31.0", id: "CVE-2023-32681", cwe: "CWE-200", sev: "medium", note: "leaks Proxy-Authorization across redirects" },
+    ],
+    maven: [
+      { name: "log4j-core", ge: "2.0.0", lt: "2.17.1", id: "CVE-2021-44228", cwe: "CWE-502", sev: "critical", note: "Log4Shell — JNDI lookup remote code execution" },
+      { name: "commons-text", ge: "1.5.0", lt: "1.10.0", id: "CVE-2022-42889", cwe: "CWE-94", sev: "high", note: "Text4Shell — script interpolation remote code execution" },
+    ],
+    go: [
+      { name: "github.com/dgrijalva/jwt-go", lt: "999.0.0", id: "CVE-2020-26160", cwe: "CWE-347", sev: "high", note: "unmaintained; access-restriction bypass — migrate to github.com/golang-jwt/jwt" },
+    ],
+  };
+
+  function cleanVer(s) {
+    const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(s || ""));
+    return m ? `${m[1]}.${m[2]}.${m[3] || 0}` : "";
+  }
+  function verCmp(a, b) {
+    const pa = a.split(".").map(Number);
+    const pb = b.split(".").map(Number);
+    for (let i = 0; i < 3; i += 1) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d) return d < 0 ? -1 : 1;
+    }
+    return 0;
+  }
+  function matchVuln(eco, name, version) {
+    const list = SEC_VULN_DB[eco] || [];
+    const lname = String(name).toLowerCase();
+    const clean = cleanVer(version);
+    if (!clean) return null;
+    for (const v of list) {
+      if (v.name !== lname) continue;
+      if (v.ge && verCmp(clean, v.ge) < 0) continue;
+      if (verCmp(clean, v.lt) < 0) return v;
+    }
+    return null;
+  }
+  function secLineOfIndex(content, index) {
+    let line = 1;
+    for (let i = 0; i < index && i < content.length; i += 1) if (content.charCodeAt(i) === 10) line += 1;
+    return line;
+  }
+  function vulnFinding(file, name, version, hit, line) {
+    return {
+      ruleId: `vuln-dep-${hit.id.toLowerCase()}`,
+      cwe: hit.cwe,
+      severity: hit.sev,
+      confidence: "high",
+      message: `${name} ${version} — ${hit.id} (${hit.note}). Upgrade to ${hit.lt} or later.`,
+      file: node_path.normalize(file),
+      line: line || 1,
+      col: 1,
+    };
+  }
+
+  function auditRequirements(file, content) {
+    const out = [];
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = /^\s*([A-Za-z0-9_.\-]+)\s*(?:==|>=|~=|<=)\s*([0-9][0-9A-Za-z.\-]*)/.exec(lines[i]);
+      if (!m) continue;
+      const hit = matchVuln("pip", m[1], m[2]);
+      if (hit) out.push(vulnFinding(file, m[1], m[2], hit, i + 1));
+    }
+    return out;
+  }
+
+  function auditPomXml(file, content) {
+    const out = [];
+    const re = /<artifactId>\s*([\w.\-]+)\s*<\/artifactId>\s*<version>\s*([\w.\-]+)\s*<\/version>/g;
+    let m;
+    while ((m = re.exec(content))) {
+      const hit = matchVuln("maven", m[1], m[2]);
+      if (hit) out.push(vulnFinding(file, m[1], m[2], hit, secLineOfIndex(content, m.index)));
+    }
+    return out;
+  }
+
+  function auditPackageLock(file, content) {
+    const out = [];
+    let lock;
+    try {
+      lock = JSON.parse(content);
+    } catch {
+      return out;
+    }
+    const seen = new Set();
+    const check = (name, version) => {
+      if (!name || !version || seen.has(`${name}@${version}`)) return;
+      seen.add(`${name}@${version}`);
+      const hit = matchVuln("npm", name, version);
+      if (hit) out.push(vulnFinding(file, name, version, hit, pkgLineOfKey(content, name)));
+    };
+    if (lock.packages && typeof lock.packages === "object") {
+      for (const [p, info] of Object.entries(lock.packages)) {
+        if (!p || !info || typeof info !== "object") continue;
+        check(p.split("node_modules/").pop(), info.version);
+      }
+    }
+    const walk = (deps) => {
+      if (!deps || typeof deps !== "object") return;
+      for (const [name, info] of Object.entries(deps)) {
+        if (info && typeof info === "object") {
+          check(name, info.version);
+          walk(info.dependencies);
+        }
+      }
+    };
+    walk(lock.dependencies);
+    return out;
+  }
+
+  function auditGoMod(file, content) {
+    const out = [];
+    const re = /^\s*(?:require\s+)?([A-Za-z0-9._~/-]+\.[A-Za-z0-9._~/-]+)\s+v([0-9][0-9A-Za-z.\-+]*)/gm;
+    let m;
+    while ((m = re.exec(content))) {
+      const hit = matchVuln("go", m[1], m[2]);
+      if (hit) out.push(vulnFinding(file, m[1], `v${m[2]}`, hit, secLineOfIndex(content, m.index)));
+    }
+    return out;
+  }
+
+  function auditManifest(file, content) {
+    const base = node_path.basename(file).toLowerCase();
+    if (base === "package.json") return auditPackageJson(file, content);
+    if (base === "package-lock.json") return auditPackageLock(file, content);
+    if (base === "requirements.txt") return auditRequirements(file, content);
+    if (base === "pom.xml") return auditPomXml(file, content);
+    if (base === "go.mod") return auditGoMod(file, content);
+    return [];
+  }
+
   function auditPackageJson(file, content) {
     let pkg;
     try { pkg = JSON.parse(content); } catch { return []; }
@@ -2954,6 +3252,10 @@ function registerSecScanHandlers() {
         message: p + " is the React Server Components deserialiser at the heart of React2Shell (CVE-2025-55182) — ensure it is on a patched React version.",
         file: norm, line: pkgLineOfKey(content, p), col: 1 });
     }
+    for (const [name, ver] of Object.entries(deps)) {
+      const hit = matchVuln("npm", name, ver);
+      if (hit) out.push(vulnFinding(norm, name, ver, hit, pkgLineOfKey(content, name)));
+    }
     return out;
   }
 
@@ -2970,7 +3272,7 @@ function registerSecScanHandlers() {
       } else if (entry.isFile()) {
         const ext = (entry.name.split(".").pop() || "").toLowerCase();
         if (skip && skip(full)) continue;
-        if (SEC_LANG[ext] || entry.name === "package.json") { budget.files += 1; yield full; }
+        if (SEC_LANG[ext] || entry.name === "package.json" || SEC_MANIFESTS.has(entry.name.toLowerCase())) { budget.files += 1; yield full; }
       }
     }
   }
@@ -3033,13 +3335,14 @@ function registerSecScanHandlers() {
         present.add(osFile);
         const ext = (file.split(".").pop() || "").toLowerCase();
         const lang = SEC_LANG[ext];
-        if (node_path.basename(file) === "package.json") {
+        const baseName = node_path.basename(file).toLowerCase();
+        if (baseName === "package.json" || SEC_MANIFESTS.has(baseName)) {
           let pstats; try { pstats = await promises.stat(file); } catch { continue; }
           if (pstats.size > SEC_MAX_BYTES || pstats.size === 0) { fileMap.delete(osFile); continue; }
           const pcached = fileMap.get(osFile);
           if (pcached && pcached.mtime === pstats.mtimeMs && pcached.size === pstats.size) continue;
           let pcontent; try { pcontent = await promises.readFile(file, "utf8"); } catch { continue; }
-          fileMap.set(osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, pcontent), summaries: [], calls: [], mtime: pstats.mtimeMs, size: pstats.size });
+          fileMap.set(osFile, { file: osFile, lang: "manifest", single: auditManifest(osFile, pcontent), summaries: [], calls: [], mtime: pstats.mtimeMs, size: pstats.size });
           continue;
         }
         if (!lang) continue;
@@ -3153,6 +3456,24 @@ function registerSecScanHandlers() {
       ],
     };
   }
+
+  electron.ipcMain.handle("security:testRule", async (_event, pattern, flags, sample) => {
+    if (typeof pattern !== "string" || !pattern) return { ok: false, error: "No pattern." };
+    let re;
+    try {
+      re = new RegExp(pattern, typeof flags === "string" ? flags.replace(/[^gimsuy]/g, "") : "");
+    } catch (error) {
+      return { ok: false, error: String(error.message || error) };
+    }
+    const lines = String(sample || "").split("\n");
+    const matches = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      re.lastIndex = 0;
+      if (re.test(lines[i])) matches.push({ line: i + 1, text: lines[i].slice(0, 200) });
+      if (matches.length >= 100) break;
+    }
+    return { ok: true, matches };
+  });
 
   electron.ipcMain.handle("security:export", async (_event, root, format) => {
     if (!root || typeof root !== "string") return { ok: false, error: "No project is open." };

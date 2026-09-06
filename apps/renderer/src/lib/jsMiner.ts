@@ -123,6 +123,60 @@ export function mineJs(text: string): MinerResult {
   };
 }
 
+export interface RecoveredSource {
+  path: string;
+  content: string;
+}
+
+export function sourceMapRef(text: string): string {
+  const match = /\/\/[#@]\s*sourceMappingURL=(\S+)/.exec(text);
+  return match ? match[1] : "";
+}
+
+export function inlineSourceMap(ref: string): string {
+  const match = /^data:application\/json(?:;charset=[^;,]+)?(;base64)?,(.*)$/is.exec(ref);
+  if (!match) return "";
+  try {
+    return match[1] ? atob(match[2]) : decodeURIComponent(match[2]);
+  } catch {
+    return "";
+  }
+}
+
+export function parseSourceMap(jsonText: string): RecoveredSource[] {
+  try {
+    const map = JSON.parse(jsonText) as { sources?: unknown; sourcesContent?: unknown };
+    const sources = Array.isArray(map.sources) ? map.sources : [];
+    const contents = Array.isArray(map.sourcesContent) ? map.sourcesContent : [];
+    const out: RecoveredSource[] = [];
+    for (let i = 0; i < sources.length; i += 1) {
+      const content = contents[i];
+      if (typeof content === "string" && content.length) {
+        out.push({ path: String(sources[i] || `source-${i}`), content });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+export function severityForSecret(kind: string): "low" | "medium" | "high" {
+  if (kind === "Stripe Publishable Key" || kind === "Google OAuth Client ID") return "low";
+  if (kind === "Generic API Key") return "medium";
+  return "high";
+}
+
+export function absoluteEndpoint(endpoint: string, source: string): string {
+  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  if (endpoint.startsWith("//")) return `https:${endpoint}`;
+  try {
+    return new URL(endpoint, source).toString();
+  } catch {
+    return endpoint;
+  }
+}
+
 export function isJavascriptEntry(url: string, headers: [string, string][]): boolean {
   const type = headers.find(([k]) => k.toLowerCase() === "content-type")?.[1]?.toLowerCase() ?? "";
   if (type.includes("javascript") || type.includes("ecmascript")) return true;

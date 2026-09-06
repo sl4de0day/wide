@@ -166,6 +166,7 @@
     browserClose: function (tabId) { hostCmd("browser-close", { tabId: tabId }); },
     browserDevtools: function (open, activeUrl, tabId) { return invoke("browser:devtools", open, activeUrl, tabId); },
     browserCdp: function (tabId, method, params) { return invoke("browser:cdp", tabId, method, params); },
+    securityTestRule: function (pattern, flags, sample) { return invoke("security:testRule", pattern, flags, sample); },
     webtoolsCyberchef: function () { return invoke("webtools:cyberchef"); },
     webtoolsWappalyzer: function () { return invoke("webtools:wappalyzer"); },
     oastStart: function (server, token) { return invoke("oast:start", server, token); },

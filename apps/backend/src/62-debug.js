@@ -152,7 +152,7 @@ function debugHandle(message) {
     if (dbg) {
       dbg.scripts.set(params.scriptId, params.url);
 
-      if (dbg.browser) void debugOnScriptParsed(params.scriptId, params.url, params.sourceMapURL);
+      if (dbg.browser || dbg.sourceMaps) void debugOnScriptParsed(params.scriptId, params.url, params.sourceMapURL);
     }
     return;
   }
@@ -170,7 +170,7 @@ function debugHandle(message) {
       let line = frame.location.lineNumber;
       const column = frame.location.columnNumber || 0;
 
-      if (dbg && dbg.browser) {
+      if (dbg && (dbg.browser || dbg.sourceMaps)) {
         const orig = smOriginalPositionFor(dbg.scriptMaps.get(scriptId), line, column);
         if (orig && orig.source) {
           const abs = debugResolveOriginal(orig.source);
@@ -258,6 +258,7 @@ async function debugStart(event, cwd, file, breakpoints) {
     paused: false,
     sender: event.sender,
     breakpoints: breakpoints || [],
+    sourceMaps: true,
   };
 
   child.stdout.on("data", (chunk) => debugEmit({ type: "output", stream: "stdout", text: chunk.toString("utf8") }));

@@ -1,4 +1,4 @@
-import { CircleAlert, Copy, FileDown, Network, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CircleAlert, Copy, FileDown, Network, RefreshCw, ShieldCheck, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { Diagnostic, ProjectScanFinding } from "@/lib/bridge";
@@ -8,6 +8,7 @@ import { cn, basename, copyText } from "@/lib/utils";
 import { toast } from "@/stores/toast";
 import { useDiagnostics } from "@/stores/diagnostics";
 import { useEditor } from "@/stores/editor";
+import { SecurityRulesModal } from "@/components/SecurityRulesModal";
 import { useProjectScan } from "@/stores/projectScan";
 import { useWorkspace } from "@/stores/workspace";
 
@@ -24,6 +25,7 @@ export function ProblemsPanel() {
   const root = useWorkspace((state) => state.root);
   const t = useT();
   const [tab, setTab] = useState<Tab>("problems");
+  const [showRules, setShowRules] = useState(false);
   const scanFindings = useProjectScan((state) => state.findings);
   const scanning = useProjectScan((state) => state.scanning);
   const projectProblems = useDiagnostics((state) => state.projectProblems);
@@ -166,6 +168,17 @@ export function ProblemsPanel() {
                 <ShieldCheck className="size-3" strokeWidth={1.75} />
                 {t("Set baseline")}
               </button>
+              {root && (
+                <button
+                  type="button"
+                  onClick={() => setShowRules(true)}
+                  title={t("Write and test your own security rules")}
+                  className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+                >
+                  <SlidersHorizontal className="size-3" strokeWidth={1.75} />
+                  {t("Custom rules")}
+                </button>
+              )}
             </>
           )}
           <button
@@ -314,6 +327,7 @@ export function ProblemsPanel() {
           ))
         )}
       </div>
+      {showRules && root && <SecurityRulesModal root={root} onClose={() => setShowRules(false)} />}
     </div>
   );
 }

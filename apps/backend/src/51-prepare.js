@@ -83,9 +83,10 @@ const MANAGER_BOOTSTRAP = {
   python: { package: "Python.Python.3.13", label: "Python" },
   dotnet: { package: "Microsoft.DotNet.SDK.9", label: ".NET SDK" },
   rustup: { package: "Rustlang.Rustup", label: "Rust" },
-  cs: { package: "VirtusLab.Coursier", label: "Coursier" },
+  cs: { archive: { github: "coursier/coursier", asset: /^cs-x86_64-pc-win32\.zip$/, file: "cs.zip" }, bin: ["cs-x86_64-pc-win32.exe", "cs.exe"], rename: "cs.exe", label: "Coursier" },
   java: { package: "EclipseAdoptium.Temurin.21.JDK", label: "Java" },
-  elixir: { package: "ElixirLang.Elixir", label: "Elixir" },
+  erl: { package: "Erlang.ErlangOTP", label: "Erlang/OTP" },
+  elixir: { archive: { github: "elixir-lang/elixir", asset: /^elixir-otp-\d+\.zip$/, file: "elixir.zip" }, bin: ["elixir.bat"], requires: "erl", label: "Elixir" },
 
 
   ollama: { package: "Ollama.Ollama", label: "Ollama" },
@@ -146,6 +147,17 @@ const PROVISIONERS = {
     args: ["install", "metals"],
     provides: "metals",
     csBin: true,
+    needs: "java",
+  },
+  erlang: {
+    archive: {
+      github: "erlang-ls/erlang_ls",
+      asset: /^erlang_ls-windows-.*\.tar\.gz$/,
+      file: "erlang_ls.tar.gz",
+      binaries: ["erlang_ls.cmd", "erlang_ls.bat", "erlang_ls"],
+    },
+    provides: "erlang_ls",
+    needs: "erl",
   },
   java: {
     archive: {
@@ -207,7 +219,7 @@ const PROVISIONERS = {
 
 const TOOL_PROVISIONERS = {
 
-  trufflehog: { manager: "go", args: ["install", "github.com/trufflesecurity/trufflehog/v3@latest"], provides: "trufflehog", goBin: true },
+  trufflehog: { kind: "asset", archive: { github: "trufflesecurity/trufflehog", asset: /^trufflehog_.*_windows_amd64\.tar\.gz$/, file: "trufflehog.tar.gz" }, find: /^trufflehog\.exe$/i, provides: "trufflehog", binOnPath: true },
   nuclei: { manager: "go", args: ["install", "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"], provides: "nuclei", goBin: true },
   ffuf: { manager: "go", args: ["install", "github.com/ffuf/ffuf/v2@latest"], provides: "ffuf", goBin: true },
   katana: { manager: "go", args: ["install", "github.com/projectdiscovery/katana/cmd/katana@latest"], provides: "katana", goBin: true },
@@ -241,8 +253,8 @@ const TOOL_PROVISIONERS = {
 
   cyberchef: {
     kind: "asset",
-    archive: { github: "gchq/CyberChef", asset: /^CyberChef_v[\d.]+\.zip$/i, file: "cyberchef.zip" },
-    find: /^CyberChef_v[\d.]+\.html$/i,
+    archive: { github: "gchq/CyberChef", asset: /^CyberChef.*\.zip$/i, file: "cyberchef.zip" },
+    find: /^CyberChef.*\.html$/i,
     provides: "CyberChef",
   },
   wappalyzer: {
@@ -775,9 +787,105 @@ async function installWebAsset(id, spec, track = null) {
 }
 
 
+const managedBinDirs = new Set();
+
+function binPathsFile() {
+  return node_path.join(electron.app.getPath("userData"), "binpaths.json");
+}
+
+function prependPath(dir) {
+  if (!dir) return;
+  const parts = (process.env.PATH || "").split(node_path.delimiter);
+  if (!parts.includes(dir)) process.env.PATH = dir + node_path.delimiter + (process.env.PATH || "");
+}
+
+async function rememberBinDir(dir) {
+  if (!dir || managedBinDirs.has(dir)) return;
+  managedBinDirs.add(dir);
+  prependPath(dir);
+  try {
+    await writeFileAtomic(binPathsFile(), JSON.stringify([...managedBinDirs]), "utf8");
+  } catch {
+    void 0;
+  }
+}
+
+async function loadManagedBinDirs() {
+  let list = [];
+  try {
+    list = JSON.parse(await promises.readFile(binPathsFile(), "utf8"));
+  } catch {
+    return;
+  }
+  if (!Array.isArray(list)) return;
+  for (const dir of list) {
+    try {
+      await promises.access(dir);
+      managedBinDirs.add(dir);
+      prependPath(dir);
+    } catch {
+      void 0;
+    }
+  }
+}
+
+async function bootstrapArchive(manager, bootstrap, track = null) {
+  const already = await commandExists(manager);
+  if (already) return { ok: true, path: already };
+
+  const archive = bootstrap.archive;
+  const url = archive.github ? await latestAsset(archive.github, archive.asset, track) : archive.url;
+  if (!url) return { ok: false, toolchain: bootstrap.label, detail: "The download could not be found." };
+
+  const dir = node_path.join(electron.app.getPath("userData"), "toolchains", manager);
+  const temp = node_path.join(electron.app.getPath("temp"), `wide-tc-${manager}-${process.pid}`);
+  try {
+    await promises.rm(dir, { recursive: true, force: true });
+    await promises.mkdir(dir, { recursive: true });
+    await promises.mkdir(temp, { recursive: true });
+  } catch (error) {
+    return { ok: false, toolchain: bootstrap.label, detail: String(error.message) };
+  }
+
+  const file = node_path.join(temp, archive.file);
+  const fetched = await download(url, file, 6, track);
+  if (!fetched.ok) {
+    await promises.rm(temp, { recursive: true, force: true }).catch(() => {});
+    return { ok: false, toolchain: bootstrap.label, detail: fetched.detail ?? "" };
+  }
+
+  const unpacked = await runManager("tar", ["-xf", file, "-C", dir], { timeout: DOWNLOAD_TIMEOUT_MS, track });
+  await promises.rm(temp, { recursive: true, force: true }).catch(() => {});
+  if (!unpacked.ok) {
+    return { ok: false, toolchain: bootstrap.label, detail: unpacked.detail || "The download could not be unpacked." };
+  }
+
+  let binPath = await findUnder(dir, bootstrap.bin);
+  if (!binPath) return { ok: false, toolchain: bootstrap.label, detail: "The download unpacked but the command was not in it." };
+  if (bootstrap.rename && node_path.basename(binPath) !== bootstrap.rename) {
+    const renamed = node_path.join(node_path.dirname(binPath), bootstrap.rename);
+    try {
+      await promises.rename(binPath, renamed);
+      binPath = renamed;
+    } catch {
+      void 0;
+    }
+  }
+  await rememberBinDir(node_path.dirname(binPath));
+  return { ok: true, path: binPath };
+}
+
 async function bootstrapManager(manager, track = null) {
   const bootstrap = MANAGER_BOOTSTRAP[manager];
   if (!bootstrap) return { ok: false, detail: "" };
+
+  if (bootstrap.requires && !(await commandExists(bootstrap.requires))) {
+    const dependency = await bootstrapManager(bootstrap.requires, track);
+    if (!dependency.ok) return dependency;
+  }
+
+  if (bootstrap.archive) return bootstrapArchive(manager, bootstrap, track);
+
   if (!(await commandExists("winget"))) {
     return { ok: false, detail: "winget is not on this machine." };
   }
@@ -802,6 +910,7 @@ async function bootstrapManager(manager, track = null) {
 }
 
 function registerPrepareHandlers() {
+  void loadManagedBinDirs();
 
 
 
@@ -861,10 +970,14 @@ async function prepareTool(id, spec, track) {
 
   if (spec.kind === "asset") {
     const existing = await webAssetPath(id, spec);
-    if (existing) return remember("present", existing);
+    if (existing) {
+      if (spec.binOnPath) await rememberBinDir(node_path.dirname(existing));
+      return remember("present", existing);
+    }
     const done = await installWebAsset(id, spec, track);
     if (stopped() || done.cancelled) return cancelled;
     if (!done.ok) return remember("failed", "", { detail: done.detail ?? "" });
+    if (spec.binOnPath) await rememberBinDir(node_path.dirname(done.path));
     return remember("installed", done.path);
   }
 

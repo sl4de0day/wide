@@ -1,5 +1,5 @@
 ﻿#define AppName "Wide"
-#define AppVersion "0.66926"
+#define AppVersion "0.76926"
 #define AppPublisher "sl4de"
 #define AppRepo "https://github.com/sl4de0day/wide"
 
@@ -121,6 +121,18 @@ begin
     begin
       ExtractTemporaryFile('MicrosoftEdgeWebview2Setup.exe');
       Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, code);
+    end;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurStep: TUninstallStep);
+begin
+  if CurStep = usPostUninstall then
+  begin
+    if MsgBox('Remove Wide''s data too (settings, saved keys, proxy CA, extensions, browser data)? Choose No to keep them.', mbConfirmation, MB_YESNO) = IDYES then
+    begin
+      DelTree(ExpandConstant('{userappdata}\wide'), True, True, True);
+      DelTree(ExpandConstant('{localappdata}\wide'), True, True, True);
     end;
   end;
 end;

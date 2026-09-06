@@ -294,9 +294,23 @@ const safeStorage = {
   isStaleSeal() { return encStale; },
 };
 
+let portableRootCache;
+function portableRoot() {
+  if (portableRootCache !== undefined) return portableRootCache;
+  portableRootCache = null;
+  try {
+    const exeDir = path.dirname(process.execPath);
+    if (fs.existsSync(path.join(exeDir, 'portable')) || fs.existsSync(path.join(exeDir, 'wide.portable'))) {
+      portableRootCache = exeDir;
+    }
+  } catch {}
+  if (!portableRootCache && process.env.WIDE_PORTABLE) portableRootCache = process.env.WIDE_PORTABLE;
+  return portableRootCache;
+}
+
 function userDataDir() {
-  const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-  const dir = path.join(base, 'wide');
+  const root = portableRoot();
+  const dir = root ? path.join(root, 'data') : path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'wide');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return dir;
 }

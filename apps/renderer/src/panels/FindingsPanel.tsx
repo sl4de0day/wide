@@ -1,10 +1,13 @@
-import { ClipboardCopy, Plus, Trash2, X } from "lucide-react";
+import { ClipboardCopy, FileDown, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
+import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
-import { findingsReport, SEVERITIES, useFindings, type Severity } from "@/stores/findings";
+import { findingsReport, findingsReportHtml, SEVERITIES, useFindings, type Severity } from "@/stores/findings";
+import { toast } from "@/stores/toast";
+import { useWorkspace } from "@/stores/workspace";
 
 const SEVERITY_TONE: Record<Severity, string> = {
   critical: "bg-rose-500/15 text-rose-300 border-rose-500/40",
@@ -70,6 +73,18 @@ export function FindingsPanel() {
     }
   };
 
+  const exportHtml = async () => {
+    const root = useWorkspace.getState().root;
+    if (!root) {
+      toast.error(t("Open a project to save the report."));
+      return;
+    }
+    const target = `${root}/wide-findings-report.html`;
+    const written = await bridge.writeFile(target, findingsReportHtml(findings));
+    if (written.error) toast.error(t(written.error));
+    else toast.success(t("Report saved to wide-findings-report.html."));
+  };
+
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t("Findings")}>
@@ -77,6 +92,11 @@ export function FindingsPanel() {
         {findings.length > 0 && (
           <button type="button" onClick={() => void copyReport()} title={t("Copy report (Markdown)")} aria-label={t("Copy report (Markdown)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
             <ClipboardCopy className="size-3.5" strokeWidth={1.5} />
+          </button>
+        )}
+        {findings.length > 0 && (
+          <button type="button" onClick={() => void exportHtml()} title={t("Export report (HTML)")} aria-label={t("Export report (HTML)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
+            <FileDown className="size-3.5" strokeWidth={1.5} />
           </button>
         )}
         <button type="button" onClick={() => setAdding((v) => !v)} title={t("Add finding")} aria-label={t("Add finding")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">

@@ -369,7 +369,17 @@ export function IntruderView() {
 
       <div className="grid min-h-0 shrink-0 grid-cols-2 gap-2 border-b border-line p-2">
         <div className="flex min-h-0 flex-col">
-          <span className="pb-1 text-[10px] uppercase tracking-wide text-fg-faint">{t("Request — mark the payload with §…§")}</span>
+          <div className="flex items-center justify-between pb-1">
+            <span className="text-[10px] uppercase tracking-wide text-fg-faint">{t("Request — mark the payload with §…§")}</span>
+            <button
+              type="button"
+              onClick={() => setTemplate('POST https://example.com/graphql\nContent-Type: application/json\n\n{"query":"query { user(id: \\"§payload§\\") { id name } }"}')}
+              title={t("Insert a GraphQL request template")}
+              className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-fg-dim hover:bg-hover hover:text-fg"
+            >
+              {t("GraphQL")}
+            </button>
+          </div>
           <textarea
             value={template}
             onChange={(event) => setTemplate(event.target.value)}

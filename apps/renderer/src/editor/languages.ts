@@ -51,8 +51,20 @@ const GRAMMARS: ReadonlyArray<{
 
   {
     label: "CSS",
-    exts: ["css", "scss", "less", "pcss", "postcss"],
+    exts: ["css", "less", "pcss", "postcss"],
     load: async () => (await import("@codemirror/lang-css")).css(),
+  },
+
+  {
+    label: "SCSS",
+    exts: ["scss"],
+    load: async () => (await import("@codemirror/lang-sass")).sass({ indented: false }),
+  },
+
+  {
+    label: "Sass",
+    exts: ["sass"],
+    load: async () => (await import("@codemirror/lang-sass")).sass({ indented: true }),
   },
 
   {

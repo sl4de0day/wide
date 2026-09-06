@@ -1,4 +1,4 @@
-import { ArrowUpRight, Braces, Crosshair, Download, FileWarning, Flag, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
+import { ArrowUpRight, Braces, Crosshair, Download, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -8,7 +8,9 @@ import { csrfPocFromRequest } from "@/lib/poc/generate";
 import { useWorkspace } from "@/stores/workspace";
 import { useT } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
+import { useCyberchef } from "@/stores/cyberchef";
 import { useDecoder } from "@/stores/decoder";
+import { useExtensions } from "@/stores/extensions";
 import { useCatcher } from "@/stores/catcher";
 import { useEditor } from "@/stores/editor";
 import { useFindings } from "@/stores/findings";
@@ -135,6 +137,7 @@ function WsComposer({ id, seed }: { id: number; seed?: { text: string; direction
 }
 
 function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) {
+  const hasCyberchef = useExtensions((state) => state.installed.has("cyberchef"));
   const t = useT();
   const [tab, setTab] = useState<"request" | "response">("request");
   const [wsSeed, setWsSeed] = useState<{ text: string; direction: "up" | "down" } | null>(null);
@@ -278,6 +281,17 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
         >
           <Braces className="size-3.5" strokeWidth={2} />
         </button>
+        {hasCyberchef && (
+          <button
+            type="button"
+            onClick={() => useCyberchef.getState().send(tab === "response" ? entry.resBody : entry.reqBody)}
+            title={t("Send to CyberChef")}
+            aria-label={t("Send to CyberChef")}
+            className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            <FlaskConical className="size-3.5" strokeWidth={2} />
+          </button>
+        )}
         {}
         <button
           type="button"

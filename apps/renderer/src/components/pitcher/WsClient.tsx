@@ -1,4 +1,4 @@
-import { Plug, PlugZap, Send, Trash2 } from "lucide-react";
+import { Crosshair, Plug, PlugZap, Send, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
@@ -84,6 +84,26 @@ export function WsClient({ req }: { req: PitcherRequest }) {
     }
   };
 
+  const fuzz = async () => {
+    if (!connected) return;
+    const picked = await bridge.openFile();
+    if (!picked?.path) return;
+    const file = await bridge.readFile(picked.path);
+    if (file.error) {
+      append({ dir: "sys", text: `error: ${file.error}`, at: Date.now() });
+      return;
+    }
+    const lines = file.content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 1000);
+    append({ dir: "sys", text: `fuzzing ${lines.length} payloads`, at: Date.now() });
+    for (const line of lines) {
+      const text = resolveVars(line, scopeVars(req));
+      const reply = await bridge.wsSend(req.id, text);
+      append(reply.ok ? { dir: "up", text, at: Date.now() } : { dir: "sys", text: `error: ${reply.error}`, at: Date.now() });
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    append({ dir: "sys", text: "fuzz complete", at: Date.now() });
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1.5">
@@ -129,6 +149,10 @@ export function WsClient({ req }: { req: PitcherRequest }) {
         <button type="button" onClick={send} disabled={!connected} className="flex shrink-0 items-center gap-1.5 rounded-sm border border-accent px-3 py-1 text-[11px] text-accent hover:bg-accent hover:text-bg disabled:opacity-40">
           <Send className="size-3" strokeWidth={1.75} />
           {t("Send")}
+        </button>
+        <button type="button" onClick={() => void fuzz()} disabled={!connected} title={t("Fuzz: send each line of a wordlist")} className="flex shrink-0 items-center gap-1.5 rounded-sm border border-line px-2 py-1 text-[11px] text-fg-dim hover:bg-hover hover:text-fg disabled:opacity-40">
+          <Crosshair className="size-3" strokeWidth={1.75} />
+          {t("Fuzz")}
         </button>
       </div>
     </div>

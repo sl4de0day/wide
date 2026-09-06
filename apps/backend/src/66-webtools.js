@@ -71,7 +71,7 @@ function registerWebtoolsHandlers() {
     const servers = await readServers();
     const record = servers && servers.cyberchef;
     let htmlPath = record && record.path ? record.path : null;
-    if (!htmlPath) htmlPath = await webAssetPath("cyberchef", { find: /^CyberChef_v[\d.]+\.html$/i });
+    if (!htmlPath) htmlPath = await webAssetPath("cyberchef", { find: /^CyberChef.*\.html$/i });
     if (!htmlPath) return { ok: false, error: "CyberChef has not been unpacked yet." };
     const port = await startWebtoolsServer();
     if (!port) return { ok: false, error: "The local server could not start." };
