@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SRC = path.join(__dirname, 'src');
+const RUNTIME = path.join(__dirname, 'runtime');
 const OUT = path.resolve(__dirname, '..', '..', 'out', 'main', 'index.js');
 
 const files = fs
@@ -24,5 +25,6 @@ const parts = files.map((name) => {
 });
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
+fs.cpSync(RUNTIME, path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, `${parts.join('\n')}\n`, 'utf8');
 console.log(`backend: ${files.length} segments -> ${path.relative(process.cwd(), OUT)}`);

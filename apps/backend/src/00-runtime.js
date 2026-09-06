@@ -44,7 +44,7 @@ function killProcessTree(child) {
 }
 
 const prettier = require("prettier");
-const protocol = require("./chunks/protocol--BCXEARA.js");
+const protocol = require("./chunks/protocol.js");
 const IGNORED$3 =  new Set(["node_modules", ".git", "dist", "out", ".DS_Store"]);
 const MAX_FILE_BYTES$1 = 4 * 1024 * 1024;
 function isInside(candidate, parent) {
