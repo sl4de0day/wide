@@ -111,19 +111,43 @@ function snapshotFor(file) {
   return snapshot;
 }
 
+function resolveCompilerOptions(root) {
+  const configPath = ts.findConfigFile(root, ts.sys.fileExists, 'tsconfig.json') ||
+    ts.findConfigFile(root, ts.sys.fileExists, 'jsconfig.json');
+  if (!configPath) return { options: { ...COMPILER_OPTIONS }, configPath: null };
+  try {
+    const read = ts.readConfigFile(configPath, ts.sys.readFile);
+    if (read.error) return { options: { ...COMPILER_OPTIONS }, configPath: null };
+    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, path.dirname(configPath));
+    const options = {
+      ...COMPILER_OPTIONS,
+      ...parsed.options,
+      allowNonTsExtensions: true,
+      noEmit: true,
+      skipLibCheck: true,
+    };
+    return { options, configPath };
+  } catch {
+    return { options: { ...COMPILER_OPTIONS }, configPath: null };
+  }
+}
+
+let compilerOptions = { ...COMPILER_OPTIONS };
+
 function createService(rootPath) {
   const root = norm(rootPath);
   projectRoot = root;
   projectFiles = [];
   snapshots.clear();
   collectFiles(root, projectFiles);
+  compilerOptions = resolveCompilerOptions(root).options;
 
   const host = {
     getScriptFileNames: () => [...new Set([...projectFiles, ...overlay.keys()])],
     getScriptVersion: (file) => String(versions.get(file) ?? 0),
     getScriptSnapshot: snapshotFor,
     getCurrentDirectory: () => root,
-    getCompilationSettings: () => COMPILER_OPTIONS,
+    getCompilationSettings: () => compilerOptions,
 
     getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
     fileExists: ts.sys.fileExists,
@@ -321,6 +345,7 @@ const OPS = {
     if (!languageService) return { counts: {} };
     const rootPrefix = norm(root);
     const counts = {};
+    const problems = [];
     let scanned = 0;
     try {
       for (const file of languageService.getProgram()?.getSourceFiles() ?? []) {
@@ -338,11 +363,25 @@ const OPS = {
           else if (entry.category === ts.DiagnosticCategory.Warning) warnings += 1;
         }
         if (errors || warnings) counts[name] = { errors, warnings };
+        for (const entry of list) {
+          if (entry.category !== ts.DiagnosticCategory.Error && entry.category !== ts.DiagnosticCategory.Warning) continue;
+          if (problems.length >= 2000) break;
+          const start = entry.start ?? 0;
+          const pos = entry.file ? entry.file.getLineAndCharacterOfPosition(start) : { line: 0, character: 0 };
+          problems.push({
+            file: name,
+            line: pos.line + 1,
+            column: pos.character + 1,
+            severity: entry.category === ts.DiagnosticCategory.Error ? 'error' : 'warning',
+            message: ts.flattenDiagnosticMessageText(entry.messageText, '\n'),
+            code: entry.code,
+          });
+        }
       }
     } catch (error) {
-      return { counts, error: error.message };
+      return { counts, problems, error: error.message };
     }
-    return { counts, scanned };
+    return { counts, problems, scanned };
   },
 
   quickInfo(root, filePath, position) {

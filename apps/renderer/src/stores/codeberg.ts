@@ -4,7 +4,7 @@ import { bridge, type CodebergCommit, type CodebergFile, type CodebergStatus, ty
 import { providerFor, type GitProvider } from "@/lib/gitProviders";
 import { useWorkspace } from "./workspace";
 
-export type SyncStage = "" | "pushing" | "pulling" | "committing" | "staging";
+export type SyncStage = "" | "pushing" | "pulling" | "committing" | "staging" | "stashing";
 
 export interface Message {
   key: string;
@@ -42,6 +42,7 @@ interface CodebergState {
   switchBranch(name: string, create: boolean): Promise<boolean>;
   push(withTags: boolean): Promise<void>;
   pull(): Promise<void>;
+  stash(action: "push" | "pop"): Promise<void>;
   init(branch: string): Promise<void>;
   setRemote(url: string): Promise<void>;
   setIdentity(name: string, email: string): Promise<void>;
@@ -211,6 +212,18 @@ export const useCodeberg = create<CodebergState>((set, get) => ({
       set({ busy: "", error: failure(reply) });
     }
     await get().refresh();
+  },
+
+  stash: async (action) => {
+    set({ busy: "stashing", error: null, notice: null });
+    const reply = await bridge.codebergStash(root(), action);
+    set({
+      busy: "",
+      error: reply.ok ? null : failure(reply),
+      notice: reply.ok ? { key: action === "pop" ? "Stash popped." : "Changes stashed." } : null,
+    });
+    await get().refresh();
+    if (reply.ok) void useWorkspace.getState().refresh();
   },
 
   pull: async () => {

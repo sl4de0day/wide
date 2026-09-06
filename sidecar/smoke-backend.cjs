@@ -75,12 +75,87 @@ const GONE = [
   failed += await checkUpdateIntegrity();
   failed += await checkCatcherAutosave();
   failed += await checkMcpTrustGate();
+  failed += await checkSecurityScanControls();
   failed += checkNativeColours();
 
   console.log(failed === 0 ? '\nAll backend checks passed.' : `\n${failed} check(s) failed.`);
   child.kill();
   process.exit(failed === 0 ? 0 : 1);
 })();
+
+async function checkSecurityScanControls() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const dir = pathSync.join(osSync.tmpdir(), `wide-secscan-${process.pid}`);
+  fsSync.mkdirSync(pathSync.join(dir, 'src'), { recursive: true });
+  fsSync.mkdirSync(pathSync.join(dir, 'spec'), { recursive: true });
+
+  const flow = (name) =>
+    `const ${name} = req.query.${name};\nfs.readFile(${name});\n`;
+
+  fsSync.writeFileSync(pathSync.join(dir, 'src', 'plain.js'), flow('alpha'), 'utf8');
+  fsSync.writeFileSync(
+    pathSync.join(dir, 'src', 'hushed.js'),
+    `const beta = req.query.beta;\nfs.readFile(beta); // wide-ignore\n`,
+    'utf8'
+  );
+  fsSync.writeFileSync(pathSync.join(dir, 'spec', 'fixture.js'), flow('gamma'), 'utf8');
+
+  const scan = await invoke('security:scanProject', [dir]);
+  const findings = scan.result?.findings ?? [];
+  const inFile = (needle) => findings.filter((f) => String(f.file).includes(needle));
+
+  report(inFile('plain.js').length > 0, 'security scan reports a taint flow');
+  report(inFile('hushed.js').length === 0, 'wide-ignore silences the line it sits on');
+  report(inFile('fixture.js').length === 0, 'spec folders are out of scope by default');
+  report(
+    findings.every((f) => f.confidence === 'high' || f.confidence === 'medium' || f.confidence === 'low'),
+    'every finding carries a confidence'
+  );
+
+  const wideDir = pathSync.join(dir, '.wide');
+  fsSync.mkdirSync(wideDir, { recursive: true });
+  fsSync.writeFileSync(
+    pathSync.join(wideDir, 'security.json'),
+    JSON.stringify({ disable: ['taint/path'] }),
+    'utf8'
+  );
+  const disabled = await invoke('security:scanProject', [dir]);
+  report(
+    (disabled.result?.findings ?? []).every((f) => f.ruleId !== 'taint/path'),
+    'security.json can switch a rule off'
+  );
+  fsSync.unlinkSync(pathSync.join(wideDir, 'security.json'));
+
+  const exported = await invoke('security:export', [dir, 'sarif']);
+  let sarif = null;
+  try { sarif = JSON.parse(exported.result?.text ?? ''); } catch {}
+  report(sarif?.version === '2.1.0' && Array.isArray(sarif?.runs?.[0]?.results), 'SARIF 2.1.0 export is well formed');
+  report(
+    Array.isArray(sarif?.runs?.[0]?.tool?.driver?.rules) && sarif.runs[0].tool.driver.rules.length > 0,
+    'SARIF export declares the rules it used'
+  );
+
+  const based = await invoke('security:baseline', [dir, 'set']);
+  report(based.result?.ok === true && based.result.count > 0, 'a baseline can be written from the last scan');
+  const after = await invoke('security:scanProject', [dir]);
+  report((after.result?.findings ?? []).length === 0, 'findings in the baseline stop being reported');
+  report((after.result?.baselined ?? 0) > 0, 'the scan says how many it held back');
+
+  await invoke('security:baseline', [dir, 'clear']);
+  const cleared = await invoke('security:scanProject', [dir]);
+  report((cleared.result?.findings ?? []).length > 0, 'clearing the baseline brings them back');
+
+  try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return failed;
+}
 
 async function checkMcpTrustGate() {
   let failed = 0;

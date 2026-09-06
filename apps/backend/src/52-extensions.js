@@ -9,7 +9,7 @@ const EXTENSIONS_FILE = () =>
 
 
 
-const OPTIONAL_EXTENSIONS = new Set(["codeberg", "github", "comment-cleaner", "javascript", "typescript", "html", "css", "php", "python", "csharp", "java", "go", "ruby", "rust", "elixir", "kotlin", "sql", "graphql", "wasm", "scala", "erlang", "vue", "svelte", "angular", "ai-assistant", "trufflehog", "nuclei", "ffuf", "katana", "httpx", "dalfox", "subfinder", "interactsh", "sqlmap", "arjun", "curlconverter", "retirejs", "secretfinder", "jwt-tool", "commix", "sublist3r", "seclists", "python-debugger", "go-debugger", "ruby-debugger"]);
+const OPTIONAL_EXTENSIONS = new Set(["codeberg", "github", "comment-cleaner", "javascript", "typescript", "html", "css", "php", "python", "csharp", "java", "go", "ruby", "rust", "elixir", "kotlin", "sql", "graphql", "wasm", "scala", "erlang", "vue", "svelte", "angular", "ai-assistant", "trufflehog", "nuclei", "ffuf", "katana", "httpx", "dalfox", "subfinder", "interactsh", "sqlmap", "arjun", "curlconverter", "retirejs", "secretfinder", "jwt-tool", "commix", "sublist3r", "seclists", "python-debugger", "go-debugger", "ruby-debugger", "cyberchef", "wappalyzer", "js-miner", "selector-test"]);
 
 
 
@@ -88,7 +88,7 @@ async function writeExtensionsFile() {
   const servers = await readServers();
   const settings = await readExtensionSettings();
   try {
-    await promises.writeFile(EXTENSIONS_FILE(), JSON.stringify({ installed, servers, settings }, null, 2), "utf8");
+    await writeFileAtomic(EXTENSIONS_FILE(), JSON.stringify({ installed, servers, settings }, null, 2), "utf8");
   } catch (error) {
     console.warn("[extensions] The extensions file could not be saved:", error.message);
   }

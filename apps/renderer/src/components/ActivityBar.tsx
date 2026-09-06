@@ -3,6 +3,7 @@ import {
   Boxes,
   Bug,
   CircleAlert,
+  FlaskConical,
   Folder,
   Globe,
   Hammer,
@@ -24,7 +25,7 @@ import { ProblemsPanel } from "@/panels/ProblemsPanel";
 import { SearchPanel } from "@/panels/SearchPanel";
 import { StructurePanel } from "@/panels/StructurePanel";
 import { ToolsPanel } from "@/panels/ToolsPanel";
-import { BROWSER_PATH, CATCHER_PATH, PITCHER_PATH, SETTINGS_PATH, useEditor } from "@/stores/editor";
+import { BROWSER_PATH, CATCHER_PATH, CYBERCHEF_PATH, PITCHER_PATH, SETTINGS_PATH, useEditor } from "@/stores/editor";
 import { useExtensions } from "@/stores/extensions";
 
 const BuildPanel = lazy(() => import("@/panels/BuildPanel").then((m) => ({ default: m.BuildPanel })));
@@ -155,6 +156,13 @@ const BROWSER_BUTTON: ToolButton = {
   open: () => useEditor.getState().openBrowser(),
 };
 
+const CYBERCHEF_BUTTON: ToolButton = {
+  id: "cyberchef",
+  label: "CyberChef",
+  icon: FlaskConical,
+  open: () => useEditor.getState().openCyberchef(),
+};
+
 const SETTINGS_BUTTON: ToolButton = {
   id: "settings",
   label: "Settings",
@@ -245,6 +253,9 @@ export function ActivityBar({
       <ToolBarButton tool={CATCHER_BUTTON} active={activePath === CATCHER_PATH} />
       <ToolBarButton tool={PITCHER_BUTTON} active={activePath === PITCHER_PATH} />
       <ToolBarButton tool={BROWSER_BUTTON} active={activePath === BROWSER_PATH} />
+      {installed.has("cyberchef") && (
+        <ToolBarButton tool={CYBERCHEF_BUTTON} active={activePath === CYBERCHEF_PATH} />
+      )}
       {topExtension.length > 0 && <div className="my-1 h-px w-5 shrink-0 bg-line" />}
       {topExtension.map((panel) => (
         <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />

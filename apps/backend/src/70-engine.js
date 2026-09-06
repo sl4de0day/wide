@@ -318,7 +318,7 @@ async function perform(method, params, { tool, root, emit }) {
       const path = inside(params.path);
       if (typeof params.content !== "string") throw new Error("write() needs text.");
       await promises.mkdir(node_path.dirname(path), { recursive: true });
-      await promises.writeFile(path, params.content, "utf8");
+      await writeFileAtomic(path, params.content, "utf8");
       return null;
     }
     case "project.files": {

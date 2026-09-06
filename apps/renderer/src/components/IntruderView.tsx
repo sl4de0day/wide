@@ -132,6 +132,10 @@ function RuleRow({ rule, onChange, onRemove }: { rule: PayloadRule; onChange: (r
           : rule.type === "suffix" ? "Suffix"
           : rule.type === "case" ? "Case"
           : rule.type === "encode" ? "Encode"
+          : rule.type === "hash" ? "Hash"
+          : rule.type === "arith" ? "Arithmetic"
+          : rule.type === "substring" ? "Substring"
+          : rule.type === "reverse" ? "Reverse"
           : rule.type === "replace" ? "Replace"
           : "Skip if",
         )}
@@ -153,6 +157,23 @@ function RuleRow({ rule, onChange, onRemove }: { rule: PayloadRule; onChange: (r
             </option>
           ))}
         </select>
+      )}
+      {rule.type === "hash" && <span className="flex-1 text-[10px] text-fg-faint">MD5</span>}
+      {rule.type === "reverse" && <span className="flex-1 text-[10px] text-fg-faint">{t("reverses the payload")}</span>}
+      {rule.type === "arith" && (
+        <>
+          <select value={rule.op} onChange={(e) => onChange({ ...rule, op: e.target.value as "add" | "sub" })} className={cn(smallInput, "w-16")}>
+            <option value="add">+</option>
+            <option value="sub">-</option>
+          </select>
+          <input value={rule.amount} onChange={(e) => onChange({ ...rule, amount: e.target.value })} placeholder={t("amount")} className={cn(smallInput, "flex-1")} />
+        </>
+      )}
+      {rule.type === "substring" && (
+        <>
+          <input value={rule.start} onChange={(e) => onChange({ ...rule, start: e.target.value })} placeholder={t("start")} className={cn(smallInput, "flex-1")} />
+          <input value={rule.length} onChange={(e) => onChange({ ...rule, length: e.target.value })} placeholder={t("length")} className={cn(smallInput, "flex-1")} />
+        </>
       )}
       {(rule.type === "replace" || rule.type === "skip") && (
         <input value={rule.match} onChange={(e) => onChange({ ...rule, match: e.target.value })} placeholder={t("match")} className={cn(smallInput, "flex-1")} />
@@ -192,6 +213,7 @@ export function IntruderView() {
   const [onlyHits, setOnlyHits] = useState(false);
   const [concurrency, setConcurrency] = useState(8);
   const [delayMs, setDelayMs] = useState(0);
+  const [useSession, setUseSession] = useState(false);
   const [openFold, setOpenFold] = useState<string | null>(null);
   const [rangeFrom, setRangeFrom] = useState("0");
   const [rangeTo, setRangeTo] = useState("100");
@@ -266,7 +288,7 @@ export function IntruderView() {
         const request = parseHttpMessage(requestText);
         if (request) {
           try {
-            const reply = await bridge.proxyReplay(request);
+            const reply = await bridge.proxyReplay(request, { session: useSession });
             const body = reply.ok ? reply.body ?? "" : "";
             const extracted = extractRe ? (body.match(extractRe)?.[1] ?? body.match(extractRe)?.[0] ?? "") : "";
             setRows((current) => [
@@ -323,9 +345,17 @@ export function IntruderView() {
           ? { ...base, type, value: "upper" }
           : type === "encode"
             ? { ...base, type, kind: "url" }
-            : type === "replace"
-              ? { ...base, type, match: "", replace: "", regex: false }
-              : { ...base, type: "skip", match: "", regex: false };
+            : type === "hash"
+              ? { ...base, type, algo: "md5" }
+              : type === "arith"
+                ? { ...base, type, op: "add", amount: "1" }
+                : type === "substring"
+                  ? { ...base, type, start: "0", length: "" }
+                  : type === "reverse"
+                    ? { ...base, type }
+                    : type === "replace"
+                      ? { ...base, type, match: "", replace: "", regex: false }
+                      : { ...base, type: "skip", match: "", regex: false };
     setProcessors((p) => [...p, rule]);
   };
 
@@ -438,7 +468,7 @@ export function IntruderView() {
           ))}
           <div className="flex flex-wrap items-center gap-1 pt-1">
             <Plus className="size-3 text-fg-faint" strokeWidth={2} />
-            {(["prefix", "suffix", "case", "encode", "replace", "skip"] as PayloadRule["type"][]).map((ty) => (
+            {(["prefix", "suffix", "case", "encode", "hash", "arith", "substring", "reverse", "replace", "skip"] as PayloadRule["type"][]).map((ty) => (
               <button key={ty} type="button" onClick={() => addRule(ty)} className="rounded-sm border border-line px-1.5 py-0.5 text-[9px] text-fg-faint hover:bg-hover hover:text-fg">
                 {t(ty === "prefix" ? "Prefix" : ty === "suffix" ? "Suffix" : ty === "case" ? "Case" : ty === "encode" ? "Encode" : ty === "replace" ? "Replace" : "Skip if")}
               </button>
@@ -465,6 +495,10 @@ export function IntruderView() {
           <label className="flex items-center gap-1 text-[10px] text-fg-faint">
             {t("Delay (ms)")}
             <input type="number" min={0} value={delayMs} onChange={(e) => setDelayMs(Number(e.target.value) || 0)} className={cn(smallInput, "w-16")} />
+          </label>
+          <label className="flex items-center gap-1 text-[10px] text-fg-faint">
+            <input type="checkbox" checked={useSession} onChange={(e) => setUseSession(e.target.checked)} />
+            {t("Use session")}
           </label>
         </div>
       </Fold>

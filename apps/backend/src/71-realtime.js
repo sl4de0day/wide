@@ -41,9 +41,8 @@ function wsConnect(id, url, protocols) {
   wsConnections.set(id, ws);
   ws.addEventListener("open", () => broadcast("ws:event", { id, type: "open" }));
   ws.addEventListener("message", (ev) => {
-    const data = typeof ev.data === "string" ? ev.data : "";
     if (typeof ev.data === "string") {
-      broadcast("ws:event", { id, type: "message", data, binary: false });
+      broadcast("ws:event", { id, type: "message", data: realtimeClamp(ev.data), binary: false });
     } else {
 
       broadcast("ws:event", { id, type: "message", data: "[binary frame]", binary: true });
@@ -111,7 +110,7 @@ async function sseOpen(id, url, headers) {
       let lastEventId = "";
       const dispatch = () => {
         if (dataLines.length === 0 && !eventName) return;
-        broadcast("sse:event", { id, type: "message", event: eventName || "message", data: dataLines.join("\n"), lastEventId });
+        broadcast("sse:event", { id, type: "message", event: eventName || "message", data: realtimeClamp(dataLines.join("\n")), lastEventId });
         eventName = "";
         dataLines = [];
       };
@@ -162,6 +161,13 @@ function sseClose(id) {
     sseControllers.delete(id);
   }
   return { ok: true };
+}
+
+const REALTIME_MAX_TEXT = 256 * 1024;
+
+function realtimeClamp(text) {
+  const value = typeof text === "string" ? text : String(text ?? "");
+  return value.length > REALTIME_MAX_TEXT ? `${value.slice(0, REALTIME_MAX_TEXT)}…` : value;
 }
 
 function registerRealtimeHandlers() {

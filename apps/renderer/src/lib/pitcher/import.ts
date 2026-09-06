@@ -47,6 +47,7 @@ interface PmRequest {
     mode?: string;
     raw?: string;
     urlencoded?: { key: string; value: string; disabled?: boolean }[];
+    formdata?: { key: string; value: string; type?: string; disabled?: boolean }[];
     graphql?: { query?: string; variables?: string };
     options?: { raw?: { language?: string } };
   };
@@ -57,11 +58,19 @@ interface PmAuth {
   bearer?: { key: string; value: string }[];
   basic?: { key: string; value: string }[];
   apikey?: { key: string; value: string }[];
+  oauth2?: { key: string; value: string }[];
+  digest?: { key: string; value: string }[];
+  awsv4?: { key: string; value: string }[];
+}
+interface PmEvent {
+  listen?: string;
+  script?: { exec?: string[] | string };
 }
 interface PmItem {
   name?: string;
   item?: PmItem[];
   request?: PmRequest;
+  event?: PmEvent[];
 }
 
 function pmUrlToString(url: PmUrl | string | undefined): { url: string; query: Param[] } {
@@ -85,7 +94,28 @@ function pmAuth(auth: PmAuth | undefined, r: PitcherRequest): void {
   } else if (auth.type === "apikey") {
     r.auth.type = "apikey";
     r.auth.apikey = { key: val(auth.apikey, "key"), value: val(auth.apikey, "value"), in: val(auth.apikey, "in") === "query" ? "query" : "header" };
+  } else if (auth.type === "oauth2") {
+    r.auth.type = "oauth2";
+    r.auth.oauth2 = { ...r.auth.oauth2, token: val(auth.oauth2, "accessToken") || val(auth.oauth2, "token") };
+  } else if (auth.type === "digest") {
+    r.auth.type = "digest";
+    r.auth.digest = { username: val(auth.digest, "username"), password: val(auth.digest, "password") };
+  } else if (auth.type === "awsv4") {
+    r.auth.type = "awssigv4";
+    r.auth.aws = {
+      accessKey: val(auth.awsv4, "accessKey"),
+      secretKey: val(auth.awsv4, "secretKey"),
+      region: val(auth.awsv4, "region"),
+      service: val(auth.awsv4, "service"),
+    };
   }
+}
+
+function pmScript(events: PmEvent[] | undefined, listen: string): string {
+  const event = (events ?? []).find((e) => e.listen === listen);
+  if (!event || !event.script) return "";
+  const exec = event.script.exec;
+  return Array.isArray(exec) ? exec.join("\n") : String(exec ?? "");
 }
 
 function pmItemToNode(item: PmItem): Node | null {
@@ -107,12 +137,17 @@ function pmItemToNode(item: PmItem): Node | null {
     } else if (b.mode === "urlencoded" && b.urlencoded) {
       r.body.mode = "form";
       r.body.form = b.urlencoded.map((x) => param(x.key, x.value, !x.disabled));
+    } else if (b.mode === "formdata" && b.formdata) {
+      r.body.mode = "multipart";
+      r.body.form = b.formdata.filter((x) => (x.type ?? "text") !== "file").map((x) => param(x.key, x.value, !x.disabled));
     } else if (b.mode === "graphql" && b.graphql) {
       r.body.mode = "graphql";
       r.body.graphql = { query: b.graphql.query ?? "", variables: b.graphql.variables ?? "" };
     }
   }
   pmAuth(pr.auth, r);
+  r.preScript = pmScript(item.event, "prerequest");
+  r.testScript = pmScript(item.event, "test");
   return reqNode(r);
 }
 
@@ -328,6 +363,9 @@ export function importAny(text: string): { collections: Collection[]; format: st
       return { collections: [], format: "unknown" };
     }
     if (!doc || typeof doc !== "object") return { collections: [], format: "unknown" };
+    if (doc._wide === "pitcher-collection" && doc.collection && typeof doc.collection === "object") {
+      return { collections: [doc.collection as Collection], format: "wide" };
+    }
     if (doc.info && doc.item) return { collections: importPostman(doc as Parameters<typeof importPostman>[0]), format: "postman" };
     if (doc._type === "export" || Array.isArray(doc.resources)) return { collections: importInsomnia(doc as { resources?: InsoResource[] }), format: "insomnia" };
     if (doc.openapi || doc.swagger) return { collections: importOpenApi(doc), format: "openapi" };

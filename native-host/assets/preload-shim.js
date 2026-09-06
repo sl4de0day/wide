@@ -13,6 +13,14 @@
   let nextId = 1;
   const subscribers = new Map();
 
+  function failPending(reason) {
+    const waiting = Array.prototype.slice.call(pending.values());
+    pending.clear();
+    waiting.forEach(function (p) {
+      try { p.reject(new Error(reason)); } catch (e) {}
+    });
+  }
+
   function invoke(channel) {
     const args = Array.prototype.slice.call(arguments, 1);
     const replyId = nextId++;
@@ -58,6 +66,7 @@
         if (msg.error) p.reject(new Error(msg.error));
         else p.resolve(msg.result);
       } else if (msg.type === "event") {
+        if (msg.channel === "host:backend") failPending("The backend stopped.");
         const set = subscribers.get(msg.channel);
         if (set) set.forEach(function (h) { try { h(msg.payload); } catch (err) { console.error(err); } });
       }
@@ -78,11 +87,14 @@
     openRecentFile: function (path) { return invoke("workspace:openRecentFile", path); },
     workspaceOpenTarget: function (path) { return invoke("workspace:openTarget", path); },
     onHostOpenPath: subscribe("host:openPath"),
+    onBackendState: subscribe("host:backend"),
+    onBackendFault: subscribe("backend:fault"),
     requestPendingOpenPath: function () { hostCmd("consume-open-path"); },
     watchWorkspace: function (root) { return invoke("workspace:watch", root); },
     onFsChanged: subscribe("fs:changed"),
     readDir: function (path) { return invoke("fs:readDir", path); },
     readFile: function (path) { return invoke("fs:readFile", path); },
+    readBinary: function (path) { return invoke("fs:readBinary", path); },
     writeFile: function (path, content) { return invoke("fs:writeFile", path, content); },
     create: function (parentPath, name, kind) { return invoke("fs:create", parentPath, name, kind); },
     rename: function (path, name) { return invoke("fs:rename", path, name); },
@@ -109,12 +121,13 @@
     lspStopAll: function () { return invoke("lsp:stopAll"); },
     lintFile: function (root, filePath, text) { return invoke("lint:file", root, filePath, text); },
     formatText: function (filePath, text, root) { return invoke("format:text", filePath, text, root); },
-    httpSend: function (url, method, headers, body) { return invoke("http:send", url, method, headers, body); },
+    httpSend: function (url, method, headers, body, options) { return invoke("http:send", url, method, headers, body, options); },
     projectTailwind: function (root) { return invoke("project:tailwind", root); },
     projectScripts: function (root) { return invoke("project:scripts", root); },
     tsSync: function (root, file, content) { return invoke("ts:sync", root, file, content); },
     tsClose: function (file) { return invoke("ts:close", file); },
     tsCompletions: function (root, file, position) { return invoke("ts:completions", root, file, position); },
+    tsDetails: function (root, file, position, name, source, data) { return invoke("ts:details", root, file, position, name, source, data); },
     tsQuickInfo: function (root, file, position) { return invoke("ts:quickInfo", root, file, position); },
     tsDiagnostics: function (root, file) { return invoke("ts:diagnostics", root, file); },
     tsProjectDiagnostics: function (root) { return invoke("ts:projectDiagnostics", root); },
@@ -123,6 +136,8 @@
     tsSecurityScan: function (root) { return invoke("ts:securityScan", root); },
     securityScanProject: function (root) { return invoke("security:scanProject", root); },
     securityRescanFile: function (root, file, content) { return invoke("security:rescanFile", root, file, content); },
+    securityExport: function (root, format) { return invoke("security:export", root, format); },
+    securityBaseline: function (root, action) { return invoke("security:baseline", root, action); },
     tsDocumentHighlights: function (root, file, position) { return invoke("ts:documentHighlights", root, file, position); },
     tsSignatureHelp: function (root, file, position) { return invoke("ts:signatureHelp", root, file, position); },
     tsNavigationTree: function (root, file) { return invoke("ts:navigationTree", root, file); },
@@ -151,7 +166,10 @@
     browserClose: function (tabId) { hostCmd("browser-close", { tabId: tabId }); },
     browserDevtools: function (open, activeUrl, tabId) { return invoke("browser:devtools", open, activeUrl, tabId); },
     browserCdp: function (tabId, method, params) { return invoke("browser:cdp", tabId, method, params); },
+    webtoolsCyberchef: function () { return invoke("webtools:cyberchef"); },
+    webtoolsWappalyzer: function () { return invoke("webtools:wappalyzer"); },
     oastStart: function (server, token) { return invoke("oast:start", server, token); },
+    oastStartBuiltin: function () { return invoke("oast:startBuiltin"); },
     oastStop: function () { return invoke("oast:stop"); },
     oastStatus: function () { return invoke("oast:status"); },
     onOastInteraction: subscribe("oast:interaction"),
@@ -182,6 +200,9 @@
     onProxyInterceptResponse: subscribe("proxy:interceptResponse"),
     proxyWsSend: function (id, direction, text) { return invoke("proxy:wsSend", id, direction, text); },
     proxyRunMacro: function (macro) { return invoke("proxy:runMacro", macro); },
+    proxySetSessionMacro: function (macro) { return invoke("proxy:setSessionMacro", macro); },
+    proxyRefreshSession: function () { return invoke("proxy:refreshSession"); },
+    proxySessionStatus: function () { return invoke("proxy:sessionStatus"); },
 
 
     wsConnect: function (id, url, protocols) { return invoke("ws:connect", { id: id, url: url, protocols: protocols }); },
@@ -308,6 +329,8 @@
     codebergBranches: function (root) { return invoke("codeberg:branches", root); },
     codebergSwitch: function (root, name, create) { return invoke("codeberg:switch", root, name, create); },
     codebergDiscard: function (root, paths) { return invoke("codeberg:discard", root, paths); },
+    codebergStash: function (root, action, ref) { return invoke("codeberg:stash", root, action, ref); },
+    codebergClone: function (url, parentDir, folder) { return invoke("codeberg:clone", url, parentDir, folder); },
   };
 
   try {

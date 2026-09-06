@@ -34,6 +34,9 @@ interface MacrosState {
 
   seedStep(text: string): void;
   run(macro: Macro): Promise<void>;
+  sessionMacroId: string | null;
+  useAsSession(macro: Macro): Promise<void>;
+  clearSession(): Promise<void>;
 }
 
 const STORAGE_KEY = "wide.macros";
@@ -79,6 +82,33 @@ export const useMacros = create<MacrosState>((set, get) => ({
   activeId: null,
   running: false,
   session: null,
+  sessionMacroId: null,
+
+  useAsSession: async (macro) => {
+    const steps = macro.steps.map(textToStep);
+    if (steps.some((step) => step === null)) {
+      set({ session: { cookies: [], tokens: [], results: [], error: "A step is not a valid request (needs METHOD URL on the first line)." } });
+      return;
+    }
+    set({ running: true });
+    await bridge.proxySetSessionMacro({ steps: steps as MacroStep[], extract: macro.extract });
+    const refreshed = await bridge.proxyRefreshSession();
+    set({
+      running: false,
+      sessionMacroId: macro.id,
+      session: {
+        cookies: refreshed.cookies ?? [],
+        tokens: refreshed.tokens ?? [],
+        results: [],
+        error: refreshed.ok ? undefined : refreshed.error,
+      },
+    });
+  },
+
+  clearSession: async () => {
+    await bridge.proxySetSessionMacro(null);
+    set({ sessionMacroId: null });
+  },
 
   openMacros: () => {
     const { macros, activeId } = get();

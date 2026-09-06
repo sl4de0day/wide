@@ -6,6 +6,7 @@ const MCP_CALL_TIMEOUT_MS = 120000;
 const MCP_RETRY_AFTER_MS = 60000;
 const MCP_MAX_DESCRIPTION = 4096;
 const MCP_MAX_SCHEMA = 20000;
+const MCP_MAX_LINE = 8 * 1024 * 1024;
 
 const mcpConnections = new Map();
 const mcpStarting = new Map();
@@ -108,6 +109,11 @@ async function connectMcp(root, name, spec, signature) {
   child.stdout.on("error", () => {});
   child.stdout.on("data", (chunk) => {
     buffer += decoder.write(chunk);
+    if (buffer.length > MCP_MAX_LINE) {
+      buffer = "";
+      mcpKill(conn);
+      return;
+    }
     let nl;
     while ((nl = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, nl);
@@ -191,7 +197,7 @@ async function readMcpTrust() {
 async function writeMcpTrust(trust) {
   try {
     await promises.mkdir(node_path.dirname(mcpTrustFile()), { recursive: true });
-    await promises.writeFile(mcpTrustFile(), JSON.stringify(trust, null, 2), "utf8");
+    await writeFileAtomic(mcpTrustFile(), JSON.stringify(trust, null, 2), "utf8");
   } catch {
     void 0;
   }

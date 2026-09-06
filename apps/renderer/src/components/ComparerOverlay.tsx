@@ -1,8 +1,8 @@
 import { GitCompare, X } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { useT } from "@/lib/i18n";
-import { lineDiff } from "@/lib/lineDiff";
+import { byteDiff, lineDiff, wordDiff } from "@/lib/lineDiff";
 import { cn } from "@/lib/utils";
 import { useComparer } from "@/stores/comparer";
 
@@ -12,8 +12,15 @@ export function ComparerOverlay() {
   const left = useComparer((state) => state.left);
   const right = useComparer((state) => state.right);
 
-  const rows = useMemo(() => (left || right ? lineDiff(left, right) : []), [left, right]);
+  const [mode, setMode] = useState<"lines" | "words" | "bytes">("lines");
+  const rows = useMemo(() => {
+    if (!left && !right) return [];
+    if (mode === "words") return wordDiff(left, right);
+    if (mode === "bytes") return byteDiff(left, right);
+    return lineDiff(left, right);
+  }, [left, right, mode]);
   const changed = useMemo(() => rows.filter((row) => row.type !== "same").length, [rows]);
+  const inline = mode !== "lines";
 
   if (!open) return null;
 
@@ -24,8 +31,27 @@ export function ComparerOverlay() {
         <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
           <GitCompare className="size-4 shrink-0 text-fg-faint" strokeWidth={1.75} />
           <span className="flex-1 text-[12px] font-medium text-fg">{t("Comparer")}</span>
+          <div className="flex items-center gap-0.5 rounded-sm border border-line p-0.5">
+            {(["lines", "words", "bytes"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={cn(
+                  "rounded-sm px-2 py-0.5 text-[10px] transition-colors duration-100",
+                  mode === m ? "bg-hover text-fg" : "text-fg-faint hover:text-fg",
+                )}
+              >
+                {m === "lines" ? t("Lines") : m === "words" ? t("Words") : t("Bytes")}
+              </button>
+            ))}
+          </div>
           <span className="text-[11px] text-fg-faint">
-            {changed === 0 ? t("Identical") : t("{count} differing lines", { count: changed })}
+            {changed === 0
+              ? t("Identical")
+              : mode === "lines"
+                ? t("{count} differing lines", { count: changed })
+                : t("{count} differences", { count: changed })}
           </span>
           <button
             type="button"
@@ -60,6 +86,21 @@ export function ComparerOverlay() {
           {rows.length === 0 ? (
             <p className="px-1 py-2 text-[12px] text-fg-faint">{t("Paste two things to compare.")}</p>
           ) : (
+            inline ? (
+              <p className="whitespace-pre-wrap break-all px-1 font-mono text-[11px] leading-relaxed text-fg-dim">
+                {rows.map((row, index) => (
+                  <span
+                    key={index}
+                    className={cn(
+                      row.type === "add" && "bg-emerald-500/20 text-emerald-300",
+                      row.type === "del" && "bg-rose-500/20 text-rose-300 line-through",
+                    )}
+                  >
+                    {row.text}
+                  </span>
+                ))}
+              </p>
+            ) : (
             <pre className="font-mono text-[11px] leading-relaxed">
               {rows.map((row, index) => (
                 <div
@@ -78,6 +119,7 @@ export function ComparerOverlay() {
                 </div>
               ))}
             </pre>
+            )
           )}
         </div>
       </div>

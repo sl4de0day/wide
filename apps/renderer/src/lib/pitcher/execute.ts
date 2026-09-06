@@ -18,7 +18,7 @@ function collectionVarsMap(req: PitcherRequest): Param[] {
 
 export async function executeRequest(
   req: PitcherRequest,
-  opts: { extraVars?: Record<string, string>; iteration?: number } = {},
+  opts: { extraVars?: Record<string, string>; iteration?: number; collectionAuth?: PitcherRequest["auth"] } = {},
 ): Promise<ExecResult> {
   const extraVars = opts.extraVars ?? {};
   const collVars = collectionVarsMap(req);
@@ -84,7 +84,7 @@ export async function executeRequest(
     logs,
   };
 
-  const pre = runScript(req.preScript, { ...baseCtx, response: null });
+  const pre = await runScript(req.preScript, { ...baseCtx, response: null });
 
   const bodyChanged = mutable.body !== initialBody;
   const clone: PitcherRequest = {
@@ -97,7 +97,7 @@ export async function executeRequest(
       : req.body,
   };
 
-  const resp = await sendPitcher(clone, bag);
+  const resp = await sendPitcher(clone, bag, opts.collectionAuth);
 
   let testError: string | undefined;
   if (resp.ok) {
@@ -108,7 +108,7 @@ export async function executeRequest(
       headers: resp.headers ?? [],
       body: resp.body ?? "",
     };
-    const post = runScript(req.testScript, { ...baseCtx, response });
+    const post = await runScript(req.testScript, { ...baseCtx, response });
     testError = post.error;
   }
 

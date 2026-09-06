@@ -227,7 +227,7 @@ async function replaceInFiles(root, options, replacement, exclude) {
       if (count === 0) continue;
       const next = text.replace(matcher, repl);
       if (next === text) continue;
-      await promises.writeFile(path, next, "utf8");
+      await writeFileAtomic(path, next, "utf8");
       changed.push(node_path.relative(root, path).split(node_path.sep).join("/"));
       replacements += count;
     } catch {

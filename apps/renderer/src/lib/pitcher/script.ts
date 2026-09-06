@@ -4,7 +4,7 @@ export interface ScriptOutcome {
   error?: string;
 }
 
-export function runScript(code: string, ctx: PmContext): ScriptOutcome {
+export async function runScript(code: string, ctx: PmContext): Promise<ScriptOutcome> {
   if (!code.trim()) return {};
   const pm = createPm(ctx);
   const console = {
@@ -25,8 +25,11 @@ export function runScript(code: string, ctx: PmContext): ScriptOutcome {
   );
   try {
 
-    const fn = new Function("pm", "console", "tests", code);
-    fn(pm, console, tests);
+    const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as (
+      ...args: string[]
+    ) => (...args: unknown[]) => Promise<void>;
+    const fn = AsyncFunction("pm", "console", "tests", code);
+    await fn(pm, console, tests);
     return {};
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };

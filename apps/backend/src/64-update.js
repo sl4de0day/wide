@@ -1,4 +1,4 @@
-const WIDE_VERSION = "0.56926";
+const WIDE_VERSION = "0.66926";
 const WIDE_REPO = "sl4de0day/wide";
 const WIDE_ASSET_RE = /Wide-Setup-.*\.exe$/i;
 const WIDE_SUMS_RE = /^SHA256SUMS(\.txt)?$/i;
@@ -32,7 +32,7 @@ async function readUpdateState() {
 
 async function writeUpdateState(state) {
   try {
-    await promises.writeFile(updateStateFile(), JSON.stringify(state, null, 2), "utf8");
+    await writeFileAtomic(updateStateFile(), JSON.stringify(state, null, 2), "utf8");
   } catch {
     void 0;
   }
@@ -96,8 +96,9 @@ function fetchJson(url, headers) {
   } catch {
     return Promise.resolve({ ok: false, error: "That is not a valid URL." });
   }
-  if (target.protocol !== "http:" && target.protocol !== "https:") {
-    return Promise.resolve({ ok: false, error: "The update URL must be http or https." });
+  const loopback = isLoopbackName(target.hostname);
+  if (target.protocol !== "https:" && !(target.protocol === "http:" && loopback)) {
+    return Promise.resolve({ ok: false, error: "The update URL must be https." });
   }
   const transport = target.protocol === "https:" ? node_https : node_http;
   return new Promise((resolve) => {
@@ -244,29 +245,36 @@ function registerUpdateHandlers() {
 
   electron.ipcMain.handle("update:install", async (_event, arg) => {
     const info = arg && typeof arg === "object" ? arg : { path: arg };
-    const installerPath = typeof info.path === "string" ? info.path : "";
     const version = typeof info.version === "string" ? info.version : "";
-    if (!installerPath) {
-      return { ok: false, error: "No installer to run." };
+    const assetName = typeof info.asset === "string" ? info.asset : "";
+    const sumsUrl = typeof info.sums === "string" ? info.sums : "";
+
+    const installerPath = node_path.join(node_os.tmpdir(), `Wide-Setup-${version || "latest"}.exe`);
+    const expected = await expectedHashFor(sumsUrl, assetName);
+    if (!expected) {
+      return { ok: false, error: "The update could not be verified, so it was not installed." };
     }
-    await noteAttempt(version);
-    try {
-      const child = node_child_process.spawn(installerPath, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL"], {
-        detached: true,
-        stdio: "ignore",
-      });
-      child.unref();
-    } catch (error) {
-      return { ok: false, error: String((error && error.message) || error) };
-    }
-    broadcast("update:progress", { phase: "install", state: "start" });
-    setTimeout(() => {
+    const actual = await sha256File(installerPath);
+    if (!actual || actual !== expected) {
       try {
-        electron.app.quit();
+        await promises.unlink(installerPath);
       } catch {
         void 0;
       }
-    }, 400);
+      await noteAttempt(version);
+      return { ok: false, error: "The staged update did not match its published checksum." };
+    }
+
+    await noteAttempt(version);
+    broadcast("update:progress", { phase: "install", state: "start" });
+    try {
+      const reply = await electron.hostRequest("app:installUpdate", { path: installerPath });
+      if (!reply || reply.ok !== true) {
+        return { ok: false, error: "The installer could not be started." };
+      }
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
     return { ok: true };
   });
 

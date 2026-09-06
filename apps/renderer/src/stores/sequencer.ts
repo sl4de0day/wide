@@ -9,7 +9,60 @@ export interface SeqStats {
   fixedLength: number | null;
   perCharEntropy: number;
   effectiveBits: number;
+  bitEntropy: number;
+  bitBalance: number;
+  transitionEntropy: number;
+  compressionRatio: number;
   verdict: "strong" | "moderate" | "weak";
+}
+
+function bitLevelStats(tokens: string[]): { bitEntropy: number; bitBalance: number } {
+  let ones = 0;
+  let total = 0;
+  for (const token of tokens) {
+    for (let i = 0; i < token.length; i += 1) {
+      let byte = token.charCodeAt(i) & 0xff;
+      for (let b = 0; b < 8; b += 1) {
+        ones += byte & 1;
+        byte >>= 1;
+        total += 1;
+      }
+    }
+  }
+  if (!total) return { bitEntropy: 0, bitBalance: 0 };
+  const p1 = ones / total;
+  const p0 = 1 - p1;
+  const h = [p0, p1].reduce((acc, p) => (p > 0 ? acc - p * Math.log2(p) : acc), 0);
+  return { bitEntropy: h, bitBalance: p1 };
+}
+
+function transitionEntropyOf(concat: string): number {
+  if (concat.length < 2) return 0;
+  const pairs: Record<string, number> = {};
+  for (let i = 0; i + 1 < concat.length; i += 1) {
+    const key = concat[i] + concat[i + 1];
+    pairs[key] = (pairs[key] || 0) + 1;
+  }
+  const total = concat.length - 1;
+  let h = 0;
+  for (const k in pairs) {
+    const p = pairs[k] / total;
+    h -= p * Math.log2(p);
+  }
+  return h;
+}
+
+function compressionRatioOf(concat: string): number {
+  if (!concat) return 1;
+  let compressed = 0;
+  let i = 0;
+  while (i < concat.length) {
+    let run = 1;
+    while (i + run < concat.length && concat[i + run] === concat[i] && run < 255) run += 1;
+    compressed += run > 3 ? 2 : run;
+    i += run;
+  }
+  return compressed / concat.length;
 }
 
 function extractorFor(rule: string): (reply: { headers?: [string, string][] }, raw: string) => string | null {
@@ -74,8 +127,24 @@ function computeStats(tokens: string[]): SeqStats {
       effectiveBits += h;
     }
   }
-  const verdict = effectiveBits >= 64 ? "strong" : effectiveBits >= 32 ? "moderate" : "weak";
-  return { count, charset, fixedLength, perCharEntropy: perChar, effectiveBits, verdict };
+  const bits = bitLevelStats(tokens);
+  const transitionEntropy = transitionEntropyOf(concat);
+  const compressionRatio = compressionRatioOf(concat);
+  const balancedPenalty = Math.abs(bits.bitBalance - 0.5) > 0.15 || compressionRatio < 0.5;
+  let verdict: SeqStats["verdict"] = effectiveBits >= 64 ? "strong" : effectiveBits >= 32 ? "moderate" : "weak";
+  if (verdict === "strong" && balancedPenalty) verdict = "moderate";
+  return {
+    count,
+    charset,
+    fixedLength,
+    perCharEntropy: perChar,
+    effectiveBits,
+    bitEntropy: bits.bitEntropy,
+    bitBalance: bits.bitBalance,
+    transitionEntropy,
+    compressionRatio,
+    verdict,
+  };
 }
 
 interface SequencerState {

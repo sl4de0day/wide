@@ -75,6 +75,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
   const consumeReveal = useEditor((state) => state.consumeReveal);
   const consumeReplace = useEditor((state) => state.consumeReplace);
   const tabSize = useSettings((state) => state.tabSize);
+  const useTabs = useSettings((state) => state.useTabs);
   const lineWrapping = useSettings((state) => state.lineWrapping);
 
   useEffect(() => {
@@ -126,7 +127,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
           void useHttp.getState().send(request);
         }),
         languageComp.of([]),
-        tabSizeComp.of(indentUnit.of(" ".repeat(tabSize))),
+        tabSizeComp.of(indentUnit.of(useTabs ? "	" : " ".repeat(tabSize))),
         wrapComp.of(lineWrapping ? EditorView.lineWrapping : []),
         keymap.of([
           ...closeBracketsKeymap,
@@ -190,9 +191,9 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
 
   useEffect(() => {
     view.current?.dispatch({
-      effects: tabSizeComp.reconfigure(indentUnit.of(" ".repeat(tabSize))),
+      effects: tabSizeComp.reconfigure(indentUnit.of(useTabs ? "	" : " ".repeat(tabSize))),
     });
-  }, [tabSize]);
+  }, [tabSize, useTabs]);
 
   useEffect(() => {
     view.current?.dispatch({

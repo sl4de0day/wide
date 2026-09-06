@@ -19,6 +19,10 @@ export interface Rule {
   text?: RegExp;
 
   notMatch?: RegExp;
+
+  notMatchUnless?: RegExp;
+
+  confidence?: "high" | "medium" | "low";
   message: string;
   why: string;
 
@@ -6372,7 +6376,7 @@ export const BUILT_IN_RULES: Rule[] = [
     category: "security",
 
     text: /(select|insert|update|delete)\b[^;]*\b(from|into|set|where|values)\b[^;]*?(["'`]\s*(\+|\.)\s*[A-Za-z_$(]|\$\{)/i,
-    notMatch: /\?\s*[,)]|:\w+|@\w+|\$\d|knex|prisma|sequelize|\.raw\(/i,
+    notMatch: /\?\s*[,)]|:\w+|@\w+|\$\d|\bbind(?:param|_param|ing)/i,
     message: "A SQL statement is built by concatenation.",
     why: "Joining a query string with a variable is the classic SQL-injection shape: the value can change the query's meaning, not just its data.",
     fix: "Use a parameterised query (placeholders + bound values) so input can never be parsed as SQL.",
@@ -7941,6 +7945,186 @@ export const BUILT_IN_RULES: Rule[] = [
     cwe: "CWE-943",
   },
   {
+    id: "cwe89/js-query-template-literal",
+    languages: [...JS_FAMILY],
+    severity: "error",
+    category: "security",
+    text: /\.(?:query|execute)\s*\(\s*`[^`]*\$\{/,
+    notMatch: /\$\{\s*(?:table|schema|column|sort|order|dir|direction)\b/i,
+    message: "A query is built from a template literal that interpolates a value.",
+    why: "Whatever the interpolated expression evaluates to becomes part of the SQL text, so a value carrying a quote or a comment marker rewrites the statement instead of filling a slot in it.",
+    fix: "Pass the values separately: db.query('SELECT * FROM t WHERE id = ?', [id]) — the driver then sends them as data the parser never reads as SQL.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/js-query-concat",
+    languages: [...JS_FAMILY],
+    severity: "error",
+    category: "security",
+    text: /\.(?:query|execute)\s*\(\s*["'][^"']*["']\s*\+/,
+    notMatch: /\?\s*[,)]|:\w+|\$\d/,
+    message: "A query string is concatenated before it is sent.",
+    why: "String addition puts the value inside the statement, so it is parsed as SQL rather than compared as data.",
+    fix: "Use placeholders and a values array instead of building the string.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/sequelize-query-interpolated",
+    languages: [...JS_FAMILY],
+    severity: "error",
+    category: "security",
+    text: /sequelize\.query\s*\(\s*(?:`[^`]*\$\{|["'][^"']*["']\s*\+)/,
+    message: "sequelize.query() is handed a string that was interpolated or concatenated.",
+    why: "sequelize.query sends raw SQL. Anything spliced into the string before it gets there is parsed as SQL, so the ORM offers no protection on this path.",
+    fix: "Use replacements or bind: sequelize.query('... WHERE id = :id', { replacements: { id } }).",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/prisma-raw-unsafe",
+    languages: [...JS_FAMILY],
+    severity: "error",
+    category: "security",
+    text: /\$(?:queryRawUnsafe|executeRawUnsafe)\s*\(/,
+    message: "Prisma's Unsafe raw query is used.",
+    why: "queryRawUnsafe and executeRawUnsafe take the SQL as a plain string, which is why they carry Unsafe in the name: no part of it is parameterised.",
+    fix: "Use the tagged-template forms $queryRaw`...${value}` / $executeRaw`...${value}`, which parameterise every interpolation.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/knex-where-raw-interpolated",
+    languages: [...JS_FAMILY],
+    severity: "error",
+    category: "security",
+    text: /\.(?:whereRaw|havingRaw|orderByRaw|joinRaw)\s*\(\s*(?:`[^`]*\$\{|["'][^"']*["']\s*\+)/,
+    message: "A knex raw fragment is built by interpolation or concatenation.",
+    why: "The Raw builders splice their argument into the statement verbatim, so an interpolated value is read as SQL.",
+    fix: "Pass bindings as the second argument: .whereRaw('id = ?', [id]).",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/py-execute-fstring",
+    languages: [...PY],
+    severity: "error",
+    category: "security",
+    text: /\.execute(?:many)?\s*\(\s*f["']/,
+    message: "A cursor executes an f-string.",
+    why: "The f-string is fully expanded before execute() ever sees it, so the value is part of the SQL text and the driver has nothing left to parameterise.",
+    fix: "Leave the placeholder in the SQL and pass the values: cursor.execute('SELECT * FROM t WHERE id = %s', (id,)).",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/py-execute-format",
+    languages: [...PY],
+    severity: "error",
+    category: "security",
+    text: /\.execute(?:many)?\s*\(\s*["'][^"']*["']\s*(?:\+|%\s*[\w(]|\.format\s*\()/,
+    message: "A query is assembled with +, % or .format() before it is executed.",
+    why: "All three build the finished SQL string in Python, so the value is parsed as SQL rather than bound as a parameter.",
+    fix: "Use the driver's placeholders (%s or ?) and pass a tuple of values as the second argument.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/php-query-concat",
+    languages: [...PHP],
+    severity: "error",
+    category: "security",
+    text: /(?:mysqli_query|pg_query|->query|->exec)\s*\([^)]*["'][^"']*["']\s*\./,
+    notMatch: /\?\s*[,)]|:\w+|prepare\s*\(/i,
+    message: "A query is built with the concatenation operator.",
+    why: "Joining the statement to a variable with . puts the value into the SQL text, where a quote ends the literal and the rest is executed.",
+    fix: "Use a prepared statement: $stmt = $pdo->prepare('... WHERE id = :id'); $stmt->execute([':id' => $id]).",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/php-query-interpolated",
+    languages: [...PHP],
+    severity: "error",
+    category: "security",
+    text: /(?:mysqli_query|pg_query|->query|->exec)\s*\([^)]*"[^"]*\$\w/,
+    notMatch: /prepare\s*\(/i,
+    message: "A PHP variable is interpolated straight into a query string.",
+    why: "Double-quoted PHP strings expand variables, so the value lands inside the statement before the database sees it.",
+    fix: "Use a prepared statement with bound parameters rather than interpolating.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/java-statement-concat",
+    languages: ["java"],
+    severity: "error",
+    category: "security",
+    text: /\.execute(?:Query|Update|LargeUpdate)?\s*\(\s*"[^"]*"\s*\+/,
+    message: "A JDBC Statement is executed on a concatenated string.",
+    why: "Statement sends the string as written. Once a value is inside it, the driver parses it as SQL and there is nothing left to bind.",
+    fix: "Use PreparedStatement with ? placeholders and setString/setInt for the values.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/java-sql-string-format",
+    languages: ["java", "kotlin", "kt", "scala"],
+    severity: "error",
+    category: "security",
+    text: /String\.format\s*\(\s*"[^"]*\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i,
+    message: "SQL is assembled with String.format().",
+    why: "String.format produces the finished statement, so the substituted value is read as SQL, not as a bound parameter.",
+    fix: "Build the statement with ? placeholders and bind the values through PreparedStatement.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/go-sprintf-query",
+    languages: ["go"],
+    severity: "error",
+    category: "security",
+    text: /(?:db|tx|conn)\.(?:Query|QueryRow|Exec)(?:Context)?\s*\(\s*(?:ctx\s*,\s*)?fmt\.Sprintf\s*\(/,
+    message: "A query is built with fmt.Sprintf before it is run.",
+    why: "Sprintf returns a finished string, so the substituted value becomes part of the statement and database/sql has no placeholder left to fill.",
+    fix: "Keep the placeholders in the query and pass the values as arguments: db.Query(`SELECT ... WHERE id = $1`, id).",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/go-query-concat",
+    languages: ["go"],
+    severity: "error",
+    category: "security",
+    text: /(?:db|tx|conn)\.(?:Query|QueryRow|Exec)(?:Context)?\s*\([^)]*"[^"]*"\s*\+/,
+    message: "A query string is concatenated before it is run.",
+    why: "The value is joined into the SQL text, so it is parsed rather than bound.",
+    fix: "Use $1 / ? placeholders and pass the values as further arguments.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/cs-command-concat",
+    languages: ["cs", "csx"],
+    severity: "error",
+    category: "security",
+    text: /new\s+Sql(?:Command|DataAdapter)\s*\(\s*(?:\$"|"[^"]*"\s*\+)/,
+    message: "A SqlCommand is built from an interpolated or concatenated string.",
+    why: "Both forms produce the finished SQL before ADO.NET sees it, so the value is parsed as part of the statement.",
+    fix: "Use parameters: cmd.Parameters.AddWithValue(\"@id\", id) with @id left in the SQL text.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/cs-executesql-interpolated",
+    languages: ["cs", "csx"],
+    severity: "error",
+    category: "security",
+    text: /\.(?:ExecuteSqlRaw|ExecuteSqlRawAsync|FromSqlRaw)\s*\(\s*(?:\$"|"[^"]*"\s*\+)/,
+    message: "An Entity Framework Raw call is given an interpolated or concatenated string.",
+    why: "The Raw variants take the SQL verbatim. The Interpolated variants are the ones that parameterise; these do not.",
+    fix: "Use FromSqlInterpolated / ExecuteSqlInterpolated, which turn each interpolation into a parameter.",
+    cwe: "CWE-89",
+  },
+  {
+    id: "cwe89/rb-where-interpolated",
+    languages: ["rb"],
+    severity: "error",
+    category: "security",
+    text: /\.(?:where|having|order|find_by_sql|select_all|execute)\s*\(?\s*"[^"]*#\{/,
+    message: "A Ruby query fragment interpolates a value with #{}.",
+    why: "Interpolation happens before ActiveRecord sees the string, so the value is part of the SQL and the usual escaping never runs.",
+    fix: "Use the array or hash form: where('id = ?', id) or where(id: id).",
+    cwe: "CWE-89",
+  },
+  {
     id: "cwe89/knex-raw-string-concat",
     languages: ["js","jsx","mjs","cjs","ts","tsx","mts","cts"],
     severity: "error",
@@ -8250,3 +8434,16 @@ export const BUILT_IN_RULES: Rule[] = [
     cwe: "CWE-200",
   },
 ];
+
+const HEURISTIC_PROSE = /Aggravator|not a standalone|on its own is not|by itself is not/i;
+
+const OWNER_FROM_REQUEST =
+  /(?:req(?:uest)?\.(?:query|params|body|headers|cookies)|Request\.(?:Query|Form|Params|QueryString)|\$_(?:GET|POST|REQUEST))\s*(?:\.|\[\s*["'])\s*\w*(?:user|owner|tenant|account|org|company|team|workspace|member|author)\w*/i;
+
+for (const rule of BUILT_IN_RULES) {
+  if (!rule.confidence) {
+    rule.confidence = HEURISTIC_PROSE.test(`${rule.message} ${rule.why}`) ? "low" : "high";
+  }
+  if (rule.confidence === "low" && rule.severity === "error") rule.severity = "info";
+  if (rule.id.startsWith("wide/idor-") && rule.notMatch) rule.notMatchUnless = OWNER_FROM_REQUEST;
+}

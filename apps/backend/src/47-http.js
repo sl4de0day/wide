@@ -28,7 +28,7 @@ function afterRedirect(status, method, headers, body) {
   return { method, headers, body };
 }
 
-function sendOnce(target, method, headers, body, redirectsLeft) {
+function sendOnce(target, method, headers, body, redirectsLeft, options) {
   return new Promise((resolve) => {
     let url;
     try {
@@ -44,9 +44,11 @@ function sendOnce(target, method, headers, body, redirectsLeft) {
 
     const transport = url.protocol === "https:" ? node_https : node_http;
     const startedAt = Date.now();
+    const requestOptions = { method, headers: Object.fromEntries(headers) };
+    if (url.protocol === "https:" && options && options.insecure) requestOptions.rejectUnauthorized = false;
     const request = transport.request(
       url,
-      { method, headers: Object.fromEntries(headers) },
+      requestOptions,
       (response) => {
 
         const location = response.headers.location;
@@ -60,7 +62,7 @@ function sendOnce(target, method, headers, body, redirectsLeft) {
           const next = new URL(location, url).toString();
 
           const after = afterRedirect(response.statusCode, method, headers, body);
-          resolve(sendOnce(next, after.method, after.headers, after.body, redirectsLeft - 1));
+          resolve(sendOnce(next, after.method, after.headers, after.body, redirectsLeft - 1, options));
           return;
         }
 
@@ -108,18 +110,21 @@ function sendOnce(target, method, headers, body, redirectsLeft) {
       resolve({ ok: false, error: `No answer within ${HTTP_TIMEOUT_MS / 1000}s.` });
     });
     request.on("error", (error) => resolve({ ok: false, error: error.message }));
-    if (body) request.write(body);
+    if (body != null && body !== "") {
+      request.write(options && options.bodyBase64 ? Buffer.from(body, "base64") : body);
+    }
     request.end();
   });
 }
 
 function registerHttpHandlers() {
 
-  electron.ipcMain.handle("http:send", async (_event, url, method = "GET", headers = [], body = null) => {
+  electron.ipcMain.handle("http:send", async (_event, url, method = "GET", headers = [], body = null, options = null) => {
     if (typeof url !== "string" || !url.trim()) return { ok: false, error: "No address." };
     const safeHeaders = Array.isArray(headers)
       ? headers.filter((pair) => Array.isArray(pair) && typeof pair[0] === "string")
       : [];
-    return sendOnce(url.trim(), String(method || "GET").toUpperCase(), safeHeaders, body, HTTP_MAX_REDIRECTS);
+    const opts = options && typeof options === "object" ? options : {};
+    return sendOnce(url.trim(), String(method || "GET").toUpperCase(), safeHeaders, body, HTTP_MAX_REDIRECTS, opts);
   });
 }

@@ -32,6 +32,7 @@ interface OastState {
   setToken(v: string): void;
   refresh(): Promise<void>;
   start(): Promise<void>;
+  startBuiltin(): Promise<void>;
   stop(): Promise<void>;
   clear(): void;
   ingest(i: OastInteraction): void;
@@ -64,6 +65,10 @@ export const useOast = create<OastState>((set, get) => ({
     const { server, token } = get();
     const r = await bridge.oastStart(server, token);
     if (r.ok) set({ running: Boolean(r.running), domain: r.domain ?? get().domain });
+  },
+  startBuiltin: async () => {
+    const r = await bridge.oastStartBuiltin();
+    if (r.ok) set({ running: Boolean(r.running), domain: r.domain ?? get().domain, server: "built-in" });
   },
   stop: async () => {
     await bridge.oastStop();

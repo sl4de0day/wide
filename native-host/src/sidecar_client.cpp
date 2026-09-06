@@ -2,6 +2,10 @@
 
 #include <string>
 
+namespace {
+constexpr DWORD kGracefulExitMs = 3000;
+}
+
 bool SidecarClient::Start(HWND notifyHwnd, UINT notifyMsg,
                           const std::wstring& nodeExe,
                           const std::wstring& scriptPath,
@@ -34,9 +38,22 @@ bool SidecarClient::Start(HWND notifyHwnd, UINT notifyMsg,
   si.hStdOutput = stdoutWr;
   si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
+  if (!hJob_) {
+    hJob_ = CreateJobObjectW(nullptr, nullptr);
+    if (hJob_) {
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+      limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      if (!SetInformationJobObject(hJob_, JobObjectExtendedLimitInformation, &limits,
+                                   sizeof(limits))) {
+        CloseHandle(hJob_);
+        hJob_ = nullptr;
+      }
+    }
+  }
+
   PROCESS_INFORMATION pi = {};
   BOOL ok = CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE,
-                           CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+                           CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi);
 
   CloseHandle(stdinRd);
   CloseHandle(stdoutWr);
@@ -45,6 +62,8 @@ bool SidecarClient::Start(HWND notifyHwnd, UINT notifyMsg,
     CloseHandle(stdoutRd);
     return false;
   }
+  if (hJob_) AssignProcessToJobObject(hJob_, pi.hProcess);
+  ResumeThread(pi.hThread);
   CloseHandle(pi.hThread);
   hProcess_ = pi.hProcess;
   hStdinWr_ = stdinWr;
@@ -164,9 +183,16 @@ void SidecarClient::Stop() {
     hWriterThread_ = nullptr;
   }
   if (hProcess_) {
-    TerminateProcess(hProcess_, 0);
+    if (hStdinWr_) { CloseHandle(hStdinWr_); hStdinWr_ = nullptr; }
+    if (WaitForSingleObject(hProcess_, kGracefulExitMs) != WAIT_OBJECT_0) {
+      TerminateProcess(hProcess_, 0);
+    }
     CloseHandle(hProcess_);
     hProcess_ = nullptr;
+  }
+  if (hJob_) {
+    CloseHandle(hJob_);
+    hJob_ = nullptr;
   }
   if (hStdinWr_) { CloseHandle(hStdinWr_); hStdinWr_ = nullptr; }
   if (hStdoutRd_) { CloseHandle(hStdoutRd_); hStdoutRd_ = nullptr; }

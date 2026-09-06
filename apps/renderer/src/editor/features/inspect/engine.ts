@@ -7,7 +7,19 @@ import { useDiagnostics } from "@/stores/diagnostics";
 import { useSettings } from "@/stores/settings";
 import type { Rule } from "./rules";
 import { runRouteAudit } from "./routes";
-import { compose, isSecurity, runTextPass, serializeTextRule, type SerializedTextRule } from "./shared";
+import {
+  compose,
+  isSecurity,
+  isSuppressed,
+  NO_SUPPRESSIONS,
+  readSuppressions,
+  ruleIdOf,
+  runTextPass,
+  serializeTextRule,
+  type SerializedTextRule,
+  type Suppressions,
+} from "./shared";
+import { loadRuleDictionary } from "./rulesI18n";
 import { runTaint, runToctou, TAINT_LANGUAGES } from "./taint";
 import { runFlow, setWorkerProjectRules, type FlowResult } from "./workerClient";
 
@@ -47,7 +59,13 @@ function runNodePass(view: EditorView, rules: Rule[], ext: string, securityOn: b
           if (node.name !== rule.node) continue;
           const text = doc.sliceString(node.from, node.to);
           if (rule.match && !rule.match.test(text)) continue;
-          if (rule.notMatch && rule.notMatch.test(text)) continue;
+          if (
+            rule.notMatch &&
+            rule.notMatch.test(text) &&
+            !(rule.notMatchUnless && rule.notMatchUnless.test(text))
+          ) {
+            continue;
+          }
           if (rule.within) {
             const parent = node.node.parent;
             if (!parent || parent.name !== rule.within) continue;
@@ -136,6 +154,73 @@ export function parseProjectRules(source: string): { rules: Rule[]; errors: stri
   return { rules, errors };
 }
 
+const RANK: Record<string, number> = { low: 0, medium: 1, high: 2 };
+
+export interface SecurityConfig {
+  disable: Set<string>;
+  severity: Record<string, "error" | "warning" | "info">;
+  minConfidence: "high" | "medium" | "low";
+}
+
+let securityConfig: SecurityConfig = { disable: new Set(), severity: {}, minConfidence: "low" };
+
+export function parseSecurityConfig(source: string): SecurityConfig {
+  const empty: SecurityConfig = { disable: new Set(), severity: {}, minConfidence: "low" };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(source);
+  } catch {
+    return empty;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return empty;
+  const entry = raw as { disable?: unknown; severity?: unknown; minConfidence?: unknown };
+  return {
+    disable: new Set(
+      Array.isArray(entry.disable) ? entry.disable.filter((v): v is string => typeof v === "string") : [],
+    ),
+    severity:
+      entry.severity && typeof entry.severity === "object" && !Array.isArray(entry.severity)
+        ? (entry.severity as Record<string, "error" | "warning" | "info">)
+        : {},
+    minConfidence:
+      entry.minConfidence === "high" || entry.minConfidence === "medium" ? entry.minConfidence : "low",
+  };
+}
+
+export function setSecurityConfig(config: SecurityConfig): void {
+  securityConfig = config;
+}
+
+const ruleConfidence = new Map<string, string>([
+  ["wide/route-missing-auth", "low"],
+  ["wide/route-missing-rate-limit", "low"],
+  ["wide/toctou-race", "low"],
+]);
+
+function applyPolicy(list: Diagnostic[], sup: Suppressions, doc: { lineAt(pos: number): { number: number } }): Diagnostic[] {
+  const floor = RANK[securityConfig.minConfidence] ?? 0;
+  const kept: Diagnostic[] = [];
+  for (const item of list) {
+    const id = ruleIdOf(item.message);
+    if (id && securityConfig.disable.has(id)) continue;
+    if (id) {
+      const confidence = ruleConfidence.get(id);
+      if (confidence && (RANK[confidence] ?? 2) < floor) continue;
+    }
+    let line: number;
+    try {
+      line = doc.lineAt(item.from).number;
+    } catch {
+      line = 0;
+    }
+    if (line && isSuppressed(sup, line, id)) continue;
+    const override = id ? securityConfig.severity[id] : undefined;
+    kept.push(override ? { ...item, severity: override } : item);
+  }
+  return kept;
+}
+
+let confidenceLoaded = false;
 let projectRules: Rule[] = [];
 
 export function setProjectRules(rules: Rule[]): void {
@@ -155,10 +240,14 @@ export function inspections(ext: string, filePath: string): Extension {
 
       constructor(readonly view: EditorView) {
 
+        void loadRuleDictionary(useSettings.getState().language);
         this.schedule(300);
 
         this.unsubscribe = useSettings.subscribe((state, previous) => {
           if (state.securityLint !== previous.securityLint) this.schedule(0);
+          if (state.language !== previous.language) {
+            void loadRuleDictionary(state.language).then(() => this.schedule(0));
+          }
         });
       }
 
@@ -183,6 +272,10 @@ export function inspections(ext: string, filePath: string): Extension {
           const builtIn = await loadBuiltInRules();
           if (this.destroyed || reqId !== this.reqSeq) return;
           const all = projectRules.length ? [...builtIn, ...projectRules] : builtIn;
+          if (!confidenceLoaded) {
+            confidenceLoaded = true;
+            for (const rule of builtIn) if (rule.confidence) ruleConfidence.set(rule.id, rule.confidence);
+          }
           const securityOn = useSettings.getState().securityLint;
 
           const node = runNodePass(this.view, all, ext, securityOn);
@@ -197,9 +290,11 @@ export function inspections(ext: string, filePath: string): Extension {
 
           if (this.destroyed || reqId !== this.reqSeq) return;
 
+          const doc = this.view.state.doc;
+          const sup = securityOn ? readSuppressions(docText, ext) : NO_SUPPRESSIONS;
           const store = useDiagnostics.getState();
-          store.setFor(filePath, "security", [...node.security, ...flow.security]);
-          store.setFor(filePath, "inspection", [...node.inspection, ...flow.inspection]);
+          store.setFor(filePath, "security", applyPolicy([...node.security, ...flow.security], sup, doc));
+          store.setFor(filePath, "inspection", applyPolicy([...node.inspection, ...flow.inspection], sup, doc));
         }, delay);
       }
 

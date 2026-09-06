@@ -1,4 +1,4 @@
-import { CornerDownRight, Crosshair, FileWarning, Hash, ListTree, Radar, Redo2, Send, Terminal } from "lucide-react";
+import { CornerDownRight, Crosshair, FileWarning, Hash, ListTree, Radar, Redo2, Send, Terminal, KeyRound } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
@@ -52,6 +52,8 @@ export function RepeaterView({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [followRedirects, setFollowRedirects] = useState(false);
+  const [useSession, setUseSession] = useState(false);
+  const [useHttp2, setUseHttp2] = useState(false);
   const [updateCl, setUpdateCl] = useState(true);
   const [showInspector, setShowInspector] = useState(false);
   const [history, setHistory] = useState<{ text: string; reply: Reply }[]>([]);
@@ -81,7 +83,7 @@ export function RepeaterView({ id }: { id: string }) {
     if (updateCl && serialised !== text) setText(serialised);
     setSending(true);
     setError("");
-    const result = await bridge.proxyReplay(request, { followRedirects });
+    const result = await bridge.proxyReplay(request, { followRedirects, session: useSession, http2: useHttp2 });
     setSending(false);
     if (!result.ok) {
       setError(result.error ?? t("The request could not be sent."));
@@ -136,6 +138,12 @@ export function RepeaterView({ id }: { id: string }) {
           </button>
           <button type="button" onClick={() => setFollowRedirects((v) => !v)} title={t("Follow redirects")} className={toggleCls(followRedirects)}>
             <CornerDownRight className="size-3" strokeWidth={1.75} />
+          </button>
+          <button type="button" onClick={() => setUseSession((v) => !v)} title={t("Send with the active session cookies")} className={toggleCls(useSession)}>
+            <KeyRound className="size-3" strokeWidth={1.75} />
+          </button>
+          <button type="button" onClick={() => setUseHttp2((v) => !v)} title={t("Send over HTTP/2")} className={toggleCls(useHttp2)}>
+            <span className="text-[10px] font-semibold">h2</span>
           </button>
           <button type="button" onClick={() => setUpdateCl((v) => !v)} title={t("Update Content-Length")} className={toggleCls(updateCl)}>
             <Hash className="size-3" strokeWidth={1.75} />

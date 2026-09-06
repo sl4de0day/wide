@@ -16,6 +16,7 @@ export interface PitcherResponse {
   ms?: number;
   url?: string;
   error?: string;
+  truncated?: boolean;
 
   sent?: { method: string; url: string; headers: [string, string][]; body: string };
 }
@@ -30,6 +31,7 @@ interface Reply {
   ms?: number;
   url?: string;
   error?: string;
+  truncated?: boolean;
 }
 
 function enabledPairs(params: Param[], vars: Record<string, string>): [string, string][] {
@@ -57,13 +59,16 @@ const CONTENT_TYPE: Record<string, string> = {
   html: "text/html",
 };
 
-function buildBody(req: PitcherRequest, vars: Record<string, string>): { body: string | null; contentType: string | null } {
+async function buildBody(
+  req: PitcherRequest,
+  vars: Record<string, string>,
+): Promise<{ body: string | null; contentType: string | null; base64: boolean }> {
   const b = req.body;
-  if (b.mode === "none" || b.mode === "binary" || b.mode === "multipart") return { body: null, contentType: null };
-  if (b.mode === "raw") return { body: resolveVars(b.raw, vars), contentType: CONTENT_TYPE[b.rawType] ?? "text/plain" };
+  if (b.mode === "none") return { body: null, contentType: null, base64: false };
+  if (b.mode === "raw") return { body: resolveVars(b.raw, vars), contentType: CONTENT_TYPE[b.rawType] ?? "text/plain", base64: false };
   if (b.mode === "form") {
     const pairs = enabledPairs(b.form, vars);
-    return { body: pairs.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&"), contentType: "application/x-www-form-urlencoded" };
+    return { body: pairs.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&"), contentType: "application/x-www-form-urlencoded", base64: false };
   }
   if (b.mode === "graphql") {
     let variables: unknown = {};
@@ -72,9 +77,51 @@ function buildBody(req: PitcherRequest, vars: Record<string, string>): { body: s
     } catch {
       variables = {};
     }
-    return { body: JSON.stringify({ query: resolveVars(b.graphql.query, vars), variables }), contentType: "application/json" };
+    return { body: JSON.stringify({ query: resolveVars(b.graphql.query, vars), variables }), contentType: "application/json", base64: false };
   }
-  return { body: null, contentType: null };
+  if (b.mode === "binary") {
+    const path = resolveVars(b.binaryPath, vars).trim();
+    if (!path) return { body: null, contentType: null, base64: false };
+    const file = await bridge.readBinary(path);
+    if (!file.ok || !file.base64) return { body: null, contentType: null, base64: false };
+    return { body: file.base64, contentType: "application/octet-stream", base64: true };
+  }
+  if (b.mode === "multipart") {
+    const boundary = `----WideFormBoundary${Math.random().toString(36).slice(2)}`;
+    const parts: Uint8Array[] = [];
+    const enc = new TextEncoder();
+    const push = (chunk: string) => parts.push(enc.encode(chunk));
+    for (const field of b.form) {
+      if (!field.enabled || !field.key.trim()) continue;
+      const value = resolveVars(field.value, vars);
+      if (value.startsWith("@")) {
+        const file = await bridge.readBinary(value.slice(1).trim());
+        if (file.ok && file.base64) {
+          push(
+            `--${boundary}\r\nContent-Disposition: form-data; name="${field.key}"; filename="${file.name ?? "file"}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+          );
+          const bin = atob(file.base64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+          parts.push(bytes);
+          push("\r\n");
+          continue;
+        }
+      }
+      push(`--${boundary}\r\nContent-Disposition: form-data; name="${field.key}"\r\n\r\n${value}\r\n`);
+    }
+    push(`--${boundary}--\r\n`);
+    let total = 0;
+    for (const chunk of parts) total += chunk.length;
+    const merged = new Uint8Array(total);
+    let at = 0;
+    for (const chunk of parts) { merged.set(chunk, at); at += chunk.length; }
+    let binary = "";
+    for (let i = 0; i < merged.length; i += 1) binary += String.fromCharCode(merged[i]);
+    return { body: btoa(binary), contentType: `multipart/form-data; boundary=${boundary}`, base64: true };
+  }
+
+  return { body: null, contentType: null, base64: false };
 }
 
 function hasHeader(headers: [string, string][], name: string): boolean {
@@ -103,21 +150,24 @@ async function dispatch(
   body: string | null,
   throughProxy: boolean,
   followRedirects: boolean,
+  insecure: boolean,
+  base64: boolean,
 ): Promise<Reply> {
-  if (throughProxy) {
+  if (throughProxy && !base64) {
     const reply = await bridge.proxyReplay({ method, url, headers, body: body ?? "" }, { followRedirects });
     if (!reply.ok) return { ok: false, error: reply.error ?? "The request could not be sent." };
-    return { ok: true, status: reply.status, statusText: reply.statusText, headers: reply.headers, body: reply.body, bytes: reply.bytes, ms: reply.ms, url: reply.url };
+    return { ok: true, status: reply.status, statusText: reply.statusText, headers: reply.headers, body: reply.body, bytes: reply.bytes, ms: reply.ms, url: reply.url, truncated: reply.truncated };
   }
-  const reply = await bridge.httpSend(url, method, headers, body);
+  const reply = await bridge.httpSend(url, method, headers, body, { insecure, bodyBase64: base64 });
   if (!reply.ok) return { ok: false, error: reply.error };
-  return { ok: true, status: reply.status, statusText: reply.statusText, headers: reply.headers, body: reply.body, bytes: reply.bytes, ms: reply.ms, url: reply.url };
+  return { ok: true, status: reply.status, statusText: reply.statusText, headers: reply.headers, body: reply.body, bytes: reply.bytes, ms: reply.ms, url: reply.url, truncated: reply.truncated };
 }
 
-export async function sendPitcher(req: PitcherRequest, vars: Record<string, string>): Promise<PitcherResponse> {
+export async function sendPitcher(req: PitcherRequest, vars: Record<string, string>, inheritedAuth?: PitcherRequest["auth"]): Promise<PitcherResponse> {
+  const effReq = req.auth.type === "inherit" && inheritedAuth ? { ...req, auth: inheritedAuth } : req;
   const url = buildUrl(req, vars);
   const headers = enabledPairs(req.headers, vars);
-  const { body, contentType } = buildBody(req, vars);
+  const { body, contentType, base64 } = await buildBody(effReq, vars);
   if (contentType && !hasHeader(headers, "content-type")) headers.push(["Content-Type", contentType]);
 
   if (!hasHeader(headers, "cookie")) {
@@ -125,23 +175,23 @@ export async function sendPitcher(req: PitcherRequest, vars: Record<string, stri
     if (jar) headers.push(["Cookie", jar]);
   }
 
-  const finalUrl = await applyAuth(req, headers, url, vars, body);
+  const finalUrl = await applyAuth(effReq, headers, url, vars, body);
 
-  let reply = await dispatch(req.method, finalUrl, headers, body, req.throughProxy, req.followRedirects);
+  let reply = await dispatch(req.method, finalUrl, headers, body, req.throughProxy, req.followRedirects, effReq.insecure ?? false, base64);
 
-  if (reply.ok && reply.status === 401 && req.auth.type === "digest") {
+  if (reply.ok && reply.status === 401 && effReq.auth.type === "digest") {
     const challenge = parseDigestChallenge(headerValue(reply.headers ?? [], "www-authenticate") ?? "");
     if (challenge) {
       const auth = buildDigestHeader(
-        resolveVars(req.auth.digest.username, vars),
-        resolveVars(req.auth.digest.password, vars),
+        resolveVars(effReq.auth.digest.username, vars),
+        resolveVars(effReq.auth.digest.password, vars),
         req.method,
         pathAndQuery(finalUrl),
         challenge,
       );
       const retryHeaders = headers.filter(([n]) => n.toLowerCase() !== "authorization");
       retryHeaders.push(["Authorization", auth]);
-      reply = await dispatch(req.method, finalUrl, retryHeaders, body, req.throughProxy, req.followRedirects);
+      reply = await dispatch(req.method, finalUrl, retryHeaders, body, req.throughProxy, req.followRedirects, effReq.insecure ?? false, base64);
     }
   }
 
@@ -159,6 +209,7 @@ export async function sendPitcher(req: PitcherRequest, vars: Record<string, stri
     bytes: reply.bytes,
     ms: reply.ms,
     url: reply.url,
+    truncated: reply.truncated,
     sent,
   };
 }

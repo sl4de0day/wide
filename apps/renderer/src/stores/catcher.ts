@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import { newRepeaterSeed, repeaterSeeds, useEditor, type RepeaterSeed } from "./editor";
 
-export type CatcherTool = "proxy" | "target" | "repeater" | "intruder" | "scanner" | "collaborator" | "sequencer";
+export type CatcherTool = "proxy" | "target" | "repeater" | "intruder" | "scanner" | "collaborator" | "sequencer" | "miner" | "technologies";
 
 interface CatcherState {
   tool: CatcherTool;

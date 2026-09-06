@@ -18,7 +18,7 @@ export interface BodyConfig {
   binaryPath: string;
 }
 
-export type AuthType = "none" | "bearer" | "basic" | "apikey" | "oauth2" | "digest" | "awssigv4";
+export type AuthType = "none" | "inherit" | "bearer" | "basic" | "apikey" | "oauth2" | "digest" | "awssigv4";
 export interface AuthConfig {
   type: AuthType;
   bearer: string;
@@ -45,6 +45,7 @@ export interface PitcherRequest {
   testScript: string;
   followRedirects: boolean;
   throughProxy: boolean;
+  insecure: boolean;
 }
 
 export type Node =
@@ -56,6 +57,7 @@ export interface Collection {
   name: string;
   nodes: Node[];
   vars: Param[];
+  auth?: AuthConfig;
 }
 
 let seq = 0;
@@ -87,6 +89,7 @@ export function newRequest(name = "New request"): PitcherRequest {
     testScript: "",
     followRedirects: true,
     throughProxy: false,
+    insecure: false,
   };
 }
 
@@ -106,6 +109,7 @@ function normalizeRequest(r: PitcherRequest): PitcherRequest {
     testScript: r.testScript ?? "",
     followRedirects: r.followRedirects ?? true,
     throughProxy: r.throughProxy ?? false,
+    insecure: r.insecure ?? false,
     auth: {
       type: a.type ?? "none",
       bearer: a.bearer ?? "",
@@ -207,6 +211,7 @@ interface PitcherState {
   updateRequest(id: string, patch: Partial<PitcherRequest>): void;
   getRequest(id: string): PitcherRequest | null;
   collectionOf(requestId: string): Collection | null;
+  setCollectionAuth(collectionId: string, auth: AuthConfig): void;
 }
 
 export const usePitcher = create<PitcherState>((set, get) => ({
@@ -215,7 +220,7 @@ export const usePitcher = create<PitcherState>((set, get) => ({
   activeTab: null,
 
   newCollection: (name = "New collection") => {
-    const c: Collection = { id: uid("c"), name, nodes: [], vars: [] };
+    const c: Collection = { id: uid("c"), name, nodes: [], vars: [], auth: emptyAuth() };
     set((s) => {
       const collections = [...s.collections, c];
       persist(collections);
@@ -345,6 +350,13 @@ export const usePitcher = create<PitcherState>((set, get) => ({
   },
 
   getRequest: (id) => findReq(get().collections, id),
+  setCollectionAuth: (collectionId, auth) =>
+    set((s) => {
+      const collections = s.collections.map((c) => (c.id === collectionId ? { ...c, auth } : c));
+      persist(collections);
+      return { collections };
+    }),
+
   collectionOf: (requestId) => {
     for (const c of get().collections) {
       if (findReq([c], requestId)) return c;

@@ -238,6 +238,21 @@ const TOOL_PROVISIONERS = {
   commix: { kind: "git", repo: "https://github.com/commixproject/commix", launcher: "commix.py", label: "commix.py" },
   sublist3r: { kind: "git", repo: "https://github.com/aboul3la/Sublist3r", launcher: "sublist3r.py", requirements: "requirements.txt", label: "sublist3r.py" },
   seclists: { kind: "git", repo: "https://github.com/danielmiessler/SecLists", label: "SecLists" },
+
+  cyberchef: {
+    kind: "asset",
+    archive: { github: "gchq/CyberChef", asset: /^CyberChef_v[\d.]+\.zip$/i, file: "cyberchef.zip" },
+    find: /^CyberChef_v[\d.]+\.html$/i,
+    provides: "CyberChef",
+  },
+  wappalyzer: {
+    kind: "asset",
+    archive: { url: "https://codeload.github.com/enthec/webappanalyzer/tar.gz/refs/heads/main", file: "webappanalyzer.tar.gz" },
+    merge: "wappalyzer",
+    provides: "Wappalyzer",
+  },
+  "js-miner": { kind: "builtin", provides: "JS Miner" },
+  "selector-test": { kind: "builtin", provides: "Selector Test" },
 };
 
 
@@ -630,6 +645,136 @@ async function installArchive(id, spec, track = null) {
 }
 
 
+async function findFileMatching(root, pattern, depth = 5) {
+  let entries;
+  try {
+    entries = await promises.readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const dirs = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) dirs.push(node_path.join(root, entry.name));
+    else if (pattern.test(entry.name)) return node_path.join(root, entry.name);
+  }
+  if (depth <= 0) return null;
+  for (const dir of dirs) {
+    const found = await findFileMatching(dir, pattern, depth - 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function collectJsonUnder(root, folderName, depth = 6) {
+  const files = [];
+  const walk = async (dir, left, inside) => {
+    let entries;
+    try {
+      entries = await promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = node_path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (left > 0) await walk(full, left - 1, inside || entry.name === folderName);
+      } else if (inside && entry.name.toLowerCase().endsWith(".json")) {
+        files.push(full);
+      }
+    }
+  };
+  await walk(root, depth, false);
+  return files.sort();
+}
+
+async function mergeWappalyzer(dir) {
+  const techFiles = await collectJsonUnder(dir, "technologies");
+  if (!techFiles.length) return { ok: false, detail: "The ruleset unpacked but no technology files were found." };
+  const technologies = {};
+  for (const file of techFiles) {
+    try {
+      Object.assign(technologies, JSON.parse(await promises.readFile(file, "utf8")));
+    } catch {
+      void 0;
+    }
+  }
+  let categories = {};
+  const categoriesFile = await findFileMatching(dir, /^categories\.json$/i);
+  if (categoriesFile) {
+    try {
+      categories = JSON.parse(await promises.readFile(categoriesFile, "utf8"));
+    } catch {
+      void 0;
+    }
+  }
+  if (!Object.keys(technologies).length) {
+    return { ok: false, detail: "The ruleset unpacked but no technologies could be read." };
+  }
+  const out = node_path.join(dir, "technologies.json");
+  try {
+    await promises.writeFile(out, JSON.stringify({ technologies, categories }), "utf8");
+  } catch (error) {
+    return { ok: false, detail: String(error.message) };
+  }
+  return { ok: true, path: out };
+}
+
+async function webAssetPath(id, spec) {
+  const dir = SERVER_DIR(id);
+  if (spec.merge === "wappalyzer") {
+    const merged = node_path.join(dir, "technologies.json");
+    try {
+      await promises.access(merged);
+      return merged;
+    } catch {
+      return null;
+    }
+  }
+  if (spec.find) return findFileMatching(dir, spec.find);
+  return null;
+}
+
+async function installWebAsset(id, spec, track = null) {
+  const archive = spec.archive;
+  const url = archive.github ? await latestAsset(archive.github, archive.asset, track) : archive.url;
+  if (!url) return { ok: false, detail: "The latest release could not be found." };
+
+  const dir = SERVER_DIR(id);
+  const temp = node_path.join(electron.app.getPath("temp"), `wide-${id}-${process.pid}`);
+  try {
+    await promises.rm(dir, { recursive: true, force: true });
+    await promises.mkdir(dir, { recursive: true });
+    await promises.mkdir(temp, { recursive: true });
+  } catch (error) {
+    return { ok: false, detail: String(error.message) };
+  }
+
+  const file = node_path.join(temp, archive.file);
+  const fetched = await download(url, file, 6, track);
+  if (!fetched.ok) {
+    await promises.rm(temp, { recursive: true, force: true }).catch(() => {});
+    return fetched;
+  }
+
+  const unpacked = await runManager("tar", ["-xf", file, "-C", dir], {
+    timeout: DOWNLOAD_TIMEOUT_MS,
+    track,
+  });
+  await promises.rm(temp, { recursive: true, force: true }).catch(() => {});
+  if (!unpacked.ok) {
+    return { ok: false, detail: unpacked.detail || "The download could not be unpacked." };
+  }
+
+  if (spec.merge === "wappalyzer") return mergeWappalyzer(dir);
+  if (spec.find) {
+    const found = await findFileMatching(dir, spec.find);
+    if (!found) return { ok: false, detail: "The download unpacked but the expected file was not in it." };
+    return { ok: true, path: found };
+  }
+  return { ok: true, path: dir };
+}
+
+
 async function bootstrapManager(manager, track = null) {
   const bootstrap = MANAGER_BOOTSTRAP[manager];
   if (!bootstrap) return { ok: false, detail: "" };
@@ -709,6 +854,19 @@ async function prepareTool(id, spec, track) {
     await rememberServer(id, server);
     return { ok: true, id, server };
   };
+
+  if (spec.kind === "builtin") {
+    return remember("installed", "");
+  }
+
+  if (spec.kind === "asset") {
+    const existing = await webAssetPath(id, spec);
+    if (existing) return remember("present", existing);
+    const done = await installWebAsset(id, spec, track);
+    if (stopped() || done.cancelled) return cancelled;
+    if (!done.ok) return remember("failed", "", { detail: done.detail ?? "" });
+    return remember("installed", done.path);
+  }
 
   if (spec.kind === "git") {
     const dir = SERVER_DIR(id);

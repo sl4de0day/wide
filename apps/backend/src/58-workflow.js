@@ -155,7 +155,7 @@ function registerWorkflowHandlers() {
       settings: existing?.settings && typeof existing.settings === "object" ? existing.settings : {},
     };
     try {
-      await promises.writeFile(workflowPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+      await writeFileAtomic(workflowPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
     } catch (error) {
       return { error: error.message };
     }

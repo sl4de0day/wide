@@ -10,6 +10,15 @@ export interface FileCounts {
 
 export type DiagnosticSource = "typescript" | "eslint" | "inspection" | "lsp" | "security";
 
+export interface ProjectProblem {
+  file: string;
+  line: number;
+  column: number;
+  severity: "error" | "warning";
+  message: string;
+  code?: number;
+}
+
 interface DiagnosticsState {
 
   bySource: Record<string, Partial<Record<DiagnosticSource, Diagnostic[]>>>;
@@ -21,6 +30,7 @@ interface DiagnosticsState {
   securityCount: number;
 
   projectCounts: Record<string, FileCounts>;
+  projectProblems: ProjectProblem[];
   scanning: boolean;
 
   setFor(path: string, source: DiagnosticSource, diagnostics: Diagnostic[]): void;
@@ -83,6 +93,7 @@ export const useDiagnostics = create<DiagnosticsState>((set, get) => ({
   problemTotals: { errors: 0, warnings: 0 },
   securityCount: 0,
   projectCounts: {},
+  projectProblems: [],
   scanning: false,
 
   setFor: (path, source, diagnostics) =>
@@ -134,7 +145,8 @@ export const useDiagnostics = create<DiagnosticsState>((set, get) => ({
       for (const [path, value] of Object.entries(result?.counts ?? {})) {
         counts[normalisePath(path)] = value;
       }
-      set({ projectCounts: counts, scanning: false });
+      const problems: ProjectProblem[] = (result?.problems ?? []).map((p) => ({ ...p, file: normalisePath(p.file) }));
+      set({ projectCounts: counts, projectProblems: problems, scanning: false });
     } catch {
       set({ scanning: false });
     }
@@ -147,5 +159,6 @@ export const useDiagnostics = create<DiagnosticsState>((set, get) => ({
       problemTotals: { errors: 0, warnings: 0 },
       securityCount: 0,
       projectCounts: {},
+      projectProblems: [],
     }),
 }));

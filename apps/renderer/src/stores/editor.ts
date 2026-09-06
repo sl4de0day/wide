@@ -16,6 +16,8 @@ export const CATCHER_PATH = "wide://catcher";
 
 export const PITCHER_PATH = "wide://pitcher";
 
+export const CYBERCHEF_PATH = "wide://cyberchef";
+
 export const EXTENSION_PATH = "wide://extension/";
 
 export const AI_CHAT_PATH = "wide://ai/";
@@ -32,15 +34,47 @@ export interface FileTab {
   savedContent: string;
   tooLarge: boolean;
   size: number;
+  diskChanged?: boolean;
 }
 
 export interface VirtualTab {
-  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher";
+  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef";
   path: string;
   name: string;
 }
 
-export type Tab = FileTab | VirtualTab;
+export interface MediaTab {
+  kind: "media";
+  path: string;
+  name: string;
+  dataUri: string;
+  mediaKind: "image" | "pdf" | "font" | "binary";
+  size: number;
+}
+
+export type Tab = FileTab | VirtualTab | MediaTab;
+
+const MEDIA_TYPES: Record<string, { kind: MediaTab["mediaKind"]; mime: string }> = {
+  png: { kind: "image", mime: "image/png" },
+  jpg: { kind: "image", mime: "image/jpeg" },
+  jpeg: { kind: "image", mime: "image/jpeg" },
+  gif: { kind: "image", mime: "image/gif" },
+  webp: { kind: "image", mime: "image/webp" },
+  bmp: { kind: "image", mime: "image/bmp" },
+  ico: { kind: "image", mime: "image/x-icon" },
+  svg: { kind: "image", mime: "image/svg+xml" },
+  avif: { kind: "image", mime: "image/avif" },
+  pdf: { kind: "pdf", mime: "application/pdf" },
+  woff: { kind: "font", mime: "font/woff" },
+  woff2: { kind: "font", mime: "font/woff2" },
+  ttf: { kind: "font", mime: "font/ttf" },
+  otf: { kind: "font", mime: "font/otf" },
+};
+
+export function mediaTypeFor(path: string): { kind: MediaTab["mediaKind"]; mime: string } | null {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return MEDIA_TYPES[ext] ?? null;
+}
 
 export interface Cursor {
   line: number;
@@ -71,6 +105,8 @@ interface EditorState {
   openCatcher(): void;
 
   openPitcher(): void;
+
+  openCyberchef(): void;
   openExtension(id: string, name: string): void;
   openAiChat(id: string, name: string): void;
 
@@ -89,6 +125,7 @@ interface EditorState {
   updateContent(path: string, content: string): void;
   setCursor(cursor: Cursor): void;
   reloadFromDisk(path: string): Promise<void>;
+  checkDiskChanges(): Promise<void>;
   revealAt(path: string, line: number, column?: number): Promise<void>;
 
   revealOffset(path: string, offset: number): Promise<void>;
@@ -161,6 +198,26 @@ export const useEditor = create<EditorState>((set, get) => ({
       set({ activePath: path, lastFilePath: path });
       return true;
     }
+    const media = mediaTypeFor(path);
+    if (media) {
+      try {
+        const binary = await bridge.readBinary(path);
+        if (binary.ok && binary.base64) {
+          const tab: MediaTab = {
+            kind: "media",
+            path,
+            name: basename(path),
+            dataUri: `data:${media.mime};base64,${binary.base64}`,
+            mediaKind: media.kind,
+            size: binary.size ?? 0,
+          };
+          set((state) => ({ tabs: [...state.tabs, tab], activePath: path, lastFilePath: path }));
+          return true;
+        }
+      } catch {
+        void 0;
+      }
+    }
     try {
       const file = await bridge.readFile(path);
       const tab: FileTab = {
@@ -232,6 +289,17 @@ export const useEditor = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, { kind: "pitcher", path: PITCHER_PATH, name: "Pitcher" }],
         activePath: PITCHER_PATH,
+      };
+    }),
+
+  openCyberchef: () =>
+    set((state) => {
+      if (state.tabs.some((tab) => tab.path === CYBERCHEF_PATH)) {
+        return { activePath: CYBERCHEF_PATH };
+      }
+      return {
+        tabs: [...state.tabs, { kind: "cyberchef", path: CYBERCHEF_PATH, name: "CyberChef" }],
+        activePath: CYBERCHEF_PATH,
       };
     }),
 
@@ -402,12 +470,42 @@ export const useEditor = create<EditorState>((set, get) => ({
       set((state) => ({
         tabs: state.tabs.map((tab) =>
           tab.path === path && tab.kind === "file"
-            ? { ...tab, content: file.content, savedContent: file.content, size: file.size }
+            ? { ...tab, content: file.content, savedContent: file.content, size: file.size, diskChanged: false }
             : tab,
         ),
       }));
     } catch (error) {
       console.error(`Could not re-read file: ${path}`, error);
+    }
+  },
+
+  checkDiskChanges: async () => {
+    const files = get().tabs.filter((tab): tab is FileTab => tab.kind === "file" && !tab.tooLarge);
+    if (files.length === 0) return;
+    let warned = false;
+    for (const tab of files) {
+      let file;
+      try {
+        file = await bridge.readFile(tab.path);
+      } catch {
+        continue;
+      }
+      if (file.tooLarge || file.content === tab.savedContent) continue;
+      const dirty = tab.content !== tab.savedContent;
+      if (!dirty) {
+        await get().reloadFromDisk(tab.path);
+      } else {
+        set((state) => ({
+          tabs: state.tabs.map((item) =>
+            item.path === tab.path && item.kind === "file" ? { ...item, diskChanged: true } : item,
+          ),
+        }));
+        warned = true;
+      }
+    }
+    if (warned) {
+      const { toast } = await import("./toast");
+      toast.error("A file open in the editor changed on disk. Your unsaved version is kept — reload it to take the disk copy.");
     }
   },
 
@@ -474,12 +572,24 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
     }
 
+    const live = get().tabs.find((item) => item.path === tab.path);
+    if (live && live.kind === "file" && live.diskChanged) {
+      const { confirm } = await import("./confirm");
+      const ok = await confirm({
+        title: "This file changed on disk",
+        message: "Saving will overwrite the newer copy on disk with your version. Overwrite it?",
+        confirmLabel: "Overwrite",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+
     try {
       await bridge.writeFile(tab.path, tab.content);
       set((state) => ({
         tabs: state.tabs.map((item) =>
           item.path === tab.path && item.kind === "file"
-            ? { ...item, savedContent: tab.content }
+            ? { ...item, savedContent: tab.content, diskChanged: false }
             : item,
         ),
       }));

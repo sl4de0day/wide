@@ -43,10 +43,22 @@ function registerFsHandlers() {
     const content = await promises.readFile(filePath, "utf8");
     return { path: filePath, tooLarge: false, size: stats.size, content };
   });
+  electron.ipcMain.handle("fs:readBinary", async (_event, filePath) => {
+    try {
+      const stats = await promises.stat(filePath);
+      if (stats.size > 32 * 1024 * 1024) {
+        return { ok: false, error: "That file is larger than 32 MB." };
+      }
+      const buffer = await promises.readFile(filePath);
+      return { ok: true, base64: buffer.toString("base64"), size: stats.size, name: node_path.basename(filePath) };
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  });
   electron.ipcMain.handle("fs:writeFile", async (_event, filePath, content) => {
 
     await promises.mkdir(node_path.dirname(filePath), { recursive: true });
-    await promises.writeFile(filePath, content, "utf8");
+    await writeFileAtomic(filePath, content, "utf8");
     return { path: filePath };
   });
   electron.ipcMain.handle("fs:create", async (_event, parentPath, name, kind) => {
@@ -111,4 +123,37 @@ function registerWindowHandlers() {
   electron.ipcMain.handle("window:setTitle", (event, title2) => {
     electron.BrowserWindow.fromWebContents(event.sender)?.setTitle(title2);
   });
+}
+
+
+async function writeFileAtomic(file, data, encoding) {
+  const dir = node_path.dirname(file);
+  await promises.mkdir(dir, { recursive: true });
+  const temp = node_path.join(
+    dir,
+    `.${node_path.basename(file)}.${process.pid}.${node_crypto.randomBytes(4).toString("hex")}.part`
+  );
+  let handle = null;
+  try {
+    handle = await promises.open(temp, "w");
+    await handle.writeFile(data, encoding ? { encoding } : undefined);
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await promises.rename(temp, file);
+  } catch (error) {
+    if (handle) {
+      try {
+        await handle.close();
+      } catch {
+        void 0;
+      }
+    }
+    try {
+      await promises.unlink(temp);
+    } catch {
+      void 0;
+    }
+    throw error;
+  }
 }

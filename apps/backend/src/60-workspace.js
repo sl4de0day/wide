@@ -12,7 +12,7 @@ async function readRecents() {
 }
 async function writeRecents(projects) {
   try {
-    await promises.writeFile(RECENTS_FILE(), JSON.stringify({ projects }, null, 2), "utf8");
+    await writeFileAtomic(RECENTS_FILE(), JSON.stringify({ projects }, null, 2), "utf8");
   } catch (error) {
     console.warn("[workspace] The recent-projects list could not be saved:", error.message);
   }

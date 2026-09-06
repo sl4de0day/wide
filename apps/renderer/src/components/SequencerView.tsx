@@ -102,6 +102,10 @@ export function SequencerView() {
             <Bar label={t("character set")} value={String(stats.charset)} max={{ v: stats.charset, of: 95 }} />
             <Bar label={t("length")} value={stats.fixedLength != null ? String(stats.fixedLength) : t("variable")} />
             <Bar label={t("entropy / char")} value={`${stats.perCharEntropy.toFixed(2)} b`} max={{ v: stats.perCharEntropy, of: Math.log2(Math.max(2, stats.charset)) }} />
+            <Bar label={t("entropy / bit")} value={`${stats.bitEntropy.toFixed(3)}`} max={{ v: stats.bitEntropy, of: 1 }} />
+            <Bar label={t("bit balance (0.5 is ideal)")} value={stats.bitBalance.toFixed(3)} max={{ v: 1 - Math.abs(stats.bitBalance - 0.5) * 2, of: 1 }} />
+            <Bar label={t("transition entropy")} value={`${stats.transitionEntropy.toFixed(2)} b`} max={{ v: stats.transitionEntropy, of: Math.log2(Math.max(2, stats.charset)) * 2 }} />
+            <Bar label={t("compression ratio")} value={stats.compressionRatio.toFixed(2)} max={{ v: stats.compressionRatio, of: 1 }} />
             <p className="mt-3 text-[11px] leading-relaxed text-fg-faint">
               {stats.effectiveBits >= 64
                 ? t("Strong: guessing this token is computationally infeasible.")

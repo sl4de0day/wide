@@ -11,7 +11,7 @@ import {
 import { passiveChecks } from "@/lib/passiveScan";
 import { useFindings } from "./findings";
 
-const MAX = 500;
+const MAX = 5000;
 const FRAME_MAX = 5000;
 
 let ruleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -50,6 +50,8 @@ interface ProxyState {
   setInterceptResponse(on: boolean): Promise<void>;
   toggleScan(): void;
   decide(id: number, action: "forward" | "drop", edited?: { method?: string; headers?: [string, string][]; body?: string }): Promise<void>;
+  decideAll(action: "forward" | "drop"): Promise<void>;
+  decideAllResponses(action: "forward" | "drop"): Promise<void>;
   decideResponse(id: number, action: "forward" | "drop", edited?: { status?: number; headers?: [string, string][]; body?: string }): Promise<void>;
   ingestIntercept(request: InterceptedRequest): void;
   ingestInterceptResponse(response: InterceptedResponse): void;
@@ -145,6 +147,18 @@ export const useProxy = create<ProxyState>((set, get) => ({
   decideResponse: async (id, action, edited) => {
     set((state) => ({ heldResponses: state.heldResponses.filter((response) => response.id !== id) }));
     await bridge.proxyResponseDecision(id, action, edited);
+  },
+
+  decideAll: async (action) => {
+    const ids = get().held.map((request) => request.id);
+    set({ held: [] });
+    for (const id of ids) await bridge.proxyInterceptDecision(id, action);
+  },
+
+  decideAllResponses: async (action) => {
+    const ids = get().heldResponses.map((response) => response.id);
+    set({ heldResponses: [] });
+    for (const id of ids) await bridge.proxyResponseDecision(id, action);
   },
 
   ingestIntercept: (request) => set((state) => ({ held: [...state.held, request] })),

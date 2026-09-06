@@ -9,6 +9,8 @@ import {
   RefreshCw,
   RotateCcw,
   Tag,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -389,6 +391,26 @@ export function CodebergPanel() {
           >
             <ArrowUpFromLine className="size-3" strokeWidth={1.75} />
             {busy === "pushing" ? t("Pushing…") : t("Push")}
+          </button>
+          <button
+            type="button"
+            disabled={busy !== ""}
+            onClick={() => void act().stash("push")}
+            title={t("Stash your uncommitted changes")}
+            className="flex items-center justify-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-fg transition-colors duration-100 hover:bg-hover disabled:opacity-40"
+          >
+            <Archive className="size-3" strokeWidth={1.75} />
+            {busy === "stashing" ? t("Stashing…") : t("Stash")}
+          </button>
+          <button
+            type="button"
+            disabled={busy !== ""}
+            onClick={() => void act().stash("pop")}
+            title={t("Restore the most recent stash")}
+            className="flex items-center justify-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-fg transition-colors duration-100 hover:bg-hover disabled:opacity-40"
+          >
+            <ArchiveRestore className="size-3" strokeWidth={1.75} />
+            {t("Pop")}
           </button>
           <button
             type="button"

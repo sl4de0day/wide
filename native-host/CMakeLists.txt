@@ -39,7 +39,7 @@ target_include_directories(wide_host PRIVATE
 )
 
 target_link_libraries(wide_host PRIVATE
-  user32 gdi32 gdiplus shell32 dwmapi ole32 shlwapi
+  user32 gdi32 gdiplus shell32 dwmapi ole32 shlwapi crypt32
 )
 
 # Unicode Win32 APIs everywhere.

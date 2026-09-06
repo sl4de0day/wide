@@ -40,5 +40,14 @@ jobs:
       - name: Backend smoke tests
         run: npm run test:smoke
 
+      - name: Security scan (self)
+        run: npm run scan -- . --format sarif --out wide-findings.sarif --fail-on never
+
+      - name: Upload the security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: wide-findings
+          path: wide-findings.sarif
+
       - name: Build the native host
         run: npm run build:host

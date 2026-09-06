@@ -708,6 +708,8 @@ export interface HostApi {
   ): Promise<{ kind: "folder" | "file"; path: string; name: string; file?: string } | { error: string }>;
 
   onHostOpenPath: Subscriber<{ path: string }>;
+  onBackendState: Subscriber<{ state: string; attempt: number }>;
+  onBackendFault: Subscriber<{ kind: string; detail: string }>;
 
   requestPendingOpenPath(): void;
 
@@ -717,6 +719,7 @@ export interface HostApi {
 
   readDir(path: string): Promise<DirEntry[]>;
   readFile(path: string): Promise<FileRead>;
+  readBinary(path: string): Promise<{ ok: boolean; base64?: string; size?: number; name?: string; error?: string }>;
   writeFile(path: string, content: string): Promise<{ path: string; error?: string }>;
   create(parentPath: string, name: string, kind: "file" | "folder"): Promise<{ path?: string; error?: string }>;
   rename(path: string, name: string): Promise<{ path?: string; error?: string }>;
@@ -802,6 +805,7 @@ export interface HostApi {
     method: string,
     headers: [string, string][],
     body: string | null,
+    options?: { insecure?: boolean; bodyBase64?: boolean },
   ): Promise<HttpResponse>;
   projectTailwind(root: string): Promise<{
     usesTailwind: boolean;
@@ -819,9 +823,10 @@ export interface HostApi {
   tsSync(root: string, file: string, content: string): Promise<{ ok: boolean }>;
   tsClose(file: string): Promise<{ ok: boolean }>;
   tsCompletions(root: string, file: string, position: number): Promise<{ entries: unknown[] }>;
+  tsDetails(root: string, file: string, position: number, name: string, source?: string | null, data?: unknown): Promise<{ signature?: string; documentation?: string; importEdits?: { span: { start: number; length: number }; newText: string }[]; importDescription?: string | null } | null>;
   tsQuickInfo(root: string, file: string, position: number): Promise<unknown | null>;
   tsDiagnostics(root: string, file: string): Promise<{ diagnostics: Diagnostic[] }>;
-  tsProjectDiagnostics(root: string): Promise<{ counts: Record<string, { errors: number; warnings: number }>; scanned: number }>;
+  tsProjectDiagnostics(root: string): Promise<{ counts: Record<string, { errors: number; warnings: number }>; problems?: { file: string; line: number; column: number; severity: "error" | "warning"; message: string; code?: number }[]; scanned: number }>;
 
 
   tsDefinition(root: string, file: string, position: number): Promise<{ span?: CodeSpan | null; locations: CodeLocation[] }>;
@@ -833,6 +838,8 @@ export interface HostApi {
 
 
   securityRescanFile(root: string, file: string, content?: string): Promise<{ findings: ProjectScanFinding[] }>;
+  securityExport(root: string, format: "sarif" | "json"): Promise<Ok & { format?: string; text?: string; count?: number }>;
+  securityBaseline(root: string, action: "set" | "clear"): Promise<Ok & { count?: number }>;
   tsDocumentHighlights(root: string, file: string, position: number): Promise<{ spans: CodeSpan[] }>;
   tsSignatureHelp(root: string, file: string, position: number): Promise<SignatureHelp>;
 
@@ -867,7 +874,7 @@ export interface HostApi {
   ): Promise<{ actions: CodeAction[] }>;
 
 
-  terminalStart(options: { cols: number; rows: number; cwd?: string }): Promise<TerminalSession>;
+  terminalStart(options: { cols: number; rows: number; cwd?: string; shell?: string }): Promise<TerminalSession>;
   terminalWrite(id: number, data: string): Promise<unknown>;
   terminalResize(id: number, cols: number, rows: number): Promise<unknown>;
   terminalDispose(id: number): Promise<unknown>;
@@ -895,12 +902,17 @@ export interface HostApi {
 
   browserCdp(tabId: string, method: string, params?: Record<string, unknown>): Promise<Ok<{ result?: unknown }>>;
 
+  webtoolsCyberchef(): Promise<Ok<{ url?: string }>>;
+
+  webtoolsWappalyzer(): Promise<Ok<{ technologies?: Record<string, unknown>; categories?: Record<string, unknown> }>>;
+
   devtoolsPlace(x: number, y: number, w: number, h: number, visible: boolean): void;
 
   browserFullscreen(on: boolean): void;
   onBrowserEvent: Subscriber<BrowserEvent>;
 
   oastStart(server: string, token: string): Promise<Ok<{ running?: boolean; domain?: string; server?: string }>>;
+  oastStartBuiltin(): Promise<Ok<{ running?: boolean; domain?: string; server?: string }>>;
   oastStop(): Promise<Ok>;
   oastStatus(): Promise<Ok<{ installed?: boolean; running?: boolean; domain?: string; server?: string }>>;
   onOastInteraction: Subscriber<OastInteraction>;
@@ -938,7 +950,7 @@ export interface HostApi {
       headers: [string, string][];
       body: string;
     },
-    options?: { followRedirects?: boolean },
+    options?: { followRedirects?: boolean; session?: boolean; http2?: boolean },
   ): Promise<
     Ok<{
       status?: number;
@@ -952,6 +964,7 @@ export interface HostApi {
       url?: string;
 
       redirects?: { status: number; url: string; location: string }[];
+      http2?: boolean;
     }>
   >;
 
@@ -1002,6 +1015,9 @@ export interface HostApi {
     steps: MacroStep[];
     extract?: MacroExtract[];
   }): Promise<Ok<{ cookies?: [string, string][]; tokens?: [string, string][]; results?: MacroStepResult[]; step?: number }>>;
+  proxySetSessionMacro(macro: { steps: MacroStep[]; extract?: MacroExtract[] } | null): Promise<Ok<{ active?: boolean }>>;
+  proxyRefreshSession(): Promise<Ok<{ cookies?: [string, string][]; tokens?: [string, string][] }>>;
+  proxySessionStatus(): Promise<Ok<{ active?: boolean; cookies?: [string, string][] }>>;
 
 
 
@@ -1062,7 +1078,7 @@ export interface HostApi {
     asset?: string;
     sums?: string;
   }): Promise<Ok<{ path?: string; bytes?: number; verified?: boolean; cached?: boolean }>>;
-  updateInstall(info: { path: string; version?: string }): Promise<Ok>;
+  updateInstall(info: { version?: string; asset?: string; sums?: string }): Promise<Ok>;
   onUpdateProgress: Subscriber<{ phase: string; state: string; bytes?: number; error?: string }>;
   installLanguage(): Promise<Ok<{ language?: string }>>;
   openExternal(url: string): Promise<Ok>;
@@ -1203,6 +1219,8 @@ export interface HostApi {
   codebergBranches(root: string): Promise<Ok<{ branches?: GitBranch[]; reason?: string }>>;
   codebergSwitch(root: string, name: string, create?: boolean): Promise<Ok<{ branch?: string; reason?: string }>>;
   codebergDiscard(root: string, paths: string[]): Promise<Ok<{ reason?: string }>>;
+  codebergStash(root: string, action: "push" | "pop" | "apply" | "drop" | "list", ref?: string): Promise<Ok<{ output?: string; entries?: { ref: string; description: string }[]; reason?: string }>>;
+  codebergClone(url: string, parentDir: string, folder?: string): Promise<Ok<{ path?: string; reason?: string }>>;
 
 
 }
@@ -1244,12 +1262,15 @@ const fallback = {
   openRecentFile: async () => (warn(), { error: "No bridge" }),
   workspaceOpenTarget: async () => (warn(), { error: "No bridge" }),
   onHostOpenPath: noSub<{ path: string }>(),
+  onBackendState: noSub<{ state: string; attempt: number }>(),
+  onBackendFault: noSub<{ kind: string; detail: string }>(),
   requestPendingOpenPath: () => warn(),
   watchWorkspace: async () => (warn(), { ok: false, error: "No bridge" }),
   onFsChanged: noSub<{ root: string }>(),
 
   readDir: async () => (warn(), []),
   readFile: async () => (warn(), { path: "", tooLarge: false, size: 0, content: "", error: "No bridge" }),
+  readBinary: async () => (warn(), { ok: false, error: "No bridge" }),
   writeFile: async () => (warn(), { path: "", error: "No bridge" }),
   create: async () => (warn(), { error: "No bridge" }),
   rename: async () => (warn(), { error: "No bridge" }),
@@ -1284,12 +1305,15 @@ const fallback = {
   tsSync: async () => (warn(), { ok: false }),
   tsClose: async () => (warn(), { ok: false }),
   tsCompletions: async () => (warn(), { entries: [] }),
+  tsDetails: async () => (warn(), null),
   tsQuickInfo: async () => (warn(), null),
   tsDefinition: async () => (warn(), { locations: [] }),
   tsReferences: async () => (warn(), { locations: [] }),
   tsSecurityScan: async () => (warn(), { findings: [] }),
   securityScanProject: async () => (warn(), { findings: [] }),
   securityRescanFile: async () => (warn(), { findings: [] }),
+  securityExport: async () => (warn(), { ok: false, error: "No bridge" }),
+  securityBaseline: async () => (warn(), { ok: false, error: "No bridge" }),
   tsDocumentHighlights: async () => (warn(), { spans: [] }),
   tsSignatureHelp: async () => (warn(), { signatures: null }),
   tsNavigationTree: async () => (warn(), { tree: null }),
@@ -1320,7 +1344,10 @@ const fallback = {
   browserClose: () => warn(),
   browserDevtools: async () => (warn(), { ok: false, error: "No bridge" }),
   browserCdp: async () => (warn(), { ok: false, error: "No bridge" }),
+  webtoolsCyberchef: async () => (warn(), { ok: false, error: "No bridge" }),
+  webtoolsWappalyzer: async () => (warn(), { ok: false, error: "No bridge" }),
   oastStart: async () => (warn(), { ok: false, error: "No bridge" }),
+  oastStartBuiltin: async () => (warn(), { ok: false, error: "No bridge" }),
   oastStop: async () => (warn(), { ok: false, error: "No bridge" }),
   oastStatus: async () => (warn(), { ok: false, error: "No bridge" }),
   onOastInteraction: noSub<OastInteraction>(),
@@ -1361,6 +1388,9 @@ const fallback = {
   onProxyInterceptResponse: noSub<InterceptedResponse>(),
   proxyWsSend: async () => (warn(), { ok: false, error: "No bridge" }),
   proxyRunMacro: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxySetSessionMacro: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxyRefreshSession: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxySessionStatus: async () => (warn(), { ok: false, error: "No bridge" }),
   debugStart: async () => (warn(), { ok: false, error: "No bridge" }),
   debugStartBrowser: async () => (warn(), { ok: false, error: "No bridge" }),
   debugStop: async () => (warn(), { ok: false, error: "No bridge" }),
@@ -1468,6 +1498,8 @@ const fallback = {
   codebergBranches: async () => (warn(), { ok: false, error: "No bridge" }),
   codebergSwitch: async () => (warn(), { ok: false, error: "No bridge" }),
   codebergDiscard: async () => (warn(), { ok: false, error: "No bridge" }),
+  codebergStash: async () => (warn(), { ok: false, error: "No bridge" }),
+  codebergClone: async () => (warn(), { ok: false, error: "No bridge" }),
 
 } as unknown as HostApi;
 

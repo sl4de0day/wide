@@ -87,10 +87,16 @@ export function CollaboratorView() {
               {t("Stop")}
             </button>
           ) : (
-            <button type="button" onClick={() => void useOast.getState().start()} disabled={!ready || !server.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-emerald-300 hover:bg-hover disabled:opacity-40">
-              <Play className="size-3" strokeWidth={2} fill="currentColor" />
-              {t("Start")}
-            </button>
+            <>
+              <button type="button" onClick={() => void useOast.getState().startBuiltin()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-emerald-300 hover:bg-hover" title={t("A zero-setup listener on this machine — reachable only by targets that can reach your host")}>
+                <Play className="size-3" strokeWidth={2} fill="currentColor" />
+                {t("Start built-in")}
+              </button>
+              <button type="button" onClick={() => void useOast.getState().start()} disabled={!ready || !server.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-emerald-300 hover:bg-hover disabled:opacity-40" title={t("Use your own interactsh server for internet-facing out-of-band testing")}>
+                <Play className="size-3" strokeWidth={2} fill="currentColor" />
+                {t("Start interactsh")}
+              </button>
+            </>
           )}
         </div>
         {running && (

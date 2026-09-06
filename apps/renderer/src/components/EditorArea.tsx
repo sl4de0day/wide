@@ -1,4 +1,5 @@
 import { ChevronDown, Eraser, Play, X } from "lucide-react";
+import { MediaView } from "./MediaView";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -32,6 +33,7 @@ const AiChatView = lazy(() => import("./AiChatView").then((m) => ({ default: m.A
 const CatcherView = lazy(() => import("./CatcherView").then((m) => ({ default: m.CatcherView })));
 const PitcherView = lazy(() => import("./pitcher/PitcherView").then((m) => ({ default: m.PitcherView })));
 const BrowserView = lazy(() => import("./BrowserView").then((m) => ({ default: m.BrowserView })));
+const CyberChefView = lazy(() => import("./CyberChefView").then((m) => ({ default: m.CyberChefView })));
 const DiffView = lazy(() => import("@/panels/DiffView").then((m) => ({ default: m.DiffView })));
 const ExtensionView = lazy(() => import("./ExtensionView").then((m) => ({ default: m.ExtensionView })));
 const SssfView = lazy(() => import("./SssfView").then((m) => ({ default: m.SssfView })));
@@ -336,6 +338,10 @@ export function EditorArea({ onOpenPanel }: { onOpenPanel?: (id: string) => void
           <CatcherView />
         ) : tab.kind === "pitcher" ? (
           <PitcherView />
+        ) : tab.kind === "cyberchef" ? (
+          <CyberChefView />
+        ) : tab.kind === "media" ? (
+          <MediaView key={tab.path} tab={tab} />
         ) : tab.kind === "diff" ? (
           (() => {
             const suffix = tab.path.slice(DIFF_PATH.length);

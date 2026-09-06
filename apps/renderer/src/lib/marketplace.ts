@@ -437,6 +437,78 @@ const RETIREJS: MarketplaceExtension = {
 
 
 
+const CYBERCHEF: MarketplaceExtension = {
+  id: "cyberchef",
+  name: "CyberChef",
+  version: "10",
+  colour: "#f6a821",
+  kind: "tool",
+  removable: true,
+  summary: "The cyber Swiss-army knife for encoding, encryption and analysis",
+  description:
+    "A workbench of over three hundred operations you chain into a recipe: decode Base64 and URL encoding, decrypt AES and RC4, parse JWTs, unpack gzip, run regular expressions, diff, and defang. It is where a captured token or a suspicious blob gets taken apart.\n\nWide opens the standalone build in its own tab. The download is fetched once when you install it, so nothing leaves your machine while you work.",
+  provides: ["Over 300 chainable operations", "Opens in its own tab", "Runs fully offline"],
+  homepage: "https://gchq.github.io/CyberChef",
+  path:
+    "M10 2h4v2h-1v3.6l5.7 9.9A2 2 0 0 1 17 20H7a2 2 0 0 1-1.7-2.5L11 7.6V4h-1V2zm2 8-2.6 4.5h5.2L12 10z",
+  fileExtensions: [],
+  server: null,
+};
+
+const WAPPALYZER: MarketplaceExtension = {
+  id: "wappalyzer",
+  name: "Wappalyzer",
+  version: "1",
+  colour: "#4608ad",
+  kind: "tool",
+  removable: true,
+  summary: "Identify the technologies a website is built with",
+  description:
+    "Fingerprints frameworks, servers, analytics, CMSs and libraries from a page's headers, cookies, markup and scripts. Knowing a target runs a particular CMS or framework version points straight at the checks worth running next.\n\nWide detects live in its own browser as you navigate, and passively over everything the Catcher proxy has already captured. The open webappanalyzer ruleset is downloaded when you install it.",
+  provides: ["Live detection in the browser", "Passive detection over proxy traffic", "Versions and categories"],
+  homepage: "https://www.wappalyzer.com",
+  path:
+    "M12 3 3 7.5 12 12l9-4.5L12 3zm-7 7 7 3.5 7-3.5v4L12 18l-7-4v-4z",
+  fileExtensions: [],
+  server: null,
+};
+
+const JS_MINER: MarketplaceExtension = {
+  id: "js-miner",
+  name: "JS Miner",
+  version: "1",
+  colour: "#d4a017",
+  kind: "tool",
+  removable: true,
+  summary: "Mine captured JavaScript for endpoints, secrets and dependencies",
+  description:
+    "Reads the JavaScript the Catcher proxy has captured and pulls out what a review cares about: hidden API endpoints and paths, leaked keys and tokens, and the third-party libraries and their versions.\n\nBundles routinely ship more of an application's surface than the site ever links to. This turns that surface into a list you can act on, with no extra requests sent.",
+  provides: ["Endpoints and paths from bundles", "Leaked keys and tokens", "Libraries and versions"],
+  homepage: "",
+  path:
+    "M14 2 7 9l-2-2-3 3 8 8 3-3-2-2 7-7-4-4zm0 2.8L17.2 8 12 13.2 8.8 10 14 4.8zM7 11.8 12.2 17 11 18.2 5.8 13 7 11.8z",
+  fileExtensions: [],
+  server: null,
+};
+
+const SELECTOR_TEST: MarketplaceExtension = {
+  id: "selector-test",
+  name: "Selector Test",
+  version: "1",
+  colour: "#3fae5a",
+  kind: "tool",
+  removable: true,
+  summary: "Try CSS and XPath selectors against the live page and highlight matches",
+  description:
+    "Type a CSS or XPath selector and see how many elements it matches in Wide's browser, with each match outlined on the page and listed with its tag and text. It is the fast way to build the selector a scraper or an automation step will rely on.\n\nEverything runs against the page already open in the browser, so there is nothing to install or send.",
+  provides: ["CSS and XPath against the live page", "Highlights every match", "Lists tag, text and attributes"],
+  homepage: "",
+  path:
+    "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zM12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z",
+  fileExtensions: [],
+  server: null,
+};
+
 const DEBUG_MARK =
   "M12 4a4 4 0 0 1 4 4v1h2a1 1 0 1 1 0 2h-2v2h2a1 1 0 1 1 0 2h-2v1a4 4 0 0 1-8 0v-1H6a1 1 0 1 1 0-2h2v-2H6a1 1 0 1 1 0-2h2V8a4 4 0 0 1 4-4z";
 
@@ -519,6 +591,10 @@ export const CATALOGUE: readonly MarketplaceExtension[] = [
   JWT_TOOL,
   CURLCONVERTER,
   RETIREJS,
+  CYBERCHEF,
+  WAPPALYZER,
+  JS_MINER,
+  SELECTOR_TEST,
   PYTHON_DEBUGGER,
   GO_DEBUGGER,
   RUBY_DEBUGGER,

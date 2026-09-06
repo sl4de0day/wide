@@ -14,8 +14,11 @@ interface CompletionEntry {
   name: string;
   kind?: string;
   sortText?: string;
-  source?: string;
+  source?: string | null;
   data?: unknown;
+  insertText?: string | null;
+  hasAction?: boolean;
+  labelDetails?: { description?: string } | null;
 }
 
 interface QuickInfo {
@@ -114,14 +117,40 @@ export function typescriptSupport(ext: string, filePath: string, root: string | 
       const result = await bridge.tsCompletions(root, filePath, context.pos);
       const entries = (result?.entries ?? []) as CompletionEntry[];
       if (entries.length === 0) return null;
+      const pos = context.pos;
       return {
         from: word?.from ?? context.pos,
-        options: entries.map((entry) => ({
-          label: entry.name,
-          type: completionType(entry.kind),
-
-          boost: entry.sortText && entry.sortText.startsWith("0") ? 1 : 0,
-        })),
+        options: entries.map((entry) => {
+          const needsImport = Boolean(entry.source) && entry.hasAction;
+          return {
+            label: entry.name,
+            type: completionType(entry.kind),
+            detail: needsImport ? "Auto-import" : entry.labelDetails?.description,
+            boost: entry.sortText && entry.sortText.startsWith("0") ? 1 : 0,
+            apply: needsImport
+              ? (view: EditorView, _completion: unknown, from: number, to: number) => {
+                  view.dispatch({
+                    changes: { from, to, insert: entry.insertText ?? entry.name },
+                    selection: { anchor: from + (entry.insertText ?? entry.name).length },
+                  });
+                  void bridge
+                    .tsDetails(root, filePath, pos, entry.name, entry.source, entry.data)
+                    .then((details) => {
+                      const edits = details?.importEdits ?? [];
+                      if (edits.length === 0) return;
+                      const ordered = [...edits].sort((a, b) => b.span.start - a.span.start);
+                      view.dispatch({
+                        changes: ordered.map((edit) => ({
+                          from: edit.span.start,
+                          to: edit.span.start + edit.span.length,
+                          insert: edit.newText,
+                        })),
+                      });
+                    });
+                }
+              : undefined,
+          };
+        }),
         validFor: /^[\w$]*$/,
       };
     } catch {

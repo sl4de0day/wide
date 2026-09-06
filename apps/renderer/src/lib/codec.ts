@@ -124,3 +124,97 @@ export function hexDump(input: Uint8Array | string): string {
   }
   return lines.join("\n");
 }
+
+export function md5Hex(input: string): string {
+  const msg = bytesEnc.encode(input);
+  function rol(x: number, c: number): number {
+    return (x << c) | (x >>> (32 - c));
+  }
+  const K = new Int32Array(64);
+  for (let i = 0; i < 64; i += 1) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
+  const S = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+  ];
+  const bitLen = msg.length * 8;
+  const withOne = new Uint8Array((((msg.length + 8) >> 6) + 1) * 64);
+  withOne.set(msg);
+  withOne[msg.length] = 0x80;
+  const view = new DataView(withOne.buffer);
+  view.setUint32(withOne.length - 8, bitLen >>> 0, true);
+  view.setUint32(withOne.length - 4, Math.floor(bitLen / 4294967296), true);
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (let off = 0; off < withOne.length; off += 64) {
+    const M = new Int32Array(16);
+    for (let i = 0; i < 16; i += 1) M[i] = view.getUint32(off + i * 4, true);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i += 1) {
+      let F: number, g: number;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+      F = (F + A + K[i] + M[g]) | 0;
+      A = D; D = C; C = B;
+      B = (B + rol(F, S[i])) | 0;
+    }
+    a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+  }
+  const out = new Uint8Array(16);
+  const ov = new DataView(out.buffer);
+  ov.setUint32(0, a0 >>> 0, true);
+  ov.setUint32(4, b0 >>> 0, true);
+  ov.setUint32(8, c0 >>> 0, true);
+  ov.setUint32(12, d0 >>> 0, true);
+  return [...out].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function subtleHash(algo: "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512", value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(algo, bytesEnc.encode(value));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export type AsyncTransform = { id: string; label: string; run: (value: string) => string | Promise<string> };
+
+export const HASH_TRANSFORMS: AsyncTransform[] = [
+  { id: "md5", label: "MD5", run: (v) => md5Hex(v) },
+  { id: "sha1", label: "SHA-1", run: (v) => subtleHash("SHA-1", v) },
+  { id: "sha256", label: "SHA-256", run: (v) => subtleHash("SHA-256", v) },
+  { id: "sha512", label: "SHA-512", run: (v) => subtleHash("SHA-512", v) },
+];
+
+export function smartDecode(value: string): { label: string; output: string } | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (decodeJwt(trimmed)) {
+    const jwt = decodeJwt(trimmed)!;
+    return { label: "JWT", output: `${jwt.header}\n\n${jwt.payload}` };
+  }
+  if (/%[0-9a-fA-F]{2}/.test(trimmed)) {
+    try {
+      const out = urlDecode(trimmed);
+      if (out !== trimmed) return { label: "URL", output: out };
+    } catch {
+      void 0;
+    }
+  }
+  if (/^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0 && trimmed.length >= 4) {
+    try {
+      const out = hexDecode(trimmed);
+      if (/^[\x09\x0a\x0d\x20-\x7e]*$/.test(out)) return { label: "Hex", output: out };
+    } catch {
+      void 0;
+    }
+  }
+  if (/^[A-Za-z0-9+/_-]{8,}={0,2}$/.test(trimmed)) {
+    try {
+      const out = /[-_]/.test(trimmed) ? base64UrlDecode(trimmed) : base64Decode(trimmed);
+      if (out && /^[\x09\x0a\x0d\x20-\x7e]*$/.test(out)) return { label: "Base64", output: out };
+    } catch {
+      void 0;
+    }
+  }
+  return null;
+}

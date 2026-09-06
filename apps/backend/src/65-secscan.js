@@ -58,6 +58,150 @@ function registerSecScanHandlers() {
   };
   const secEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+  const SEC_TEST_PATH =
+    /(^|[\\/])(?:tests?|specs?|__tests__|__mocks__|fixtures?|testdata|e2e|cypress|\.storybook)([\\/]|$)|\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:go|py|rb)$|(?:Test|Tests|Spec)\.(?:java|cs|kt|scala)$/i;
+
+  const SEC_RANK = { low: 0, medium: 1, high: 2 };
+  const SEC_IGNORE_MARK = /wide-ignore(?:-(file|next-line))?(?:\[([^\]]*)\])?/;
+
+  function secSuppressions(lines) {
+    const perLine = new Map();
+    let whole = null;
+    const mark = (map, n, ids) => {
+      const set = map.get(n) ?? new Set();
+      if (ids === null) set.add("*");
+      else for (const id of ids) set.add(id);
+      map.set(n, set);
+    };
+    for (let i = 0; i < lines.length; i += 1) {
+      const found = SEC_IGNORE_MARK.exec(lines[i]);
+      if (!found) continue;
+      const ids = found[2]
+        ? found[2].split(",").map((part) => part.trim()).filter(Boolean)
+        : null;
+      if (found[1] === "file") {
+        if (!whole) whole = new Set();
+        if (ids === null) whole.add("*");
+        else for (const id of ids) whole.add(id);
+        continue;
+      }
+      const standalone = found[1] === "next-line" || isSecComment(lines[i]);
+      mark(perLine, standalone ? i + 2 : i + 1, ids);
+    }
+    return { whole, perLine };
+  }
+
+  function secSuppressed(sup, line, ruleId) {
+    if (!sup) return false;
+    if (sup.whole && (sup.whole.has("*") || sup.whole.has(ruleId))) return true;
+    const set = sup.perLine.get(line);
+    return Boolean(set && (set.has("*") || set.has(ruleId)));
+  }
+
+  function secGlobToRe(pattern) {
+    let out = "";
+    for (let i = 0; i < pattern.length; i += 1) {
+      const c = pattern[i];
+      if (c === "*") {
+        if (pattern[i + 1] === "*") {
+          out += ".*";
+          i += 1;
+          if (pattern[i + 1] === "/") i += 1;
+        } else {
+          out += "[^/\\\\]*";
+        }
+      } else if (c === "?") out += ".";
+      else if (c === "/") out += "[/\\\\]";
+      else out += c.replace(/[.+^${}()|[\]\\]/, "\\$&");
+    }
+    try {
+      return new RegExp("(^|[/\\\\])" + out + "$", "i");
+    } catch {
+      return null;
+    }
+  }
+
+  const SEC_CONFIG_CACHE = new Map();
+  const SEC_DEFAULT_CONFIG = {
+    disable: new Set(),
+    severity: {},
+    exclude: [],
+    includeTests: false,
+    minConfidence: "low",
+  };
+
+  async function readSecConfig(root) {
+    if (!root || typeof root !== "string") return SEC_DEFAULT_CONFIG;
+    const file = node_path.join(root, ".wide", "security.json");
+    let stamp = "none";
+    try {
+      const stat = await promises.stat(file);
+      stamp = `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      void 0;
+    }
+    const cached = SEC_CONFIG_CACHE.get(root);
+    if (cached && cached.stamp === stamp) return cached.config;
+
+    let parsed = {};
+    if (stamp !== "none") {
+      try {
+        parsed = JSON.parse(await promises.readFile(file, "utf8"));
+      } catch {
+        parsed = {};
+      }
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) parsed = {};
+
+    const config = {
+      disable: new Set(
+        (Array.isArray(parsed.disable) ? parsed.disable : []).filter((v) => typeof v === "string")
+      ),
+      severity:
+        parsed.severity && typeof parsed.severity === "object" && !Array.isArray(parsed.severity)
+          ? parsed.severity
+          : {},
+      exclude: (Array.isArray(parsed.exclude) ? parsed.exclude : [])
+        .filter((v) => typeof v === "string")
+        .map(secGlobToRe)
+        .filter(Boolean),
+      includeTests: parsed.includeTests === true,
+      minConfidence: SEC_RANK[parsed.minConfidence] === undefined ? "low" : parsed.minConfidence,
+    };
+    SEC_CONFIG_CACHE.set(root, { stamp, config });
+    return config;
+  }
+
+  function secExcluded(config, root, file) {
+    const relative = node_path.relative(root, file).split(node_path.sep).join("/");
+    if (!config.includeTests && SEC_TEST_PATH.test(relative)) return true;
+    return config.exclude.some((re) => re.test(relative) || re.test(node_path.basename(file)));
+  }
+
+  function secFingerprint(root, finding, lineText) {
+    const relative = node_path.relative(root, finding.file).split(node_path.sep).join("/");
+    return node_crypto
+      .createHash("sha1")
+      .update(`${finding.ruleId}\u0000${relative}\u0000${String(lineText ?? "").trim()}`)
+      .digest("hex")
+      .slice(0, 20);
+  }
+
+  function secBaselineFile(root) {
+    return node_path.join(root, ".wide", "security-baseline.json");
+  }
+
+  async function readSecBaseline(root) {
+    try {
+      const parsed = JSON.parse(await promises.readFile(secBaselineFile(root), "utf8"));
+      const list = Array.isArray(parsed) ? parsed : parsed && parsed.fingerprints;
+      return new Set(Array.isArray(list) ? list.filter((v) => typeof v === "string") : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+
   function collectTainted(lines, seed) {
     const tainted = new Set(seed || []);
 
@@ -103,27 +247,27 @@ function registerSecScanHandlers() {
   }
 
   const TAINT_SINKS = [
-    { id: "taint/command", cwe: "CWE-78", message: "Request input reaches a shell command — command injection.",
+    { id: "taint/command", cwe: "CWE-78", message: "Request input reaches a shell command — command injection.", confidence: "high",
       re: /\b(?:exec|execSync|spawn|spawnSync|execFile|system|shell_exec|passthru|popen|proc_open|os\.system|subprocess\.\w+|Runtime\.getRuntime\(\)\.exec|\.exec\s*\(|ProcessBuilder|Process\.Start|Command::new|sys\.process|os:cmd|:os\.cmd|System\.cmd)\s*\(?/ },
-    { id: "taint/path", cwe: "CWE-22", message: "Request input reaches a filesystem path — path traversal.",
-      re: /\b(?:fs\.(?:readFile|readFileSync|writeFile|writeFileSync|createReadStream|createWriteStream|unlink|appendFile|open)\w*|open|fopen|file_get_contents|file_put_contents|readfile|include|require|ioutil\.ReadFile|os\.(?:Open|ReadFile|Create)|File\.(?:read|write|open|new)|Files\.(?:read|write|newInputStream)|Path\.of|Path\.Combine|std::fs::|fs::(?:read|write|read_to_string|read_to_end|copy|File::open|File::create)|file:(?:read_file|write_file|open|consult))\s*\(?/ },
-    { id: "taint/sql", cwe: "CWE-89", message: "Request input reaches a database query — SQL injection.",
-      re: /(?:\.|->)(?:query|execute|executeQuery|executeUpdate|exec|raw|rawQuery|prepare|find_by_sql|where)\s*\(|\bStatement\b|Repo\.query|db\.Query/ },
-    { id: "taint/ssrf", cwe: "CWE-918", message: "Request input reaches an outbound request — SSRF.",
+    { id: "taint/path", cwe: "CWE-22", message: "Request input reaches a filesystem path — path traversal.", confidence: "medium",
+      re: /\b(?:fs\.(?:readFile|readFileSync|writeFile|writeFileSync|createReadStream|createWriteStream|unlink|appendFile|open)\w*|fopen|file_get_contents|file_put_contents|readfile|ioutil\.ReadFile|os\.(?:Open|ReadFile|Create)|File\.(?:read|write|open|new)|Files\.(?:read|write|newInputStream)|Path\.of|Path\.Combine|std::fs::|fs::(?:read|write|read_to_string|read_to_end|copy|File::open|File::create)|file:(?:read_file|write_file|open|consult))\s*\(/ },
+    { id: "taint/sql", cwe: "CWE-89", message: "Request input reaches a database query — SQL injection.", confidence: "medium",
+      re: /(?:\.|->)(?:query|execute|executeQuery|executeUpdate|exec|raw|rawQuery|find_by_sql)\s*\(|\bcreateStatement\s*\(|Repo\.query|db\.Query/ },
+    { id: "taint/ssrf", cwe: "CWE-918", message: "Request input reaches an outbound request — SSRF.", confidence: "medium",
       re: /\b(?:fetch|axios(?:\.\w+)?|got|http\.get|https\.get|requests\.(?:get|post|put|delete|head)|urllib\.\w+|urlopen|http\.Get|http\.Post|HttpClient|Net::HTTP|HTTPoison|open-uri|URI\.open|Kernel\.open|reqwest::(?:get|blocking::get)|\.GetAsync|\.GetStringAsync|\.GetByteArrayAsync|\.DownloadString|openConnection)\s*\(?/ },
-    { id: "taint/redirect", cwe: "CWE-601", message: "Request input reaches a redirect — open redirect.",
-      re: /\b(?:res\.redirect|redirect(?:_to)?|sendRedirect|Redirect)\s*[(\s]/ },
-    { id: "taint/xss", cwe: "CWE-79", message: "Request input reaches HTML output — XSS.",
+    { id: "taint/redirect", cwe: "CWE-601", message: "Request input reaches a redirect — open redirect.", confidence: "medium",
+      re: /\b(?:res\.redirect|redirect_to|sendRedirect)\s*\(|\.Redirect\s*\(|\bredirect\s*\(/ },
+    { id: "taint/xss", cwe: "CWE-79", message: "Request input reaches HTML output — XSS.", confidence: "high",
       re: /\.(?:inner|outer)HTML\s*=|insertAdjacentHTML\s*\(|document\.write\s*\(|dangerouslySetInnerHTML/ },
-    { id: "taint/ssti", cwe: "CWE-1336", message: "Request input reaches a template engine as source — server-side template injection.",
+    { id: "taint/ssti", cwe: "CWE-1336", message: "Request input reaches a template engine as source — server-side template injection.", confidence: "high",
       re: /\b(?:render_template_string|from_string|Template|MarkupTemplate|(?:New)?TextTemplate|Handlebars\.compile|handlebars\.compile|pug\.(?:compile|render)|jade\.(?:compile|render)|ejs\.(?:compile|render)|nunjucks\.renderString|_\.template|createTemplate|ERB\.new|Liquid::Template\.parse|Velocity\.evaluate|template\.New)\s*\(?/ },
-    { id: "taint/nosql", cwe: "CWE-943", message: "Request input reaches a document-DB query as an object — NoSQL injection.",
+    { id: "taint/nosql", cwe: "CWE-943", message: "Request input reaches a document-DB query as an object — NoSQL injection.", confidence: "medium",
       re: /\.(?:find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany|deleteOne|deleteMany|countDocuments|count|aggregate)\s*\(\s*\{|\$where\s*:/ },
-    { id: "taint/mass-assign", cwe: "CWE-915", message: "Request input is spread onto an object — mass assignment.",
-      re: /Object\.assign\s*\(|\.update_attributes\s*\(|new\s+\w+\s*\(\s*req\.body/ },
-    { id: "taint/deserialize", cwe: "CWE-502", message: "Request input is deserialised — object injection / RCE.",
-      re: /\b(?:pickle\.loads?|yaml\.load|unserialize|Marshal\.load|readObject|BinaryFormatter|binary_to_term|deserialize)\s*\(?/ },
-    { id: "taint/eval", cwe: "CWE-95", message: "Request input reaches an eval — code injection.",
+    { id: "taint/mass-assign", cwe: "CWE-915", message: "Request input is spread onto an object — mass assignment.", confidence: "low",
+      re: /Object\.assign\s*\([^)]*\b(?:req|request)\.(?:body|query|params)\b|\.update_attributes\s*\(|new\s+\w+\s*\(\s*req\.body/ },
+    { id: "taint/deserialize", cwe: "CWE-502", message: "Request input is deserialised — object injection / RCE.", confidence: "medium",
+      re: /\b(?:pickle\.loads?|yaml\.load|unserialize|Marshal\.load|readObject|BinaryFormatter|binary_to_term)\s*\(/ },
+    { id: "taint/eval", cwe: "CWE-95", message: "Request input reaches an eval — code injection.", confidence: "high",
       re: /\beval\s*\(|new\s+Function\s*\(|Code\.eval_string\s*\(|instance_eval\s*\(/ },
   ];
 
@@ -2487,13 +2631,80 @@ function registerSecScanHandlers() {
     return text.slice(open + 1);
   }
 
-  async function scanContent(file, content, lang) {
+  const SEC_OWNER_FROM_REQUEST =
+    /(?:req(?:uest)?\.(?:query|params|body|headers|cookies)|Request\.(?:Query|Form|Params|QueryString)|\$_(?:GET|POST|REQUEST))\s*(?:\.|\[\s*["'])\s*\w*(?:user|owner|tenant|account|org|company|team|workspace|member|author)\w*/i;
+
+  const SEC_LOW_CONFIDENCE = new Set([
+    "idor-versioned-route-id-param",
+    "html-form-no-csrf",
+    "secret-logging",
+  ]);
+
+  let secRulesScored = false;
+  function scoreSecRules() {
+    if (secRulesScored) return;
+    secRulesScored = true;
+    for (const rule of RULES) {
+      if (!rule.confidence) {
+        rule.confidence = SEC_LOW_CONFIDENCE.has(rule.id) ? "low" : "high";
+      }
+      if (rule.confidence === "low" && rule.severity === "error") rule.severity = "info";
+      if (rule.id.startsWith("idor-") && rule.notMatch) rule.notMatchUnless = SEC_OWNER_FROM_REQUEST;
+    }
+  }
+
+  function secRuleSuppressed(rule, line) {
+    if (!rule.notMatch || !rule.notMatch.test(line)) return false;
+    return !(rule.notMatchUnless && rule.notMatchUnless.test(line));
+  }
+
+  const SEC_HIGH_ENTROPY = /^[A-Za-z0-9+/=_-]{20,}$/;
+  function looksLikeSecretValue(text) {
+    const quoted = /["']([^"'\s]{6,})["']\s*$/.exec(text) || /["']([^"'\s]{6,})["']/.exec(text);
+    const value = quoted ? quoted[1] : "";
+    if (!value) return true;
+    if (/^(?:true|false|null|none|undefined)$/i.test(value)) return false;
+    if (!SEC_HIGH_ENTROPY.test(value)) return false;
+    let distinct = 0;
+    const seen = new Set();
+    for (const c of value) {
+      if (!seen.has(c)) {
+        seen.add(c);
+        distinct += 1;
+      }
+    }
+    return distinct >= 8;
+  }
+
+  async function scanContent(file, content, lang, config, sup) {
+    scoreSecRules();
+    const settings = config || SEC_DEFAULT_CONFIG;
+    const floor = SEC_RANK[settings.minConfidence] ?? 0;
     const out = [];
     const lines = content.split("\n");
+    const suppressions = sup || secSuppressions(lines);
+    if (suppressions.whole && suppressions.whole.has("*")) return out;
     const tainted = collectTainted(lines);
     const nameRe = tainted.size ? new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b") : null;
     const osFile = node_path.normalize(file);
-    const emit = (n, col, rule) => { if (out.length < SEC_MAX_FINDINGS) out.push({ ruleId: rule.id, cwe: rule.cwe, severity: rule.severity || "warning", message: rule.message, file: osFile, line: n, col: col + 1 }); };
+    const emit = (n, col, rule) => {
+      if (out.length >= SEC_MAX_FINDINGS) return;
+      if (settings.disable.has(rule.id)) return;
+      const confidence = rule.confidence || "high";
+      if ((SEC_RANK[confidence] ?? 2) < floor) return;
+      if (secSuppressed(suppressions, n, rule.id)) return;
+      const severity = settings.severity[rule.id] || rule.severity || "warning";
+      out.push({
+        ruleId: rule.id,
+        cwe: rule.cwe,
+        severity,
+        confidence,
+        message: rule.message,
+        file: osFile,
+        line: n,
+        col: col + 1,
+      });
+    };
     for (let i = 0; i < lines.length; i += 1) {
 
       if (i > 0 && i % SEC_YIELD_LINES === 0) await new Promise((r) => setImmediate(r));
@@ -2504,7 +2715,9 @@ function registerSecScanHandlers() {
         if (!rule.langs.includes(lang)) continue;
         rule.re.lastIndex = 0;
         const m = rule.re.exec(line);
-        if (m && !(rule.notMatch && rule.notMatch.test(line))) emit(i + 1, m.index, rule);
+        if (!m || secRuleSuppressed(rule, line)) continue;
+        if (rule.id === "hardcoded-secret-literal" && !looksLikeSecretValue(line)) continue;
+        emit(i + 1, m.index, rule);
       }
       if (nameRe) {
         for (const sink of TAINT_SINKS) {
@@ -2512,7 +2725,15 @@ function registerSecScanHandlers() {
           const m = sink.re.exec(line);
           if (!m) continue;
           const win = (line + " " + (lines[i + 1] || "") + " " + (lines[i + 2] || "")).replace(sink.re, "");
-          if (nameRe.test(win)) emit(i + 1, m.index, { id: sink.id, cwe: sink.cwe, severity: "error", message: sink.message });
+          if (nameRe.test(win)) {
+            emit(i + 1, m.index, {
+              id: sink.id,
+              cwe: sink.cwe,
+              severity: sink.confidence === "low" ? "warning" : "error",
+              confidence: sink.confidence || "medium",
+              message: sink.message,
+            });
+          }
         }
       }
     }
@@ -2686,10 +2907,11 @@ function registerSecScanHandlers() {
     return out;
   }
 
-  async function analyzeFile(file, content, lang) {
+  async function analyzeFile(file, content, lang, config) {
+    const sup = secSuppressions(content.split("\n"));
     return {
-      file, lang,
-      single: await scanContent(file, content, lang),
+      file, lang, sup,
+      single: await scanContent(file, content, lang, config, sup),
       summaries: fileSummaries(content, lang),
       calls: taintedCallSites(content, lang),
     };
@@ -2737,39 +2959,76 @@ function registerSecScanHandlers() {
 
   const secCache = new Map();
 
-  async function* secWalk(dir, budget) {
+  async function* secWalk(dir, budget, skip) {
     let entries;
     try { entries = await promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (budget.files >= SEC_MAX_FILES) return;
       const full = node_path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!SEC_IGNORE.has(entry.name)) yield* secWalk(full, budget);
+        if (!SEC_IGNORE.has(entry.name)) yield* secWalk(full, budget, skip);
       } else if (entry.isFile()) {
         const ext = (entry.name.split(".").pop() || "").toLowerCase();
+        if (skip && skip(full)) continue;
         if (SEC_LANG[ext] || entry.name === "package.json") { budget.files += 1; yield full; }
       }
     }
   }
 
-  function collectFindings(fileMap) {
+  function collectFindings(fileMap, config, baseline, root) {
+    const settings = config || SEC_DEFAULT_CONFIG;
+    const floor = SEC_RANK[settings.minConfidence] ?? 0;
+    const supByFile = new Map();
+    for (const entry of fileMap.values()) if (entry.sup) supByFile.set(entry.file, entry.sup);
+
     const out = [];
-    for (const entry of fileMap.values()) {
-      for (const f of entry.single) { if (out.length >= SEC_MAX_FINDINGS) return { findings: out, capped: true }; out.push(f); }
-    }
-    const xf = crossFilePropagate([...fileMap.values()]);
-    for (const f of xf) { if (out.length >= SEC_MAX_FINDINGS) break; out.push(f); }
-    return { findings: out, capped: false };
+    let capped = false;
+    let suppressed = 0;
+    let baselined = 0;
+
+    const accept = (finding) => {
+      if (settings.disable.has(finding.ruleId)) return;
+      const confidence = finding.confidence || "high";
+      if ((SEC_RANK[confidence] ?? 2) < floor) return;
+      if (secSuppressed(supByFile.get(finding.file), finding.line, finding.ruleId)) {
+        suppressed += 1;
+        return;
+      }
+      const scored = {
+        ...finding,
+        confidence,
+        severity: settings.severity[finding.ruleId] || finding.severity || "warning",
+      };
+      if (baseline && baseline.size) {
+        scored.fingerprint = secFingerprint(root || "", scored, scored.message);
+        if (baseline.has(scored.fingerprint)) {
+          baselined += 1;
+          return;
+        }
+      }
+      if (out.length >= SEC_MAX_FINDINGS) {
+        capped = true;
+        return;
+      }
+      out.push(scored);
+    };
+
+    for (const entry of fileMap.values()) for (const f of entry.single) accept(f);
+    for (const f of crossFilePropagate([...fileMap.values()])) accept(f);
+
+    return { findings: out, capped, suppressed, baselined, scanned: fileMap.size };
   }
 
   electron.ipcMain.handle("security:scanProject", async (_event, root) => {
     if (!root || typeof root !== "string") return { findings: [] };
+    const config = await readSecConfig(root);
+    const baseline = await readSecBaseline(root);
     let fileMap = secCache.get(root);
     if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
     const present = new Set();
     const budget = { files: 0 };
     try {
-      for await (const file of secWalk(root, budget)) {
+      for await (const file of secWalk(root, budget, (full) => secExcluded(config, root, full))) {
         const osFile = node_path.normalize(file);
         present.add(osFile);
         const ext = (file.split(".").pop() || "").toLowerCase();
@@ -2792,18 +3051,20 @@ function registerSecScanHandlers() {
         let content;
         try { content = await promises.readFile(file, "utf8"); } catch { continue; }
         try {
-          const a = await analyzeFile(osFile, content, lang);
+          const a = await analyzeFile(osFile, content, lang, config);
           fileMap.set(osFile, { ...a, mtime: stats.mtimeMs, size: stats.size });
         } catch {  }
       }
     } catch {  }
 
     for (const key of [...fileMap.keys()]) if (!present.has(key)) fileMap.delete(key);
-    return collectFindings(fileMap);
+    return collectFindings(fileMap, config, baseline, root);
   });
 
   electron.ipcMain.handle("security:rescanFile", async (_event, root, filePath, content) => {
     if (!root || typeof root !== "string" || typeof filePath !== "string") return { findings: [] };
+    const config = await readSecConfig(root);
+    const baseline = await readSecBaseline(root);
     let fileMap = secCache.get(root);
     if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
     const ext = (filePath.split(".").pop() || "").toLowerCase();
@@ -2817,7 +3078,7 @@ function registerSecScanHandlers() {
       }
       if (text !== null && size <= SEC_MAX_BYTES) {
         try {
-          const a = await analyzeFile(osFile, text, lang);
+          const a = await analyzeFile(osFile, text, lang, config);
           fileMap.set(osFile, { ...a, mtime, size });
         } catch {  }
       }
@@ -2831,6 +3092,114 @@ function registerSecScanHandlers() {
         fileMap.set(osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text), summaries: [], calls: [], mtime, size });
       }
     }
-    return collectFindings(fileMap);
+    return collectFindings(fileMap, config, baseline, root);
+  });
+
+  function sarifLevel(severity) {
+    if (severity === "error") return "error";
+    if (severity === "info") return "note";
+    return "warning";
+  }
+
+  function toSarif(root, findings) {
+    const rules = new Map();
+    const results = [];
+    for (const finding of findings) {
+      if (!rules.has(finding.ruleId)) {
+        rules.set(finding.ruleId, {
+          id: finding.ruleId,
+          name: finding.ruleId,
+          shortDescription: { text: String(finding.message || finding.ruleId).split(". ")[0] },
+          fullDescription: { text: String(finding.message || "") },
+          defaultConfiguration: { level: sarifLevel(finding.severity) },
+          properties: {
+            tags: finding.cwe ? ["security", finding.cwe] : ["security"],
+            "security-severity": finding.severity === "error" ? "8.0" : finding.severity === "warning" ? "5.0" : "2.0",
+          },
+        });
+      }
+      const relative = node_path.relative(root, finding.file).split(node_path.sep).join("/");
+      results.push({
+        ruleId: finding.ruleId,
+        level: sarifLevel(finding.severity),
+        message: { text: String(finding.message || finding.ruleId) },
+        properties: { confidence: finding.confidence || "high" },
+        locations: [
+          {
+            physicalLocation: {
+              artifactLocation: { uri: relative || node_path.basename(finding.file), uriBaseId: "%SRCROOT%" },
+              region: { startLine: Math.max(1, Number(finding.line) || 1), startColumn: Math.max(1, Number(finding.col) || 1) },
+            },
+          },
+        ],
+      });
+    }
+    return {
+      $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+      version: "2.1.0",
+      runs: [
+        {
+          tool: {
+            driver: {
+              name: "Wide",
+              informationUri: "https://github.com/sl4de0day/wide",
+              version: WIDE_VERSION,
+              rules: [...rules.values()],
+            },
+          },
+          originalUriBaseIds: { "%SRCROOT%": { uri: `file:///${root.split(node_path.sep).join("/")}/` } },
+          results,
+        },
+      ],
+    };
+  }
+
+  electron.ipcMain.handle("security:export", async (_event, root, format) => {
+    if (!root || typeof root !== "string") return { ok: false, error: "No project is open." };
+    const fileMap = secCache.get(root);
+    if (!fileMap || fileMap.size === 0) {
+      return { ok: false, error: "Run a project scan first, then export the result." };
+    }
+    const config = await readSecConfig(root);
+    const baseline = await readSecBaseline(root);
+    const report = collectFindings(fileMap, config, baseline, root);
+    const kind = format === "json" ? "json" : "sarif";
+    const text =
+      kind === "json"
+        ? JSON.stringify({ root, generatedAt: Date.now(), ...report }, null, 2)
+        : JSON.stringify(toSarif(root, report.findings), null, 2);
+    return { ok: true, format: kind, text, count: report.findings.length };
+  });
+
+  electron.ipcMain.handle("security:baseline", async (_event, root, action) => {
+    if (!root || typeof root !== "string") return { ok: false, error: "No project is open." };
+    const file = secBaselineFile(root);
+    if (action === "clear") {
+      try {
+        await promises.unlink(file);
+      } catch {
+        void 0;
+      }
+      return { ok: true, count: 0 };
+    }
+    const fileMap = secCache.get(root);
+    if (!fileMap || fileMap.size === 0) {
+      return { ok: false, error: "Run a project scan first, then set the baseline." };
+    }
+    const config = await readSecConfig(root);
+    const report = collectFindings(fileMap, config, null, root);
+    const fingerprints = [
+      ...new Set(report.findings.map((finding) => secFingerprint(root, finding, finding.message))),
+    ].sort();
+    try {
+      await writeFileAtomic(
+        file,
+        `${JSON.stringify({ version: 1, updatedAt: Date.now(), fingerprints }, null, 2)}\n`,
+        "utf8"
+      );
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+    return { ok: true, count: fingerprints.length };
   });
 }

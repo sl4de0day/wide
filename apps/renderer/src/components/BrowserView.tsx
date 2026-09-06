@@ -1,10 +1,12 @@
-import { ArrowLeft, ArrowRight, ArrowUpRight, Bug, ChevronDown, ChevronUp, Code2, Cookie, Download, Frame, List, Lock, Maximize2, Minimize2, Plus, Radar, RotateCw, Search, ShieldAlert, ShieldCheck, Smartphone, Star, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Bug, ChevronDown, ChevronUp, Code2, Cookie, Download, Frame, Layers, List, Lock, Maximize2, Minimize2, MousePointerClick, Plus, Radar, RotateCw, Search, ShieldAlert, ShieldCheck, Smartphone, Star, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CookiePanel } from "@/components/browser/CookiePanel";
 import { DeviceBar } from "@/components/browser/DeviceBar";
 import { DomInvaderPanel } from "@/components/browser/DomInvader";
 import { BrowserRequestsPanel } from "@/components/browser/RequestsPanel";
+import { SelectorPanel } from "@/components/browser/SelectorPanel";
+import { WappalyzerPanel } from "@/components/browser/WappalyzerPanel";
 import { clickjackingPocForUrl } from "@/lib/poc/generate";
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
@@ -15,6 +17,7 @@ import { useBrowserData } from "@/stores/browserData";
 import { useCatcher } from "@/stores/catcher";
 import { useFindings } from "@/stores/findings";
 import { useProxy } from "@/stores/proxy";
+import { useExtensions } from "@/stores/extensions";
 
 function hostInScope(host: string, scope: string[]): boolean {
   if (!host) return false;
@@ -112,7 +115,10 @@ export function BrowserView() {
 
   const [devtoolsOpen, setDevtoolsOpen] = useState(false);
 
-  const [drawer, setDrawer] = useState<"requests" | "cookies" | "dominvader" | null>(null);
+  const [drawer, setDrawer] = useState<"requests" | "cookies" | "dominvader" | "wappalyzer" | "selector" | null>(null);
+
+  const hasWappalyzer = useExtensions((state) => state.installed.has("wappalyzer"));
+  const hasSelectorTest = useExtensions((state) => state.installed.has("selector-test"));
 
   const [showDevice, setShowDevice] = useState(false);
   const [find, setFind] = useState<string | null>(null);
@@ -583,6 +589,30 @@ export function BrowserView() {
         >
           <Bug className="size-4" strokeWidth={1.75} />
         </button>
+        {hasWappalyzer && (
+          <button
+            type="button"
+            onClick={() => setDrawer((d) => (d === "wappalyzer" ? null : "wappalyzer"))}
+            title={t("Technologies")}
+            aria-label={t("Technologies")}
+            aria-pressed={drawer === "wappalyzer"}
+            className={cn("rounded-sm p-1 transition-colors duration-100 hover:bg-hover hover:text-fg", drawer === "wappalyzer" ? "text-fg" : "text-fg-dim")}
+          >
+            <Layers className="size-4" strokeWidth={1.75} />
+          </button>
+        )}
+        {hasSelectorTest && (
+          <button
+            type="button"
+            onClick={() => setDrawer((d) => (d === "selector" ? null : "selector"))}
+            title={t("Selector Test")}
+            aria-label={t("Selector Test")}
+            aria-pressed={drawer === "selector"}
+            className={cn("rounded-sm p-1 transition-colors duration-100 hover:bg-hover hover:text-fg", drawer === "selector" ? "text-fg" : "text-fg-dim")}
+          >
+            <MousePointerClick className="size-4" strokeWidth={1.75} />
+          </button>
+        )}
         {activeUrl && (
           <button
             type="button"
@@ -687,6 +717,10 @@ export function BrowserView() {
               <BrowserRequestsPanel host={activeHost || null} />
             ) : drawer === "cookies" ? (
               <CookiePanel tabId={activeId} />
+            ) : drawer === "wappalyzer" ? (
+              <WappalyzerPanel tabId={activeId} url={activeUrl} />
+            ) : drawer === "selector" ? (
+              <SelectorPanel tabId={activeId} />
             ) : (
               <DomInvaderPanel tabId={activeId} />
             )}

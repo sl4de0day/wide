@@ -501,6 +501,49 @@ function registerCodebergHandlers() {
     return result.ok ? { ok: true, branch } : gitFailure(result);
   });
 
+  electron.ipcMain.handle("codeberg:stash", async (_event, root, action, ref) => {
+    const gate = await requireSourceControl();
+    if (gate) return gate;
+    if (!root) return { ok: false, error: "No project is open." };
+    let args;
+    if (action === "pop") args = ["stash", "pop"];
+    else if (action === "apply") args = ["stash", "apply"];
+    else if (action === "drop") args = ["stash", "drop", ...(typeof ref === "string" && ref ? [ref] : [])];
+    else if (action === "list") args = ["stash", "list"];
+    else args = ["stash", "push", "-u", ...(typeof ref === "string" && ref.trim() ? ["-m", ref.trim()] : [])];
+    const result = await runGit(args, root);
+    if (!result.ok) return gitFailure(result);
+    if (action === "list") {
+      const entries = result.stdout
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => {
+          const at = line.indexOf(":");
+          const ref2 = line.slice(0, at).trim();
+          return { ref: ref2, description: line.slice(at + 1).trim() };
+        });
+      return { ok: true, entries };
+    }
+    return { ok: true, output: result.stdout.trim() };
+  });
+
+  electron.ipcMain.handle("codeberg:clone", async (_event, url, parentDir, folder) => {
+    const gate = await requireSourceControl();
+    if (gate) return gate;
+    const remote = String(url || "").trim();
+    if (!/^(https?:\/\/|git@|ssh:\/\/)/.test(remote)) {
+      return { ok: false, error: "Enter an http(s), git@, or ssh URL." };
+    }
+    if (!parentDir || typeof parentDir !== "string") return { ok: false, error: "Choose where to clone it." };
+    const name =
+      typeof folder === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(folder.trim())
+        ? folder.trim()
+        : (remote.split(/[\/]/).pop() || "repo").replace(/\.git$/, "");
+    const target = node_path.join(parentDir, name);
+    const result = await runGit(["clone", remote, target], parentDir, { timeout: GIT_NETWORK_TIMEOUT_MS });
+    return result.ok ? { ok: true, path: target } : gitFailure(result);
+  });
+
   electron.ipcMain.handle("codeberg:discard", async (_event, root, paths) => {
     const gate = await requireSourceControl();
     if (gate) return gate;

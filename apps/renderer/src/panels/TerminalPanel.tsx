@@ -79,7 +79,7 @@ export function TerminalPanel() {
     const start = () => {
       if (idRef.current !== null) return;
       void bridge
-        .terminalStart({ cols: term.cols, rows: term.rows, cwd: root ?? undefined })
+        .terminalStart({ cols: term.cols, rows: term.rows, cwd: root ?? undefined, shell: useSettings.getState().terminalShell })
         .then((session) => {
           if (disposed) return;
           if (session?.error || !session?.id) {
@@ -93,6 +93,15 @@ export function TerminalPanel() {
     };
     startRef.current = start;
     start();
+
+    const offShell = useSettings.subscribe((next, prev) => {
+      if (next.terminalShell === prev.terminalShell) return;
+      const current = idRef.current;
+      idRef.current = null;
+      if (current !== null) void bridge.terminalDispose(current);
+      term.reset();
+      start();
+    });
 
     term.onData((data) => {
       if (idRef.current !== null) void bridge.terminalWrite(idRef.current, data);
@@ -116,6 +125,7 @@ export function TerminalPanel() {
       window.removeEventListener("resize", onResize);
       offData?.();
       offExit?.();
+      offShell();
       if (idRef.current !== null) void bridge.terminalDispose(idRef.current);
       term.dispose();
       termRef.current = null;

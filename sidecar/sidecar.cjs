@@ -54,11 +54,19 @@ function logIpc(channel, args, result, err) {
 }
 
 const hostPending = new Map();
+const HOST_REQUEST_TIMEOUT_MS = 30000;
 let hostSeq = 1;
 function hostRequest(method, params) {
   const id = hostSeq++;
   return new Promise((resolve, reject) => {
-    hostPending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      if (hostPending.delete(id)) reject(new Error('The host did not answer ' + method + ' in time.'));
+    }, HOST_REQUEST_TIMEOUT_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    hostPending.set(id, {
+      resolve: (value) => { clearTimeout(timer); resolve(value); },
+      reject: (error) => { clearTimeout(timer); reject(error); },
+    });
     send({ t: 'host', id, method, params: params || {} });
   });
 }
@@ -108,6 +116,12 @@ function dispatchInvoke(msg) {
 }
 
 const rl = readline.createInterface({ input: process.stdin });
+
+rl.on('close', () => {
+  try { mock.app.quit(); } catch {}
+  process.exit(0);
+});
+
 rl.on('line', (line) => {
   line = line.trim();
   if (!line) return;

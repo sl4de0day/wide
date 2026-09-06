@@ -138,6 +138,7 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
   const t = useT();
   const [tab, setTab] = useState<"request" | "response">("request");
   const [wsSeed, setWsSeed] = useState<{ text: string; direction: "up" | "down" } | null>(null);
+  const [wsFilter, setWsFilter] = useState("");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col border-t border-line">
@@ -314,11 +315,21 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
       {}
       {entry.websocket ? (
         <div className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 border-b border-line px-2 py-1">
+            <input
+              value={wsFilter}
+              onChange={(event) => setWsFilter(event.target.value)}
+              placeholder={t("Filter frames…")}
+              className="w-full rounded-sm border border-line bg-canvas px-2 py-0.5 font-mono text-[10px] text-fg outline-none focus:border-accent placeholder:text-fg-faint"
+            />
+          </div>
           <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
             {(entry.frames ?? []).length === 0 ? (
               <p className="text-[11px] text-fg-faint">{t("No frames yet.")}</p>
             ) : (
-              (entry.frames ?? []).map((frame, index) => (
+              (entry.frames ?? [])
+                .filter((frame) => !wsFilter || (frame.kind === "text" && (frame.text ?? "").toLowerCase().includes(wsFilter.toLowerCase())))
+                .map((frame, index) => (
                 <div key={index} className="flex items-start gap-2 border-b border-line py-1">
                   <span
                     className={cn(
@@ -525,6 +536,7 @@ function composeRequest(request: InterceptedRequest): string {
 
 function InterceptEditor({ request, count }: { request: InterceptedRequest; count: number }) {
   const t = useT();
+  const held = useProxy((state) => state.held);
   const [draft, setDraft] = useState(() => composeRequest(request));
 
   const forward = () => {
@@ -549,8 +561,24 @@ function InterceptEditor({ request, count }: { request: InterceptedRequest; coun
         <span className="min-w-0 flex-1 truncate text-[11px] text-fg" title={request.url}>
           {t("Held")}: {request.method} {request.host}
         </span>
-        {count > 1 && <span className="shrink-0 text-[10px] text-fg-faint">+{count - 1}</span>}
+        {count > 1 && <span className="shrink-0 text-[10px] text-fg-faint">{count} {t("held")}</span>}
       </div>
+      {held.length > 1 && (
+        <div className="flex flex-wrap gap-1 px-3 pb-1">
+          {held.map((item, index) => (
+            <span
+              key={item.id}
+              className={cn(
+                "rounded-sm border px-1.5 py-0.5 text-[9px]",
+                item.id === request.id ? "border-amber-500/50 text-amber-300" : "border-line text-fg-faint",
+              )}
+              title={`${item.method} ${item.url}`}
+            >
+              {index + 1}. {item.method} {item.host}
+            </span>
+          ))}
+        </div>
+      )}
       <textarea
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
@@ -573,6 +601,16 @@ function InterceptEditor({ request, count }: { request: InterceptedRequest; coun
         >
           {t("Drop")}
         </button>
+        {held.length > 1 && (
+          <button
+            type="button"
+            onClick={() => void useProxy.getState().decideAll("forward")}
+            className="shrink-0 rounded-sm border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+            title={t("Forward every held request")}
+          >
+            {t("Forward all")}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -586,6 +624,7 @@ function composeResponse(response: InterceptedResponse): string {
 
 function ResponseInterceptEditor({ response, count }: { response: InterceptedResponse; count: number }) {
   const t = useT();
+  const heldResponses = useProxy((state) => state.heldResponses);
   const [draft, setDraft] = useState(() => composeResponse(response));
 
   const forward = () => {
@@ -627,6 +666,16 @@ function ResponseInterceptEditor({ response, count }: { response: InterceptedRes
         <button type="button" onClick={() => void useProxy.getState().decideResponse(response.id, "drop")} className="flex-1 rounded-sm border border-line bg-rose-500/10 py-1 text-[11px] text-rose-300 transition-colors duration-100 hover:bg-rose-500/20">
           {t("Drop")}
         </button>
+        {heldResponses.length > 1 && (
+          <button
+            type="button"
+            onClick={() => void useProxy.getState().decideAllResponses("forward")}
+            className="shrink-0 rounded-sm border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+            title={t("Forward every held response")}
+          >
+            {t("Forward all")}
+          </button>
+        )}
       </div>
     </div>
   );

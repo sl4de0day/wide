@@ -26,6 +26,7 @@ class SidecarClient {
   void ReaderLoop();
   void WriterLoop();
 
+  HANDLE hJob_ = nullptr;
   HANDLE hStdinWr_ = nullptr;
   HANDLE hStdoutRd_ = nullptr;
   HANDLE hProcess_ = nullptr;

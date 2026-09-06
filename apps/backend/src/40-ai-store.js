@@ -42,7 +42,7 @@ async function readAiConfig() {
 async function writeAiConfig(next) {
   aiConfigCache = next;
   try {
-    await promises.writeFile(AI_CONFIG_FILE(), JSON.stringify(next, null, 2), "utf8");
+    await writeFileAtomic(AI_CONFIG_FILE(), JSON.stringify(next, null, 2), "utf8");
   } catch (error) {
     console.warn("[ai] The settings could not be saved:", error.message);
   }
@@ -108,7 +108,7 @@ async function writeAiKeys(keys) {
     await preserveUnreadable(AI_KEYS_FILE());
   }
   try {
-    await promises.writeFile(AI_KEYS_FILE(), electron.safeStorage.encryptString(JSON.stringify(keys)));
+    await writeFileAtomic(AI_KEYS_FILE(), electron.safeStorage.encryptString(JSON.stringify(keys)));
   } catch (error) {
     console.warn("[ai] The keys could not be saved:", error.message);
   }
@@ -177,7 +177,7 @@ async function writeAiSession(id, root, messages, stamp) {
   };
   try {
     await promises.mkdir(AI_SESSION_DIR(), { recursive: true });
-    await promises.writeFile(file, JSON.stringify(record, null, 2), "utf8");
+    await writeFileAtomic(file, JSON.stringify(record, null, 2), "utf8");
   } catch (error) {
     console.warn("[ai] The conversation could not be saved:", error.message);
     return null;

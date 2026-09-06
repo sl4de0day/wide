@@ -5,8 +5,8 @@
 IDI_APPICON ICON "../assets/wide.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,56926,0,0
-PRODUCTVERSION 0,56926,0,0
+FILEVERSION 0,66926,0,0
+PRODUCTVERSION 0,66926,0,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS VOS_NT_WINDOWS32
@@ -19,12 +19,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "sl4de"
       VALUE "FileDescription", "Wide"
-      VALUE "FileVersion", "0.56926"
+      VALUE "FileVersion", "0.66926"
       VALUE "InternalName", "wide"
       VALUE "LegalCopyright", "Copyright (C) 2026 sl4de. GNU GPL v3."
       VALUE "OriginalFilename", "wide.exe"
       VALUE "ProductName", "Wide"
-      VALUE "ProductVersion", "0.56926"
+      VALUE "ProductVersion", "0.66926"
     END
   END
   BLOCK "VarFileInfo"

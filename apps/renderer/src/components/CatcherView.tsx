@@ -1,16 +1,20 @@
-import { ArrowLeftRight, Crosshair, Dices, Plus, Radar, Radio, Repeat2, Target, X, type LucideIcon } from "lucide-react";
+import { ArrowLeftRight, Crosshair, Dices, Layers, Pickaxe, Plus, Radar, Radio, Repeat2, Target, X, type LucideIcon } from "lucide-react";
+import { useEffect } from "react";
 
 import { CollaboratorView } from "@/components/CollaboratorView";
 import { IntruderView } from "@/components/IntruderView";
+import { MinerView } from "@/components/MinerView";
 import { RepeaterView } from "@/components/RepeaterView";
 import { ScannerView } from "@/components/ScannerView";
 import { SequencerView } from "@/components/SequencerView";
+import { TechnologiesView } from "@/components/TechnologiesView";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { ProxyPanel } from "@/panels/ProxyPanel";
 import { TargetPanel } from "@/panels/TargetPanel";
 import { useCatcher, type CatcherTool } from "@/stores/catcher";
 import { repeaterSeeds } from "@/stores/editor";
+import { useExtensions } from "@/stores/extensions";
 
 const TOOLS: { id: CatcherTool; label: string; icon: LucideIcon }[] = [
   { id: "proxy", label: "Proxy", icon: ArrowLeftRight },
@@ -109,10 +113,22 @@ export function CatcherView() {
   const t = useT();
   const tool = useCatcher((state) => state.tool);
   const show = useCatcher((state) => state.show);
+  const hasMiner = useExtensions((state) => state.installed.has("js-miner"));
+  const hasTechnologies = useExtensions((state) => state.installed.has("wappalyzer"));
+  useEffect(() => {
+    if ((tool === "miner" && !hasMiner) || (tool === "technologies" && !hasTechnologies)) {
+      useCatcher.getState().show("proxy");
+    }
+  }, [tool, hasMiner, hasTechnologies]);
+  const tools: { id: CatcherTool; label: string; icon: LucideIcon }[] = [
+    ...TOOLS,
+    ...(hasMiner ? [{ id: "miner" as CatcherTool, label: "Miner", icon: Pickaxe }] : []),
+    ...(hasTechnologies ? [{ id: "technologies" as CatcherTool, label: "Technologies", icon: Layers }] : []),
+  ];
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-canvas">
       <div className="flex shrink-0 items-center gap-1 border-b border-line bg-chrome px-2 py-1">
-        {TOOLS.map((tl) => {
+        {tools.map((tl) => {
           const Icon = tl.icon;
           return (
             <button
@@ -154,6 +170,16 @@ export function CatcherView() {
         <div className={cn("h-full", tool !== "sequencer" && "hidden")}>
           <SequencerView />
         </div>
+        {hasMiner && tool === "miner" && (
+          <div className="h-full">
+            <MinerView />
+          </div>
+        )}
+        {hasTechnologies && tool === "technologies" && (
+          <div className="h-full">
+            <TechnologiesView />
+          </div>
+        )}
       </div>
     </div>
   );

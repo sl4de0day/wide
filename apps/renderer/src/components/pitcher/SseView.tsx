@@ -1,5 +1,5 @@
 import { Plug, PlugZap, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
@@ -7,6 +7,8 @@ import { resolveVars } from "@/lib/pitcher/vars";
 import { cn } from "@/lib/utils";
 import { usePitcher, type PitcherRequest } from "@/stores/pitcher";
 import { usePitcherEnv } from "@/stores/pitcherEnv";
+
+const EVENT_CAP = 5000;
 
 interface Evt {
   event: string;
@@ -19,6 +21,9 @@ export function SseView({ req }: { req: PitcherRequest }) {
   const [open, setOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [events, setEvents] = useState<Evt[]>([]);
+  const append = useCallback((evt: Evt) => {
+    setEvents((e) => (e.length >= EVENT_CAP ? [...e.slice(e.length - EVENT_CAP + 1), evt] : [...e, evt]));
+  }, []);
   const update = (patch: Partial<PitcherRequest>) => usePitcher.getState().updateRequest(req.id, patch);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -29,13 +34,13 @@ export function SseView({ req }: { req: PitcherRequest }) {
         setOpen(true);
         setConnecting(false);
       } else if (ev.type === "message") {
-        setEvents((e) => [...e, { event: ev.event ?? "message", data: ev.data ?? "", at: Date.now() }]);
+        append({ event: ev.event ?? "message", data: ev.data ?? "", at: Date.now() });
       } else if (ev.type === "close") {
         setOpen(false);
         setConnecting(false);
       } else if (ev.type === "error") {
         setConnecting(false);
-        setEvents((e) => [...e, { event: "error", data: ev.data ?? "", at: Date.now() }]);
+        append({ event: "error", data: ev.data ?? "", at: Date.now() });
       }
     });
     return off;
@@ -55,7 +60,7 @@ export function SseView({ req }: { req: PitcherRequest }) {
     const reply = await bridge.sseOpen(req.id, url, headers);
     if (!reply.ok) {
       setConnecting(false);
-      setEvents((e) => [...e, { event: "error", data: reply.error ?? "", at: Date.now() }]);
+      append({ event: "error", data: reply.error ?? "", at: Date.now() });
     }
   };
   const disconnect = () => void bridge.sseClose(req.id);

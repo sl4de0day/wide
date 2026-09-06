@@ -1,9 +1,11 @@
-import { CircleAlert, Copy, Network, RefreshCw, TriangleAlert } from "lucide-react";
+import { CircleAlert, Copy, FileDown, Network, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { Diagnostic, ProjectScanFinding } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
+import { bridge } from "@/lib/bridge";
 import { cn, basename, copyText } from "@/lib/utils";
+import { toast } from "@/stores/toast";
 import { useDiagnostics } from "@/stores/diagnostics";
 import { useEditor } from "@/stores/editor";
 import { useProjectScan } from "@/stores/projectScan";
@@ -24,6 +26,8 @@ export function ProblemsPanel() {
   const [tab, setTab] = useState<Tab>("problems");
   const scanFindings = useProjectScan((state) => state.findings);
   const scanning = useProjectScan((state) => state.scanning);
+  const projectProblems = useDiagnostics((state) => state.projectProblems);
+  const tsScanning = useDiagnostics((state) => state.scanning);
 
   useEffect(() => {
     if (root) void useDiagnostics.getState().scanProject(root);
@@ -81,6 +85,45 @@ export function ProblemsPanel() {
 
   const hasRows = entries.length > 0 || (tab === "vulnerabilities" && scanFindings.length > 0);
 
+  const [busy, setBusy] = useState(false);
+
+  const exportFindings = async () => {
+    if (!root || busy) return;
+    setBusy(true);
+    try {
+      const reply = await bridge.securityExport(root, "sarif");
+      if (!reply.ok || !reply.text) {
+        toast.error(t(reply.error ?? "The findings could not be exported."));
+        return;
+      }
+      const target = `${root}/wide-findings.sarif`;
+      const written = await bridge.writeFile(target, reply.text);
+      if (written.error) {
+        toast.error(t(written.error));
+        return;
+      }
+      toast.success(t("Wrote {count} findings to wide-findings.sarif.").replace("{count}", String(reply.count ?? 0)));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setBaseline = async () => {
+    if (!root || busy) return;
+    setBusy(true);
+    try {
+      const reply = await bridge.securityBaseline(root, "set");
+      if (!reply.ok) {
+        toast.error(t(reply.error ?? "The baseline could not be saved."));
+        return;
+      }
+      toast.success(t("Baseline set: {count} findings will stay hidden until they change.").replace("{count}", String(reply.count ?? 0)));
+      void useProjectScan.getState().run();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const TabButton = ({ id, label, n }: { id: Tab; label: string; n: number }) => (
     <button
       type="button"
@@ -100,16 +143,42 @@ export function ProblemsPanel() {
       <div className="flex shrink-0 items-center border-b border-line">
         <TabButton id="problems" label={t("Problems")} n={count(problems)} />
         <TabButton id="vulnerabilities" label={t("Vulnerabilities")} n={count(vulns) + scanFindings.length} />
-        <button
-          type="button"
-          onClick={copyAll}
-          disabled={!hasRows}
-          title={t("Copy all")}
-          className="ml-auto mr-2 flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-40"
-        >
-          <Copy className="size-3" strokeWidth={1.75} />
-          {t("Copy all")}
-        </button>
+        <div className="ml-auto mr-2 flex items-center gap-1">
+          {tab === "vulnerabilities" && (
+            <>
+              <button
+                type="button"
+                onClick={() => void exportFindings()}
+                disabled={busy || scanFindings.length === 0}
+                title={t("Export the project findings as SARIF")}
+                className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-40"
+              >
+                <FileDown className="size-3" strokeWidth={1.75} />
+                {t("Export SARIF")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void setBaseline()}
+                disabled={busy || scanFindings.length === 0}
+                title={t("Hide today's findings so only new ones show up from now on")}
+                className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-40"
+              >
+                <ShieldCheck className="size-3" strokeWidth={1.75} />
+                {t("Set baseline")}
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={copyAll}
+            disabled={!hasRows}
+            title={t("Copy all")}
+            className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-40"
+          >
+            <Copy className="size-3" strokeWidth={1.75} />
+            {t("Copy all")}
+          </button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto py-1">
@@ -165,6 +234,35 @@ export function ProblemsPanel() {
                     );
                   })}
                 </div>
+              ))
+            )}
+          </div>
+        )}
+        {tab === "problems" && (
+          <div className="mb-1 border-b border-line pb-1">
+            <div className="flex items-center gap-2 px-3 py-1.5">
+              <Network className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />
+              <span className="text-[11px] font-medium text-fg-muted">{t("TypeScript (whole project)")}</span>
+              <span className="tabular-nums text-[10px] text-fg-faint">{projectProblems.length}</span>
+              {tsScanning && <RefreshCw className="ml-auto size-3 animate-spin text-fg-faint" strokeWidth={1.75} />}
+            </div>
+            {projectProblems.length === 0 ? (
+              <p className="px-3 pb-1 text-[11px] text-fg-faint">{tsScanning ? t("Scanning…") : t("No type errors in the project.")}</p>
+            ) : (
+              projectProblems.slice(0, 500).map((problem, index) => (
+                <button
+                  key={`${problem.file}:${problem.line}:${index}`}
+                  type="button"
+                  onClick={() => void useEditor.getState().revealAt(problem.file, problem.line, problem.column)}
+                  title={`${problem.file}:${problem.line}`}
+                  className="flex w-full items-start gap-2 px-3 py-0.5 text-left text-[11px] hover:bg-hover"
+                >
+                  {problem.severity === "error" ? <CircleAlert className="mt-0.5 size-3 shrink-0 text-status-error" strokeWidth={1.75} /> : <TriangleAlert className="mt-0.5 size-3 shrink-0 text-amber-400" strokeWidth={1.75} />}
+                  <span className="min-w-0 flex-1">
+                    <span className="text-fg">{problem.message.split("\n")[0]}</span>
+                    <span className="text-fg-faint"> — {basename(problem.file)}:{problem.line}</span>
+                  </span>
+                </button>
               ))
             )}
           </div>

@@ -99,6 +99,7 @@ const ENC_CONTEXT = 'wide.safeStorage.v1';
 const ENC_OPAQUE = 'The encrypted data could not be read.';
 
 function saltFile() { return path.join(userDataDir(), '.enc-salt'); }
+function masterFile() { return path.join(userDataDir(), '.enc-master'); }
 function legacyKeyFile() { return path.join(userDataDir(), '.enc-key'); }
 function legacyWrapFile() { return path.join(userDataDir(), '.enc-legacy'); }
 
@@ -158,12 +159,50 @@ function encSalt() {
   return salt;
 }
 
+let masterKey = null;
+
+async function initMasterKey() {
+  if (masterKey) return masterKey;
+  try {
+    const stored = fs.readFileSync(masterFile(), 'utf8').trim();
+    if (stored) {
+      const opened = await bridge.hostRequest('crypto:unprotect', { data: stored });
+      if (opened && opened.ok && typeof opened.data === 'string') {
+        const key = Buffer.from(opened.data, 'base64');
+        if (key.length === 32) {
+          masterKey = key;
+          return masterKey;
+        }
+      }
+      return null;
+    }
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') return null;
+  }
+
+  try {
+    const key = crypto.randomBytes(32);
+    const sealed = await bridge.hostRequest('crypto:protect', { data: key.toString('base64') });
+    if (!sealed || !sealed.ok || typeof sealed.data !== 'string') return null;
+    fs.writeFileSync(masterFile(), sealed.data, 'utf8');
+    masterKey = key;
+    return masterKey;
+  } catch {
+    return null;
+  }
+}
+
 const encKeyCache = [];
 function encKeyAt(index) {
+  let at = index;
+  if (masterKey) {
+    if (at === 0) return masterKey;
+    at -= 1;
+  }
   const secrets = encSecrets();
-  if (index >= secrets.length) return null;
-  if (!encKeyCache[index]) encKeyCache[index] = crypto.scryptSync(secrets[index], encSalt(), 32);
-  return encKeyCache[index];
+  if (at >= secrets.length) return null;
+  if (!encKeyCache[at]) encKeyCache[at] = crypto.scryptSync(secrets[at], encSalt(), 32);
+  return encKeyCache[at];
 }
 
 function sealBuffer(key, data) {
@@ -231,7 +270,12 @@ function migrateLegacyKey() {
   } catch {}
 }
 
-try { migrateLegacyKey(); } catch {}
+async function initSecrets() {
+  await initMasterKey();
+  try {
+    migrateLegacyKey();
+  } catch {}
+}
 
 const safeStorage = {
   isEncryptionAvailable() { return true; },
@@ -256,10 +300,28 @@ function userDataDir() {
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return dir;
 }
+const appListeners = new Map();
+let quitting = false;
 const app = {
   whenReady() { return Promise.resolve(); },
-  on() { return app; },
-  quit() {},
+  on(event, fn) {
+    if (typeof fn !== 'function') return app;
+    if (!appListeners.has(event)) appListeners.set(event, []);
+    appListeners.get(event).push(fn);
+    return app;
+  },
+  emit(event, ...args) {
+    for (const fn of appListeners.get(event) || []) {
+      try { fn(...args); } catch {}
+    }
+    return app;
+  },
+  quit() {
+    if (quitting) return;
+    quitting = true;
+    app.emit('before-quit');
+    process.exit(0);
+  },
   getAppPath() { return projectRoot; },
   getPath(name) {
     switch (name) {
@@ -306,6 +368,7 @@ module.exports = {
   hostRequest(method, params) { return bridge.hostRequest(method, params || {}); },
 
   __setBridge: setBridge,
+  __initSecrets: initSecrets,
   __invoke(channel, args) {
     const listener = handlers.get(channel);
     if (!listener) return Promise.reject(new Error('No handler for ' + channel));

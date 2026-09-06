@@ -1,6 +1,6 @@
 import type { Extension } from "@codemirror/state";
 
-import { extname } from "@/lib/utils";
+import { basename, extname } from "@/lib/utils";
 import { extensionById, languageExtensionFor } from "@/lib/marketplace";
 import { useExtensions } from "@/stores/extensions";
 
@@ -157,14 +157,85 @@ const GRAMMARS: ReadonlyArray<{
   {
     label: "JSON",
     exts: ["json", "jsonc", "map", "webmanifest"],
-    load: async () => (await import("@codemirror/lang-json")).json(),
+    load: async () => {
+      const [{ json, jsonParseLinter }, { linter }] = await Promise.all([
+        import("@codemirror/lang-json"),
+        import("@codemirror/lint"),
+      ]);
+      return [json(), linter(jsonParseLinter())];
+    },
   },
   {
     label: "Markdown",
     exts: ["md", "markdown"],
     load: async () => (await import("@codemirror/lang-markdown")).markdown(),
   },
+  {
+    label: "YAML",
+    exts: ["yaml", "yml"],
+    load: async () => {
+      const { StreamLanguage } = await import("@codemirror/language");
+      return StreamLanguage.define((await import("@codemirror/legacy-modes/mode/yaml")).yaml);
+    },
+  },
+  {
+    label: "TOML",
+    exts: ["toml"],
+    load: async () => {
+      const { StreamLanguage } = await import("@codemirror/language");
+      return StreamLanguage.define((await import("@codemirror/legacy-modes/mode/toml")).toml);
+    },
+  },
+  {
+    label: "Dockerfile",
+    exts: ["dockerfile"],
+    load: async () => {
+      const { StreamLanguage } = await import("@codemirror/language");
+      return StreamLanguage.define((await import("@codemirror/legacy-modes/mode/dockerfile")).dockerFile);
+    },
+  },
+  {
+    label: "Shell",
+    exts: ["sh", "bash", "zsh", "ksh"],
+    load: async () => {
+      const { StreamLanguage } = await import("@codemirror/language");
+      return StreamLanguage.define((await import("@codemirror/legacy-modes/mode/shell")).shell);
+    },
+  },
+  {
+    label: "PowerShell",
+    exts: ["ps1", "psm1", "psd1"],
+    load: async () => {
+      const { StreamLanguage } = await import("@codemirror/language");
+      return StreamLanguage.define((await import("@codemirror/legacy-modes/mode/powershell")).powerShell);
+    },
+  },
+  {
+    label: "Properties",
+    exts: ["env", "ini", "properties", "conf", "cfg"],
+    load: async () => {
+      const { StreamLanguage } = await import("@codemirror/language");
+      return StreamLanguage.define((await import("@codemirror/legacy-modes/mode/properties")).properties);
+    },
+  },
 ];
+
+const BY_NAME: Record<string, string> = {
+  dockerfile: "dockerfile",
+  ".env": "env",
+  ".gitignore": "properties",
+  ".editorconfig": "properties",
+  ".npmrc": "properties",
+  ".dockerignore": "properties",
+};
+
+function extFor(path: string): string {
+  const ext = extname(path);
+  if (ext) return ext;
+  const name = basename(path).toLowerCase();
+  const dot = name.startsWith(".") ? name : name.split(".")[0];
+  return BY_NAME[name] ?? BY_NAME[dot] ?? "";
+}
 
 const LOADERS: Record<string, Loader> = {};
 const LABELS: Record<string, string> = {};
@@ -185,7 +256,7 @@ export const SUPPORTED_EXTENSIONS: readonly string[] = Object.keys(LOADERS);
 export function languageLabel(path: string): string {
 
   if (!languageInstalled(path)) return "Plain text";
-  return LABELS[extname(path)] ?? "Plain Text";
+  return LABELS[extFor(path)] ?? "Plain Text";
 }
 
 export function languageInstalled(path: string): boolean {
@@ -208,7 +279,7 @@ export async function preloadGrammar(extensionId: string): Promise<boolean> {
 }
 
 export async function languageFor(path: string): Promise<Extension | null> {
-  const loader = LOADERS[extname(path)];
+  const loader = LOADERS[extFor(path)];
   if (!loader) return null;
   if (!languageInstalled(path)) return null;
   try {

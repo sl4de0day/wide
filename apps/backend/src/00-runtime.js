@@ -21,6 +21,7 @@ const node_http = require("node:http");
 const node_https = require("node:https");
 const node_net = require("node:net");
 const node_tls = require("node:tls");
+const node_http2 = require("node:http2");
 const node_zlib = require("node:zlib");
 const { StringDecoder } = require("node:string_decoder");
 

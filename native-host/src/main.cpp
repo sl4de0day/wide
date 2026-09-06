@@ -33,6 +33,7 @@ using json = nlohmann::json;
 #define WM_APP_SIDECAR (WM_APP + 1)
 
 #define WM_APP_REMOTE_APPLY (WM_APP + 2)
+#define WM_APP_INSTALL_UPDATE (WM_APP + 3)
 
 namespace {
 
@@ -59,6 +60,11 @@ std::wstring g_pendingOpenPath;
 constexpr ULONG_PTR kOpenPathCopyTag = 0x57494400;
 
 bool g_currentlyRemote = false;
+std::wstring g_pendingInstaller;
+constexpr int kBackendMaxRestarts = 3;
+constexpr ULONGLONG kBackendRestartWindowMs = 60000;
+int g_backendRestarts = 0;
+ULONGLONG g_backendRestartWindow = 0;
 bool g_sidecarSpoke = false;
 bool g_remoteFellBack = false;
 
@@ -967,6 +973,15 @@ void ProcessSidecarLine(HWND hwnd, const std::string& line) {
       return;
     }
 
+    if (method == "app:installUpdate") {
+      std::wstring installer = Utf8ToWide(params.value("path", std::string()));
+      std::error_code ec;
+      const bool ok = !installer.empty() && fs::exists(installer, ec) && !ec;
+      if (ok) g_pendingInstaller = installer;
+      g_sidecar.Send(json{{"t", "hostReply"}, {"id", id}, {"result", {{"ok", ok}}}}.dump());
+      if (ok) PostMessage(hwnd, WM_APP_INSTALL_UPDATE, 0, 0);
+      return;
+    }
     if (method == "remote:get") {
 
       json cfg = ReadRemoteConfig();
@@ -1109,6 +1124,40 @@ void WriteRemoteConfig(const json& cfg) {
   if (f) f << cfg.dump(2);
 }
 
+bool IsSafeRemoteHost(const std::string& value) {
+  if (value.empty() || value.size() > 255 || value.front() == '-') return false;
+  bool seenAt = false;
+  for (char c : value) {
+    if (c == '@') {
+      if (seenAt) return false;
+      seenAt = true;
+      continue;
+    }
+    const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+bool IsSafeRemoteCommand(const std::string& value) {
+  if (value.empty() || value.size() > 255 || value.front() == '-') return false;
+  for (char c : value) {
+    const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_' || c == '/';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+bool IsSafeRemotePath(const std::string& value) {
+  if (value.empty() || value.size() > 4096) return false;
+  for (unsigned char c : value) {
+    if (c < 0x20 || c == 0x27 || c == 0x5C || c == 0x22) return false;
+  }
+  return true;
+}
+
 std::wstring BuildRemoteCommand() {
   json cfg = ReadRemoteConfig();
   if (!cfg.value("enabled", false)) return std::wstring();
@@ -1116,14 +1165,18 @@ std::wstring BuildRemoteCommand() {
   std::string remotePath = cfg.value("remotePath", std::string());
   std::string nodeCmd = cfg.value("node", std::string("node"));
   if (host.empty() || remotePath.empty()) return std::wstring();
+  if (!IsSafeRemoteHost(host) || !IsSafeRemoteCommand(nodeCmd) || !IsSafeRemotePath(remotePath)) {
+    return std::wstring();
+  }
 
   while (!remotePath.empty() && (remotePath.back() == '/' || remotePath.back() == '\\'))
     remotePath.pop_back();
 
-  std::wstring cmd = L"ssh.exe -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 ";
-  cmd += Utf8ToWide(host);
+  const std::wstring quote(1, L'"');
+  std::wstring cmd = L"ssh.exe -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -- ";
+  cmd += quote + Utf8ToWide(host) + quote;
   cmd += L" ";
-  cmd += Utf8ToWide(nodeCmd);
+  cmd += quote + Utf8ToWide(nodeCmd) + quote;
   cmd += L" '";
   cmd += Utf8ToWide(remotePath);
   cmd += L"/sidecar/sidecar.cjs'";
@@ -1561,14 +1614,44 @@ void RestartSidecar(HWND hwnd) {
   if (g_webview) g_webview->Reload();
 }
 
+void BackendEmit(const char* state, int attempt) {
+  if (!g_webview) return;
+  json message = {{"type", "event"},
+                  {"channel", "host:backend"},
+                  {"payload", {{"state", state}, {"attempt", attempt}}}};
+  g_webview->PostWebMessageAsJson(Utf8ToWide(message.dump()).c_str());
+}
+
 void OnSidecarExit(HWND hwnd) {
-  if (!g_currentlyRemote || g_sidecarSpoke || g_remoteFellBack) return;
-  g_remoteFellBack = true;
+  if (g_currentlyRemote && !g_sidecarSpoke && !g_remoteFellBack) {
+    g_remoteFellBack = true;
+    g_sidecar.Stop();
+    ResetBrowserForSidecarRestart(hwnd);
+    g_currentlyRemote = false;
+    g_sidecar.Start(hwnd, WM_APP_SIDECAR, ResolveNodeExe(), ResolveSidecarScript(), L"");
+    if (g_webview) g_webview->Navigate(L"https://app.local/index.html?remoteFallback=1");
+    return;
+  }
+
+  const ULONGLONG now = GetTickCount64();
+  if (now - g_backendRestartWindow > kBackendRestartWindowMs) {
+    g_backendRestartWindow = now;
+    g_backendRestarts = 0;
+  }
+  if (g_backendRestarts >= kBackendMaxRestarts) {
+    BackendEmit("down", g_backendRestarts);
+    return;
+  }
+  ++g_backendRestarts;
+
   g_sidecar.Stop();
   ResetBrowserForSidecarRestart(hwnd);
-  g_currentlyRemote = false;
-  g_sidecar.Start(hwnd, WM_APP_SIDECAR, ResolveNodeExe(), ResolveSidecarScript(), L"");
-  if (g_webview) g_webview->Navigate(L"https://app.local/index.html?remoteFallback=1");
+  std::wstring remoteCmd = BuildRemoteCommand();
+  g_currentlyRemote = !remoteCmd.empty();
+  g_sidecarSpoke = false;
+  const bool started =
+      g_sidecar.Start(hwnd, WM_APP_SIDECAR, ResolveNodeExe(), ResolveSidecarScript(), remoteCmd);
+  BackendEmit(started ? "restarted" : "down", g_backendRestarts);
 }
 
 void ApplyRemoteChange(HWND hwnd) {
@@ -1592,6 +1675,28 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     }
     case WM_APP_REMOTE_APPLY: {
       ApplyRemoteChange(hwnd);
+      return 0;
+    }
+    case WM_APP_INSTALL_UPDATE: {
+      if (g_pendingInstaller.empty()) return 0;
+      std::wstring installer = g_pendingInstaller;
+      g_pendingInstaller.clear();
+
+      g_sidecar.Stop();
+
+      std::wstring cmd = L"\"" + installer +
+                         L"\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL";
+      std::wstring mutableCmd = cmd;
+      STARTUPINFOW si = {};
+      si.cb = sizeof(si);
+      PROCESS_INFORMATION pi = {};
+      if (CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE,
+                         CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW, nullptr, nullptr, &si,
+                         &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+      }
+      DestroyWindow(hwnd);
       return 0;
     }
     case WM_TIMER: {

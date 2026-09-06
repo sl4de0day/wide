@@ -1,7 +1,7 @@
-import { ArrowDown, Braces, X } from "lucide-react";
+import { ArrowDown, Braces, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { TRANSFORMS, decodeJwt, type Transform } from "@/lib/codec";
+import { HASH_TRANSFORMS, TRANSFORMS, decodeJwt, smartDecode, type AsyncTransform } from "@/lib/codec";
 import { useT } from "@/lib/i18n";
 import { useDecoder } from "@/stores/decoder";
 
@@ -25,14 +25,25 @@ export function DecoderOverlay() {
 
   if (!open) return null;
 
-  const apply = (transform: Transform) => {
+  const apply = async (transform: AsyncTransform) => {
     try {
-      setOutput(transform.run(input));
+      setOutput(await transform.run(input));
       setError("");
     } catch (caught) {
       setOutput("");
       setError(caught instanceof Error ? caught.message : String(caught));
     }
+  };
+
+  const applySmart = () => {
+    const guess = smartDecode(input);
+    if (!guess) {
+      setOutput("");
+      setError("Nothing here decodes cleanly — pick a transform by hand.");
+      return;
+    }
+    setOutput(guess.output);
+    setError("");
   };
 
   return (
@@ -63,11 +74,32 @@ export function DecoderOverlay() {
           />
 
           <div className="mt-2 flex flex-wrap gap-1">
+            <button
+              type="button"
+              onClick={applySmart}
+              className="flex items-center gap-1 rounded-sm border border-accent px-2 py-1 text-[11px] text-accent transition-colors duration-100 hover:bg-hover"
+            >
+              <Wand2 className="size-3" strokeWidth={1.75} />
+              {t("Smart decode")}
+            </button>
             {TRANSFORMS.map((transform) => (
               <button
                 key={transform.id}
                 type="button"
-                onClick={() => apply(transform)}
+                onClick={() => void apply(transform)}
+                className="rounded-sm border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+              >
+                {t(transform.label)}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-1 flex flex-wrap gap-1">
+            {HASH_TRANSFORMS.map((transform) => (
+              <button
+                key={transform.id}
+                type="button"
+                onClick={() => void apply(transform)}
                 className="rounded-sm border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
               >
                 {t(transform.label)}

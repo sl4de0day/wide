@@ -557,7 +557,7 @@ function registerAiAgentHandlers() {
     if (!allowed.ok) return { ok: false, error: allowed.reason };
     try {
       await promises.mkdir(node_path.dirname(resolved.path), { recursive: true });
-      await promises.writeFile(resolved.path, content, "utf8");
+      await writeFileAtomic(resolved.path, content, "utf8");
       return { ok: true, path: resolved.path };
     } catch (error) {
       return { ok: false, error: String(error.message || error) };

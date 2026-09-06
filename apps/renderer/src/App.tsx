@@ -46,7 +46,7 @@ import { useQuickOpen } from "./stores/quickOpen";
 import { comboOf, useCommandPalette } from "./stores/commands";
 import { resetEslintState } from "./editor/features/eslint";
 import { resetLspState, subscribeLspDiagnostics } from "./editor/features/lsp";
-import { parseProjectRules, setProjectRules } from "./editor/features/inspect/engine";
+import { parseProjectRules, parseSecurityConfig, setProjectRules, setSecurityConfig } from "./editor/features/inspect/engine";
 import { forgetTailwindTheme } from "./editor/features/tailwind";
 import { applyLanguage, isLanguage, useT } from "./lib/i18n";
 import { installCatcherSession } from "./lib/catcherSession";
@@ -311,6 +311,7 @@ export default function App() {
 
 
     setProjectRules([]);
+    setSecurityConfig(parseSecurityConfig(""));
     useCommandPalette.getState().setBindings({});
     if (root) {
       void bridge
@@ -321,6 +322,11 @@ export default function App() {
           for (const error of parsed.errors) console.warn(`[inspections] ${error}`);
         })
         .catch(() => setProjectRules([]));
+
+      void bridge
+        .readFile(`${root}/.wide/security.json`)
+        .then((file) => setSecurityConfig(parseSecurityConfig(file?.content ?? "")))
+        .catch(() => setSecurityConfig(parseSecurityConfig("")));
 
 
       void bridge
@@ -403,6 +409,23 @@ export default function App() {
     bridge.requestPendingOpenPath();
     return off;
   }, []);
+
+  useEffect(() => {
+    const offState = bridge.onBackendState(({ state }) => {
+      if (state === "restarted") {
+        toast.error(t("Wide's backend stopped and was restarted. Reopen your project to carry on; anything unsaved is still in the editor."));
+      } else {
+        toast.error(t("Wide's backend stopped and could not be restarted. Save your work elsewhere and restart Wide."));
+      }
+    });
+    const offFault = bridge.onBackendFault(() => {
+      toast.error(t("Something went wrong in Wide's backend. If a panel stops responding, restart Wide."));
+    });
+    return () => {
+      offState();
+      offFault();
+    };
+  }, [t]);
 
   useEffect(() => {
     if (hasStoredLanguage()) return;

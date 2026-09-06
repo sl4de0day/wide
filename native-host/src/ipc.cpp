@@ -2,11 +2,13 @@
 #include "util.h"
 
 #include <windows.h>
+#include <dpapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shellapi.h>
 
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -84,6 +86,59 @@ json SetTitle(HWND hwnd, const std::wstring& title) {
   return json(nullptr);
 }
 
+std::string ToBase64(const BYTE* data, DWORD size) {
+  DWORD chars = 0;
+  if (!CryptBinaryToStringA(data, size, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, nullptr,
+                            &chars)) {
+    return std::string();
+  }
+  std::string out(chars, 0);
+  if (!CryptBinaryToStringA(data, size, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, out.data(),
+                            &chars)) {
+    return std::string();
+  }
+  out.resize(chars);
+  while (!out.empty() && (out.back() == 0 || out.back() == 10 || out.back() == 13)) {
+    out.pop_back();
+  }
+  return out;
+}
+
+std::vector<BYTE> FromBase64(const std::string& text) {
+  DWORD size = 0;
+  if (text.empty() ||
+      !CryptStringToBinaryA(text.c_str(), (DWORD)text.size(), CRYPT_STRING_BASE64, nullptr, &size,
+                            nullptr, nullptr)) {
+    return {};
+  }
+  std::vector<BYTE> out(size);
+  if (!CryptStringToBinaryA(text.c_str(), (DWORD)text.size(), CRYPT_STRING_BASE64, out.data(),
+                            &size, nullptr, nullptr)) {
+    return {};
+  }
+  out.resize(size);
+  return out;
+}
+
+json ProtectData(const std::string& base64In, bool protect) {
+  std::vector<BYTE> input = FromBase64(base64In);
+  if (input.empty()) return json{{"ok", false}};
+
+  DATA_BLOB in = {(DWORD)input.size(), input.data()};
+  DATA_BLOB out = {};
+  const BOOL ok = protect ? CryptProtectData(&in, L"Wide", nullptr, nullptr, nullptr,
+                                             CRYPTPROTECT_UI_FORBIDDEN, &out)
+                          : CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr,
+                                               CRYPTPROTECT_UI_FORBIDDEN, &out);
+  if (!ok) return json{{"ok", false}};
+
+  std::string encoded = ToBase64(out.pbData, out.cbData);
+  SecureZeroMemory(out.pbData, out.cbData);
+  LocalFree(out.pbData);
+  if (encoded.empty()) return json{{"ok", false}};
+  return json{{"ok", true}, {"data", encoded}};
+}
+
 std::wstring PStr(const json& p, const char* key) {
   if (p.contains(key) && p[key].is_string())
     return Utf8ToWide(p[key].get<std::string>());
@@ -107,6 +162,12 @@ std::string HandleHostService(HWND hwnd, const std::string& method,
   else if (method == "shell:openExternal") result = OpenExternal(PStr(params, "url"));
   else if (method == "shell:trashItem") result = TrashItem(PStr(params, "path"));
   else if (method == "window:setTitle") result = SetTitle(hwnd, PStr(params, "title"));
+  else if (method == "crypto:protect") {
+    result = ProtectData(params.value("data", std::string()), true);
+  }
+  else if (method == "crypto:unprotect") {
+    result = ProtectData(params.value("data", std::string()), false);
+  }
 
   return result.dump();
 }

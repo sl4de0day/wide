@@ -88,7 +88,7 @@ export const useUpdate = create<UpdateState>((set, get) => ({
       return;
     }
     set({ installing: "install" });
-    const run = await bridge.updateInstall({ path: dl.path, version: latest });
+    const run = await bridge.updateInstall({ version: latest, asset, sums });
     if (!run.ok) {
       set({ installing: "idle", error: run.error ?? "The update could not be installed." });
     }

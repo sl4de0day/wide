@@ -75,6 +75,7 @@ function LanguagePicker({
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const current = LANGUAGES.find((language) => language.id === value) ?? LANGUAGES[0];
+  const isBeta = (id: Language) => id !== "en" && id !== "tr";
 
   useEffect(() => {
     if (!open) return undefined;
@@ -101,7 +102,12 @@ function LanguagePicker({
         onClick={() => setOpen((was) => !was)}
         className="flex w-44 items-center justify-between gap-2 rounded-md border border-line px-2 py-1 text-[12px] text-fg transition-colors duration-100 hover:bg-hover"
       >
-        <span className="truncate">{current.label}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{current.label}</span>
+          {isBeta(current.id) && (
+            <span className="shrink-0 rounded-sm border border-line px-1 text-[9px] uppercase tracking-wide text-fg-faint">beta</span>
+          )}
+        </span>
         <ChevronDown
           className={cn("size-3.5 shrink-0 text-fg-faint transition-transform duration-100", open && "rotate-180")}
           strokeWidth={1.75}
@@ -123,13 +129,16 @@ function LanguagePicker({
                 setOpen(false);
               }}
               className={cn(
-                "block w-full px-2 py-1 text-left text-[12px] transition-colors duration-100",
+                "flex w-full items-center gap-1.5 px-2 py-1 text-left text-[12px] transition-colors duration-100",
                 language.id === value
                   ? "bg-selected text-fg-bright"
                   : "text-fg-muted hover:bg-hover hover:text-fg",
               )}
             >
-              {language.label}
+              <span className="truncate">{language.label}</span>
+              {isBeta(language.id) && (
+                <span className="ml-auto shrink-0 rounded-sm border border-line px-1 text-[9px] uppercase tracking-wide text-fg-faint">beta</span>
+              )}
             </button>
           ))}
         </div>
@@ -384,11 +393,28 @@ export function SettingsView() {
             className="w-16 rounded-sm border border-line bg-panel px-2 py-1 text-[12px] text-fg outline-none"
           />
         </Row>
+        <Row label={t("Indent with tabs")} hint={t("Off inserts spaces.")}>
+          <Toggle value={settings.useTabs} onChange={(next) => settings.set({ useTabs: next })} />
+        </Row>
         <Row label={t("Wrap long lines")}>
           <Toggle value={settings.lineWrapping} onChange={(next) => settings.set({ lineWrapping: next })} />
         </Row>
         <Row label={t("Colourful syntax")} hint={t("Off flattens every token to one tone.")}>
           <Toggle value={settings.colorfulSyntax} onChange={(next) => settings.set({ colorfulSyntax: next })} />
+        </Row>
+        <Row label={t("Terminal shell")} hint={t("Applies to the next terminal you open.")}>
+          <select
+            value={settings.terminalShell}
+            onChange={(event) => settings.set({ terminalShell: event.target.value as typeof settings.terminalShell })}
+            className="rounded-sm border border-line bg-canvas px-2 py-1 text-[12px] text-fg outline-none"
+          >
+            <option value="default">{t("Default")}</option>
+            <option value="cmd">Command Prompt</option>
+            <option value="powershell">Windows PowerShell</option>
+            <option value="pwsh">PowerShell (pwsh)</option>
+            <option value="gitbash">Git Bash</option>
+            <option value="wsl">WSL</option>
+          </select>
         </Row>
         <Row
           label={t("Format on save")}

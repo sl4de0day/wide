@@ -64,6 +64,9 @@ function registerTsHandlers() {
   electron.ipcMain.handle("ts:completions", (_event, root, filePath, position) =>
     tsCall("completions", [root, filePath, position], { entries: [] }));
 
+  electron.ipcMain.handle("ts:details", (_event, root, filePath, position, name, source, data) =>
+    tsCall("details", [root, filePath, position, name, source, data], null));
+
   electron.ipcMain.handle("ts:diagnostics", (_event, root, filePath) =>
     tsCall("diagnostics", [root, filePath], { diagnostics: [] }));
 

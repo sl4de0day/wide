@@ -44,7 +44,9 @@ function browserDevtoolsUrl(port, activeUrl, targetId, trusted) {
         { host: "127.0.0.1", port, path: "/json/list", timeout: 2000 },
         (response) => {
           let body = "";
-          response.on("data", (chunk) => (body += chunk));
+          response.on("data", (chunk) => {
+            if (body.length < 4 * 1024 * 1024) body += chunk;
+          });
           response.on("end", () => {
             let url = null;
             try {

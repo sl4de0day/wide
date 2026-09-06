@@ -7,8 +7,9 @@ const PROXY_CA_KEY = () => node_path.join(PROXY_DIR(), "ca-key.bin");
 const forge = require("node-forge");
 
 const PROXY_MAX_BODY = 8 * 1024 * 1024;
-const PROXY_MAX_ENTRIES = 500;
+const PROXY_MAX_ENTRIES = 5000;
 const PROXY_TUNNEL_IDLE_MS = 120000;
+const PROXY_MAX_FRAME = 16 * 1024 * 1024;
 
 let proxyServer = null;
 let proxyPort = 0;
@@ -26,6 +27,50 @@ let interceptingResponses = false;
 const pendingResponseIntercepts = new Map();
 
 const liveWebSockets = new Map();
+
+let sessionMacro = null;
+let sessionCookies = new Map();
+
+function runMacroChain(macro) {
+  const steps = Array.isArray(macro?.steps) ? macro.steps : [];
+  const extract = Array.isArray(macro?.extract) ? macro.extract : [];
+  const jar = new Map();
+  const vars = new Map();
+  return (async () => {
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i] ?? {};
+      const url = fillTemplate(step.url, vars);
+      const body = fillTemplate(step.body ?? "", vars);
+      const headers = (step.headers ?? []).map(([name, value]) => [name, fillTemplate(value, vars)]);
+      const cookie = cookieHeader(jar);
+      const withCookie = cookie
+        ? [...headers.filter(([name]) => name.toLowerCase() !== "cookie"), ["Cookie", cookie]]
+        : headers;
+      const reply = await sendRequestOnce({ method: step.method || "GET", url, headers: withCookie, body });
+      if (!reply.ok) return { ok: false, error: reply.error, step: i, jar, vars };
+      parseSetCookies(reply.headers, jar);
+      for (const rule of extract) {
+        const source =
+          rule.source === "header" ? reply.headers.map(([n, v]) => `${n}: ${v}`).join("\n") : reply.body;
+        try {
+          const match = new RegExp(rule.pattern).exec(source);
+          if (match) vars.set(rule.name, match[1] ?? match[0]);
+        } catch {
+          void 0;
+        }
+      }
+    }
+    return { ok: true, jar, vars };
+  })();
+}
+
+async function refreshSession() {
+  if (!sessionMacro) return { ok: false, error: "No session macro is set." };
+  const result = await runMacroChain(sessionMacro);
+  if (!result.ok) return result;
+  sessionCookies = result.jar;
+  return { ok: true, cookies: [...result.jar], tokens: [...result.vars] };
+}
 
 function encodeWsFrame(text, mask) {
   const payload = Buffer.from(String(text ?? ""), "utf8");
@@ -68,6 +113,128 @@ function pairsToNodeHeaders(pairs) {
 function hasHeaderNamed(pairs, name) {
   const lower = name.toLowerCase();
   return pairs.some((p) => Array.isArray(p) && typeof p[0] === "string" && p[0].toLowerCase() === lower);
+}
+
+function mergeSessionCookie(headers) {
+  if (sessionCookies.size === 0) return headers;
+  const existing = new Map();
+  for (const [name, value] of headers) {
+    if (String(name).toLowerCase() === "cookie") {
+      for (const pair of String(value).split(";")) {
+        const eq = pair.indexOf("=");
+        if (eq > 0) existing.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+      }
+    }
+  }
+  for (const [name, value] of sessionCookies) if (!existing.has(name)) existing.set(name, value);
+  const cookie = [...existing.entries()].map(([n, v]) => `${n}=${v}`).join("; ");
+  return [...headers.filter(([name]) => String(name).toLowerCase() !== "cookie"), ["Cookie", cookie]];
+}
+
+async function sendRequestWithSession(request, options) {
+  const withSession = { ...request, headers: mergeSessionCookie(request.headers ?? []) };
+  const reply = await sendRequestOnce(withSession, options);
+  if (reply.ok && (reply.status === 401 || reply.status === 403) && sessionMacro && !options.__reauthed) {
+    const refreshed = await refreshSession();
+    if (refreshed.ok) {
+      const retry = { ...request, headers: mergeSessionCookie(request.headers ?? []) };
+      return sendRequestOnce(retry, { ...options, __reauthed: true });
+    }
+  }
+  return reply;
+}
+
+function sendRequestH2(request, options = {}) {
+  const { method = "GET", url = "", headers = [], body = "" } = request ?? {};
+  const started = options.started ?? Date.now();
+  let target;
+  try {
+    target = new URL(url);
+  } catch {
+    return Promise.resolve({ ok: false, error: "That is not a valid URL." });
+  }
+  if (target.protocol !== "https:") {
+    return Promise.resolve({ ok: false, error: "HTTP/2 here needs an https URL." });
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    let client;
+    try {
+      client = node_http2.connect(target.origin, { rejectUnauthorized: false });
+    } catch (error) {
+      done({ ok: false, error: String((error && error.message) || error) });
+      return;
+    }
+    client.on("error", (error) => {
+      done({ ok: false, error: String((error && error.message) || error) });
+      try { client.close(); } catch { void 0; }
+    });
+    const h2headers = { ":method": method, ":path": target.pathname + target.search, ":authority": target.host };
+    for (const [name, value] of headers) {
+      const lower = String(name).toLowerCase();
+      if (lower === "host" || lower === "connection" || lower === "keep-alive" ||
+          lower === "proxy-connection" || lower === "transfer-encoding" || lower === "upgrade") {
+        continue;
+      }
+      h2headers[lower] = value;
+    }
+    let stream;
+    try {
+      stream = client.request(h2headers);
+    } catch (error) {
+      done({ ok: false, error: String((error && error.message) || error) });
+      try { client.close(); } catch { void 0; }
+      return;
+    }
+    let status = 0;
+    let respHeaders = [];
+    stream.on("response", (h) => {
+      status = Number(h[":status"]) || 0;
+      respHeaders = Object.entries(h)
+        .filter(([name]) => !name.startsWith(":"))
+        .map(([name, value]) => [name, Array.isArray(value) ? value.join(", ") : String(value)]);
+    });
+    const chunks = [];
+    let size = 0;
+    let truncated = false;
+    stream.on("data", (chunk) => {
+      size += chunk.length;
+      if (size <= PROXY_MAX_BODY) chunks.push(chunk);
+      else truncated = true;
+    });
+    stream.on("end", () => {
+      const raw = Buffer.concat(chunks);
+      const decoded = truncated
+        ? raw
+        : decodeBody(raw, respHeaders.find(([n]) => n.toLowerCase() === "content-encoding")?.[1]);
+      done({
+        ok: true,
+        status,
+        statusText: "",
+        headers: respHeaders,
+        body: decoded.toString("utf8"),
+        bytes: size,
+        truncated,
+        ms: Date.now() - started,
+        url: target.toString(),
+        redirects: [],
+        http2: true,
+      });
+      try { client.close(); } catch { void 0; }
+    });
+    stream.setTimeout(30000, () => {
+      stream.close();
+      done({ ok: false, error: "Timed out." });
+      try { client.close(); } catch { void 0; }
+    });
+    if (body) stream.write(body);
+    stream.end();
+  });
 }
 
 function sendRequestOnce(request, options = {}) {
@@ -188,7 +355,7 @@ async function loadOrMakeCa() {
     const stale = secretsNeedReseal();
     if (stale || (typeof isLegacy === "function" && isLegacy.call(electron.safeStorage, keyBlob))) {
       try {
-        await promises.writeFile(PROXY_CA_KEY(), electron.safeStorage.encryptString(keyPem));
+        await writeFileAtomic(PROXY_CA_KEY(), electron.safeStorage.encryptString(keyPem));
       } catch {
 
       }
@@ -224,8 +391,8 @@ async function loadOrMakeCa() {
 
   const certPem = forge.pki.certificateToPem(cert);
   const keyPem = forge.pki.privateKeyToPem(keys.privateKey);
-  await promises.writeFile(PROXY_CA_CERT(), certPem, "utf8");
-  await promises.writeFile(PROXY_CA_KEY(), electron.safeStorage.encryptString(keyPem));
+  await writeFileAtomic(PROXY_CA_CERT(), certPem, "utf8");
+  await writeFileAtomic(PROXY_CA_KEY(), electron.safeStorage.encryptString(keyPem));
   proxyCa = { cert, key: keys.privateKey, pem: certPem };
   return proxyCa;
 }
@@ -691,11 +858,19 @@ function forward(scheme, req, res) {
   });
 }
 
-function makeFrameReader(onFrame) {
+function makeFrameReader(onFrame, onOverflow) {
   let buffer = Buffer.alloc(0);
+  let dead = false;
   return (chunk) => {
+    if (dead) return;
     try {
       buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk;
+      if (buffer.length > PROXY_MAX_FRAME) {
+        dead = true;
+        buffer = Buffer.alloc(0);
+        if (onOverflow) onOverflow();
+        return;
+      }
       for (;;) {
         if (buffer.length < 2) return;
         const opcode = buffer[0] & 0x0f;
@@ -711,6 +886,12 @@ function makeFrameReader(onFrame) {
 
           length = Number(buffer.readBigUInt64BE(2));
           offset = 10;
+        }
+        if (!Number.isSafeInteger(length) || length > PROXY_MAX_FRAME) {
+          dead = true;
+          buffer = Buffer.alloc(0);
+          if (onOverflow) onOverflow();
+          return;
         }
         const maskLen = masked ? 4 : 0;
         if (buffer.length < offset + maskLen + length) return;
@@ -764,8 +945,16 @@ function relayWebSocket(scheme, req, clientSocket, head) {
     wsBuffer.push({ id, ...rec });
     if (!wsTimer) wsTimer = setTimeout(flushWs, 50);
   };
-  const fromClient = makeFrameReader(note("up"));
-  const fromServer = makeFrameReader(note("down"));
+  const overflow = () => {
+    note("down")({ kind: "close" });
+    try {
+      clientSocket.destroy();
+    } catch {
+
+    }
+  };
+  const fromClient = makeFrameReader(note("up"), overflow);
+  const fromServer = makeFrameReader(note("down"), overflow);
 
   let target = req.url;
   if (/^https?:\/\//i.test(target)) {
@@ -975,7 +1164,7 @@ function registerProxyHandlers() {
     try {
       const file = catcherAutosaveFile(root);
       await promises.mkdir(node_path.dirname(file), { recursive: true });
-      await promises.writeFile(file, json, "utf8");
+      await writeFileAtomic(file, json, "utf8");
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String((error && error.message) || error) };
@@ -1133,7 +1322,30 @@ function registerProxyHandlers() {
     const gate = await requireInstalled("proxy");
     if (gate) return gate;
 
-    return sendRequestOnce(request, options && typeof options === "object" ? options : {});
+    const opts = options && typeof options === "object" ? options : {};
+    if (opts.http2) return sendRequestH2(request, opts);
+    if (opts.session) return sendRequestWithSession(request, opts);
+    return sendRequestOnce(request, opts);
+  });
+
+  electron.ipcMain.handle("proxy:setSessionMacro", async (_event, macro) => {
+    const gate = await requireInstalled("proxy");
+    if (gate) return gate;
+    sessionMacro = macro && Array.isArray(macro.steps) ? macro : null;
+    if (!sessionMacro) sessionCookies = new Map();
+    return { ok: true, active: Boolean(sessionMacro) };
+  });
+
+  electron.ipcMain.handle("proxy:refreshSession", async () => {
+    const gate = await requireInstalled("proxy");
+    if (gate) return gate;
+    return refreshSession();
+  });
+
+  electron.ipcMain.handle("proxy:sessionStatus", async () => {
+    const gate = await requireInstalled("proxy");
+    if (gate) return gate;
+    return { ok: true, active: Boolean(sessionMacro), cookies: [...sessionCookies] };
   });
 
   electron.ipcMain.handle("proxy:runMacro", async (_event, macro) => {

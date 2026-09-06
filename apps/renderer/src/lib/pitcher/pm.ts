@@ -1,3 +1,4 @@
+import { bridge } from "@/lib/bridge";
 
 
 export interface TestResult {
@@ -59,7 +60,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 class Assertion {
-  constructor(private actual: unknown, private negated = false) {}
+  constructor(private actual: unknown, private negated = false, private deepFlag = false) {}
 
   private check(cond: boolean, msg: string): void {
     const pass = this.negated ? !cond : cond;
@@ -67,7 +68,7 @@ class Assertion {
   }
 
   get not(): Assertion {
-    return new Assertion(this.actual, !this.negated);
+    return new Assertion(this.actual, !this.negated, this.deepFlag);
   }
 
   get to(): this { return this; }
@@ -80,11 +81,15 @@ class Assertion {
   get has(): this { return this; }
   get have(): this { return this; }
   get with(): this { return this; }
-  get deep(): this { return this; }
+  get deep(): Assertion { return new Assertion(this.actual, this.negated, true); }
 
   equal(expected: unknown): this {
-    this.check(this.actual === expected, `to equal ${JSON.stringify(expected)}`);
+    const same = this.deepFlag ? deepEqual(this.actual, expected) : this.actual === expected;
+    this.check(same, `to equal ${JSON.stringify(expected)}`);
     return this;
+  }
+  equals(expected: unknown): this {
+    return this.equal(expected);
   }
   eql(expected: unknown): this {
     this.check(deepEqual(this.actual, expected), `to deeply equal ${JSON.stringify(expected)}`);
@@ -157,6 +162,31 @@ class Assertion {
     this.check(Boolean(isEmpty), "to be empty");
     return this;
   }
+  keys(...names: (string | string[])[]): this {
+    const wanted = names.flat();
+    const obj = this.actual as Record<string, unknown> | null;
+    const has = obj != null && wanted.every((k) => Object.prototype.hasOwnProperty.call(obj, k));
+    this.check(has, `to have keys ${JSON.stringify(wanted)}`);
+    return this;
+  }
+  closeTo(expected: number, delta: number): this {
+    this.check(Math.abs(Number(this.actual) - expected) <= delta, `to be close to ${expected} (±${delta})`);
+    return this;
+  }
+  instanceOf(ctor: new (...args: unknown[]) => unknown): this {
+    this.check(this.actual instanceof ctor, `to be an instance of ${ctor?.name ?? "type"}`);
+    return this;
+  }
+  throw(): this {
+    let threw = false;
+    try {
+      if (typeof this.actual === "function") (this.actual as () => void)();
+    } catch {
+      threw = true;
+    }
+    this.check(threw, "to throw");
+    return this;
+  }
 }
 
 function expect(actual: unknown): Assertion {
@@ -227,6 +257,8 @@ function responseApi(res: ResponseCtx) {
     text: () => res.body,
     json: () => JSON.parse(res.body),
     headers: { get: headerGet },
+    reason: () => res.status,
+    size: () => res.body.length,
     to: {
       have: {
         status: (code: number | string) => {
@@ -239,10 +271,34 @@ function responseApi(res: ResponseCtx) {
           if (headerGet(name) === undefined) throw new Error(`expected header ${name}`);
           return self;
         },
+        jsonBody: (expected?: unknown) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(res.body);
+          } catch {
+            throw new Error("expected the body to be JSON");
+          }
+          if (expected !== undefined && !deepEqual(parsed, expected)) {
+            throw new Error(`expected JSON body to equal ${JSON.stringify(expected)}`);
+          }
+          return self;
+        },
       },
       be: {
         get ok() {
           if (res.code < 200 || res.code >= 300) throw new Error(`expected a 2xx status but got ${res.code}`);
+          return self;
+        },
+        get success() {
+          if (res.code < 200 || res.code >= 300) throw new Error(`expected a 2xx status but got ${res.code}`);
+          return self;
+        },
+        get clientError() {
+          if (res.code < 400 || res.code >= 500) throw new Error(`expected a 4xx status but got ${res.code}`);
+          return self;
+        },
+        get serverError() {
+          if (res.code < 500 || res.code >= 600) throw new Error(`expected a 5xx status but got ${res.code}`);
           return self;
         },
       },
@@ -271,9 +327,52 @@ export function createPm(ctx: PmContext): Record<string, unknown> {
     response: ctx.response ? responseApi(ctx.response) : undefined,
     info: { requestName: ctx.requestName, iteration: ctx.iteration },
     expect,
-    test: (name: string, fn: () => void) => {
+    sendRequest: async (
+      config: string | { url?: string; method?: string; header?: Record<string, string> | { key: string; value: string }[]; body?: { raw?: string } | string },
+      callback?: (err: Error | null, res: unknown) => void,
+    ): Promise<unknown> => {
       try {
-        fn();
+        const url = typeof config === "string" ? config : config.url ?? "";
+        const method = typeof config === "string" ? "GET" : (config.method ?? "GET").toUpperCase();
+        let headers: [string, string][] = [];
+        if (typeof config !== "string" && config.header) {
+          headers = Array.isArray(config.header)
+            ? config.header.map((h) => [h.key, h.value] as [string, string])
+            : Object.entries(config.header).map(([k, v]) => [k, String(v)] as [string, string]);
+        }
+        let body: string | null = null;
+        if (typeof config !== "string" && config.body) {
+          body = typeof config.body === "string" ? config.body : config.body.raw ?? null;
+        }
+        const resolved = url.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (whole, n) => ctx.scopes.get(String(n).trim()) ?? whole);
+        const reply = await bridge.httpSend(resolved, method, headers, body);
+        const res = reply.ok
+          ? {
+              code: reply.status,
+              status: reply.statusText,
+              headers: reply.headers,
+              text: () => reply.body,
+              json: () => JSON.parse(reply.body),
+            }
+          : null;
+        const err = reply.ok ? null : new Error(reply.error);
+        if (callback) callback(err, res);
+        if (err) throw err;
+        return res;
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        if (callback) callback(err, null);
+        throw err;
+      }
+    },
+    test: (name: string, fn: () => void | Promise<void>) => {
+      try {
+        const out = fn();
+        if (out && typeof (out as Promise<void>).then === "function") {
+          return (out as Promise<void>)
+            .then(() => ctx.results.push({ name, passed: true }))
+            .catch((e) => ctx.results.push({ name, passed: false, error: e instanceof Error ? e.message : String(e) }));
+        }
         ctx.results.push({ name, passed: true });
       } catch (e) {
         ctx.results.push({ name, passed: false, error: e instanceof Error ? e.message : String(e) });

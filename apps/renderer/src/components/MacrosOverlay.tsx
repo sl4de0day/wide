@@ -12,6 +12,7 @@ export function MacrosOverlay() {
   const activeId = useMacros((state) => state.activeId);
   const running = useMacros((state) => state.running);
   const session = useMacros((state) => state.session);
+  const sessionMacroId = useMacros((state) => state.sessionMacroId);
 
   const macro = useMemo(() => macros.find((item) => item.id === activeId) ?? null, [macros, activeId]);
 
@@ -122,6 +123,23 @@ export function MacrosOverlay() {
                   title={t("Delete macro")}
                 >
                   <Trash2 className="size-3.5" strokeWidth={1.75} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    sessionMacroId === macro.id
+                      ? void useMacros.getState().clearSession()
+                      : void useMacros.getState().useAsSession(macro)
+                  }
+                  disabled={running}
+                  title={t("Run this macro before scans and replays so they stay authenticated")}
+                  className={cn(
+                    "flex items-center gap-1 rounded-sm px-2.5 py-1 text-[11px] transition-colors duration-100 disabled:opacity-40",
+                    sessionMacroId === macro.id ? "bg-accent/25 text-accent" : "border border-line text-fg-dim hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  <KeyRound className="size-3.5" strokeWidth={2} />
+                  {sessionMacroId === macro.id ? t("Session on") : t("Use as session")}
                 </button>
                 <button
                   type="button"

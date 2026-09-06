@@ -25,6 +25,7 @@ export interface Settings {
   theme: ThemeId;
   fontSize: number;
   tabSize: number;
+  useTabs: boolean;
   lineWrapping: boolean;
   typewriter: boolean;
   colorfulSyntax: boolean;
@@ -38,6 +39,7 @@ export interface Settings {
   securityLint: boolean;
 
   updateManifestUrl: string;
+  terminalShell: "default" | "cmd" | "powershell" | "pwsh" | "gitbash" | "wsl";
 }
 
 export const DEFAULTS: Settings = {
@@ -45,6 +47,7 @@ export const DEFAULTS: Settings = {
   theme: "default",
   fontSize: 13,
   tabSize: 2,
+  useTabs: false,
   lineWrapping: false,
   typewriter: true,
   colorfulSyntax: true,
@@ -53,6 +56,7 @@ export const DEFAULTS: Settings = {
   aiGhostText: false,
   securityLint: true,
   updateManifestUrl: "",
+  terminalShell: "default",
 };
 
 interface SettingsState extends Settings {

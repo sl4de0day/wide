@@ -930,7 +930,7 @@ ${JSON.stringify(record2)}`).digest("hex");
       p: GENESIS
     };
     const markerHash = this.hashOf(marker);
-    await promises.writeFile(
+    await writeFileAtomic(
       this.path,
       `${[JSON.stringify(markerHash === null ? marker : { ...marker, h: markerHash }), ...kept].join("\n")}
 `,

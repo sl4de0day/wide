@@ -411,7 +411,10 @@ export function subscribeFsChanges(): () => void {
   });
   const off = bridge.onFsChanged(() => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void useWorkspace.getState().refresh(), 200);
+    timer = setTimeout(() => {
+      void useWorkspace.getState().refresh();
+      void import("./editor").then((m) => m.useEditor.getState().checkDiskChanges());
+    }, 200);
   });
 
   void bridge.watchWorkspace(useWorkspace.getState().root ?? "");

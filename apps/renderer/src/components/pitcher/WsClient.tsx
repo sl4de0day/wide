@@ -1,5 +1,5 @@
 import { Plug, PlugZap, Send, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
@@ -7,6 +7,8 @@ import { resolveVars } from "@/lib/pitcher/vars";
 import { cn } from "@/lib/utils";
 import { usePitcher, type PitcherRequest } from "@/stores/pitcher";
 import { usePitcherEnv } from "@/stores/pitcherEnv";
+
+const FRAME_CAP = 5000;
 
 interface Frame {
   dir: "up" | "down" | "sys";
@@ -23,6 +25,9 @@ export function WsClient({ req }: { req: PitcherRequest }) {
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [frames, setFrames] = useState<Frame[]>([]);
+  const append = useCallback((frame: Frame) => {
+    setFrames((f) => (f.length >= FRAME_CAP ? [...f.slice(f.length - FRAME_CAP + 1), frame] : [...f, frame]));
+  }, []);
   const [input, setInput] = useState("");
   const update = (patch: Partial<PitcherRequest>) => usePitcher.getState().updateRequest(req.id, patch);
   const logRef = useRef<HTMLDivElement>(null);
@@ -33,16 +38,16 @@ export function WsClient({ req }: { req: PitcherRequest }) {
       if (ev.type === "open") {
         setConnected(true);
         setConnecting(false);
-        setFrames((f) => [...f, { dir: "sys", text: "connected", at: Date.now() }]);
+        append({ dir: "sys", text: "connected", at: Date.now() });
       } else if (ev.type === "message") {
-        setFrames((f) => [...f, { dir: "down", text: ev.data ?? "", at: Date.now() }]);
+        append({ dir: "down", text: ev.data ?? "", at: Date.now() });
       } else if (ev.type === "close") {
         setConnected(false);
         setConnecting(false);
-        setFrames((f) => [...f, { dir: "sys", text: `closed${ev.code ? ` (${ev.code})` : ""}${ev.reason ? ` ${ev.reason}` : ""}`, at: Date.now() }]);
+        append({ dir: "sys", text: `closed${ev.code ? ` (${ev.code})` : ""}${ev.reason ? ` ${ev.reason}` : ""}`, at: Date.now() });
       } else if (ev.type === "error") {
         setConnecting(false);
-        setFrames((f) => [...f, { dir: "sys", text: `error: ${ev.reason ?? ""}`, at: Date.now() }]);
+        append({ dir: "sys", text: `error: ${ev.reason ?? ""}`, at: Date.now() });
       }
     });
     return off;
@@ -63,7 +68,7 @@ export function WsClient({ req }: { req: PitcherRequest }) {
     const reply = await bridge.wsConnect(req.id, url);
     if (!reply.ok) {
       setConnecting(false);
-      setFrames((f) => [...f, { dir: "sys", text: `error: ${reply.error}`, at: Date.now() }]);
+      append({ dir: "sys", text: `error: ${reply.error}`, at: Date.now() });
     }
   };
   const disconnect = () => void bridge.wsClose(req.id);
@@ -72,10 +77,10 @@ export function WsClient({ req }: { req: PitcherRequest }) {
     const text = resolveVars(input, scopeVars(req));
     const reply = await bridge.wsSend(req.id, text);
     if (reply.ok) {
-      setFrames((f) => [...f, { dir: "up", text, at: Date.now() }]);
+      append({ dir: "up", text, at: Date.now() });
       setInput("");
     } else {
-      setFrames((f) => [...f, { dir: "sys", text: `error: ${reply.error}`, at: Date.now() }]);
+      append({ dir: "sys", text: `error: ${reply.error}`, at: Date.now() });
     }
   };
 

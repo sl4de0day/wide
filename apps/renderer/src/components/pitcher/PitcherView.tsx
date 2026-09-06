@@ -1,18 +1,20 @@
-import { Code2, ChevronDown, ChevronRight, Cookie, Download, FolderPlus, Globe, Pencil, Play, Plus, Radar, Send, Trash2, Upload, X } from "lucide-react";
+import { Code2, ChevronDown, ChevronRight, Cookie, Download, FolderPlus, Globe, History, KeyRound, Pencil, Play, Plus, Radar, Send, ShieldOff, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { bridge } from "@/lib/bridge";
 import { HttpBodyView } from "@/components/http/HttpBodyView";
+import { Modal } from "@/components/pitcher/Modal";
 import { loadDockSize, saveDockSize } from "@/lib/dockSize";
 import { t, useT } from "@/lib/i18n";
 import { promptText } from "@/stores/prompt";
 import { sendToIntruder, sendToRepeater, sendToScanner } from "@/lib/pitcher/catcherBridge";
 import { executeRequest } from "@/lib/pitcher/execute";
 import { collectionToMarkdown } from "@/lib/pitcher/docs";
-import { exportCollectionHttp, exportCollectionJson, downloadText } from "@/lib/pitcher/export";
+import { exportCollectionHttp, exportCollectionJson, exportPostmanV21, downloadText } from "@/lib/pitcher/export";
 import type { TestResult } from "@/lib/pitcher/pm";
 import { type PitcherResponse } from "@/lib/pitcher/send";
 import { cn } from "@/lib/utils";
-import { usePitcher, type Collection, type Node, type Param, type PitcherRequest, type Protocol } from "@/stores/pitcher";
+import { usePitcher, type Collection, type Node, type Param, type PitcherRequest, type Protocol, newRequest } from "@/stores/pitcher";
 import { usePitcherEnv } from "@/stores/pitcherEnv";
 import { usePitcherHistory } from "@/stores/pitcherHistory";
 
@@ -99,6 +101,8 @@ async function rename(id: string, current: string) {
 
 function Sidebar({ collections, activeTab, onRun }: { collections: Collection[]; activeTab: string | null; onRun: (c: Collection) => void }) {
   const t = useT();
+  const [authFor, setAuthFor] = useState<Collection | null>(null);
+  const authColl = authFor ? collections.find((c) => c.id === authFor.id) ?? null : null;
   return (
     <div className="flex w-56 shrink-0 flex-col border-r border-line bg-chrome">
       <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
@@ -129,7 +133,9 @@ function Sidebar({ collections, activeTab, onRun }: { collections: Collection[];
                     <Download className="size-3" strokeWidth={2} />
                   </button>
                   <button type="button" onClick={() => downloadText(`${c.name}.http`, exportCollectionHttp(c), "text/plain")} title={t("Export .http")} className="text-fg-faint hover:text-fg font-mono text-[8px]">.http</button>
+                  <button type="button" onClick={() => downloadText(`${c.name}.postman_collection.json`, exportPostmanV21(c))} title={t("Export as a Postman v2.1 collection")} className="text-fg-faint hover:text-fg font-mono text-[8px]">pm</button>
                   <button type="button" onClick={() => downloadText(`${c.name}.md`, collectionToMarkdown(c), "text/markdown")} title={t("Export docs (Markdown)")} className="text-fg-faint hover:text-fg font-mono text-[8px]">.md</button>
+                  <button type="button" onClick={() => setAuthFor(c)} title={t("Collection auth")} className="text-fg-faint hover:text-fg"><KeyRound className="size-3" strokeWidth={2} /></button>
                   <button type="button" onClick={() => rename(c.id, c.name)} title={t("Rename")} className="text-fg-faint hover:text-fg"><Pencil className="size-3" strokeWidth={2} /></button>
                   <button type="button" onClick={() => usePitcher.getState().remove(c.id)} title={t("Delete")} className="text-fg-faint hover:text-status-error">
                     <Trash2 className="size-3" strokeWidth={2} />
@@ -141,6 +147,59 @@ function Sidebar({ collections, activeTab, onRun }: { collections: Collection[];
           ))
         )}
       </div>
+      <HistoryPanel />
+      {authColl && (
+        <Modal title={t("Collection auth — {name}", { name: authColl.name })} onClose={() => setAuthFor(null)}>
+          <p className="mb-2 text-[11px] text-fg-faint">{t("Requests set to \"Inherit from collection\" use this.")}</p>
+          <AuthEditor
+            req={{ ...newRequest(""), auth: authColl.auth ?? newRequest("").auth }}
+            update={(patch) => {
+              if (patch.auth) usePitcher.getState().setCollectionAuth(authColl.id, patch.auth);
+            }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function HistoryPanel() {
+  const t = useT();
+  const items = usePitcherHistory((s) => s.items);
+  const [open, setOpen] = useState(false);
+  if (items.length === 0) return null;
+  return (
+    <div className="shrink-0 border-t border-line">
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-1 text-[11px] uppercase tracking-wide text-fg-faint hover:text-fg">
+          {open ? <ChevronDown className="size-3" strokeWidth={2} /> : <ChevronRight className="size-3" strokeWidth={2} />}
+          <History className="size-3" strokeWidth={1.75} />
+          {t("History")}
+          <span className="tabular-nums">{items.length}</span>
+        </button>
+        {open && (
+          <button type="button" onClick={() => usePitcherHistory.getState().clear()} title={t("Clear history")} className="text-fg-faint hover:text-status-error">
+            <Trash2 className="size-3" strokeWidth={2} />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="max-h-48 overflow-auto pb-1">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => usePitcher.getState().captureRequest({ method: item.method, url: item.url, headers: [], body: "" })}
+              title={`${item.method} ${item.url}`}
+              className="flex w-full items-center gap-1.5 px-2 py-0.5 text-left text-[10px] hover:bg-hover"
+            >
+              <span className={cn("shrink-0 font-mono", item.status >= 500 ? "text-status-error" : item.status >= 400 ? "text-amber-400" : "text-emerald-400")}>{item.status || "—"}</span>
+              <span className="shrink-0 font-mono text-fg-faint">{item.method}</span>
+              <span className="min-w-0 flex-1 truncate text-fg-dim">{item.url}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -212,6 +271,10 @@ function RequestPane({ req, run, onSend, onCode, onSendTo }: { req: PitcherReque
         <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-faint" title={t("Send through Catcher's proxy so it is captured")}>
           <input type="checkbox" checked={req.throughProxy} onChange={(e) => update({ throughProxy: e.target.checked })} />
           <Radar className="size-3" strokeWidth={1.75} />
+        </label>
+        <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-faint" title={t("Skip TLS certificate verification (for self-signed staging servers)")}>
+          <input type="checkbox" checked={req.insecure} onChange={(e) => update({ insecure: e.target.checked })} />
+          <ShieldOff className="size-3" strokeWidth={1.75} />
         </label>
         <button type="button" onClick={onCode} title={t("Generate code")} className="flex shrink-0 items-center rounded-sm border border-line px-2 py-1 text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
           <Code2 className="size-3.5" strokeWidth={1.75} />
@@ -289,6 +352,31 @@ function BodyEditor({ req, update }: { req: PitcherRequest; update: (p: Partial<
         <textarea value={b.raw} onChange={(e) => setBody({ raw: e.target.value })} rows={6} spellCheck={false} placeholder='{"key": "{{value}}"}' className="w-full resize-y rounded-sm border border-line bg-canvas px-2 py-1 font-mono text-[11px] text-fg outline-none focus:border-accent" />
       )}
       {b.mode === "form" && <ParamTable rows={b.form} onChange={(form) => setBody({ form })} />}
+      {b.mode === "multipart" && (
+        <div className="flex flex-col gap-1">
+          <ParamTable rows={b.form} onChange={(form) => setBody({ form })} keyPlaceholder={t("field name")} />
+          <p className="text-[10px] text-fg-faint">{t("For a file field, set the value to @ followed by the file path (e.g. @C:/path/to/file.png).")}</p>
+        </div>
+      )}
+      {b.mode === "binary" && (
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                const picked = await bridge.openFile();
+                const file = picked?.path ?? "";
+                if (file) setBody({ binaryPath: file });
+              }}
+              className="rounded-sm border border-line px-2 py-1 text-[11px] text-fg-dim hover:bg-hover hover:text-fg"
+            >
+              {t("Choose file…")}
+            </button>
+            <input value={b.binaryPath} onChange={(e) => setBody({ binaryPath: e.target.value })} placeholder={t("or type a file path")} className="min-w-0 flex-1 rounded-sm border border-line bg-canvas px-2 py-1 font-mono text-[11px] text-fg outline-none focus:border-accent" />
+          </div>
+          {b.binaryPath && <p className="text-[10px] text-fg-faint">{t("Sent as the raw request body.")}</p>}
+        </div>
+      )}
       {b.mode === "graphql" && (
         <div className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wide text-fg-faint">{t("Query")}</span>
@@ -298,7 +386,6 @@ function BodyEditor({ req, update }: { req: PitcherRequest; update: (p: Partial<
           <GraphqlSchema req={req} onInsert={(snippet) => setBody({ graphql: { ...b.graphql, query: b.graphql.query.trim() ? `${b.graphql.query}\n${snippet}` : `query {\n  ${snippet}\n}` } })} />
         </div>
       )}
-      {(b.mode === "multipart" || b.mode === "binary") && <p className="text-[10px] text-fg-faint">{t("File bodies arrive in a later update.")}</p>}
     </div>
   );
 }
@@ -310,8 +397,12 @@ function AuthEditor({ req, update }: { req: PitcherRequest; update: (p: Partial<
   const field = "w-full rounded-sm border border-line bg-canvas px-2 py-1 font-mono text-[11px] text-fg outline-none focus:border-accent";
   return (
     <div className="flex flex-col gap-1.5 text-[11px]">
+      {a.type === "inherit" && (
+        <p className="text-[10px] text-fg-faint">{t("This request uses the collection's auth. Set it on the collection (the key icon next to its name).")}</p>
+      )}
       <select value={a.type} onChange={(e) => setAuth({ type: e.target.value as typeof a.type })} className="w-48 rounded-sm border border-line bg-canvas px-1.5 py-1 text-[11px] text-fg outline-none">
         <option value="none">{t("No Auth")}</option>
+        <option value="inherit">{t("Inherit from collection")}</option>
         <option value="bearer">{t("Bearer Token")}</option>
         <option value="basic">{t("Basic")}</option>
         <option value="apikey">{t("API Key")}</option>
@@ -389,7 +480,7 @@ function ScriptsEditor({ req, update }: { req: PitcherRequest; update: (p: Parti
   );
 }
 
-type RespTab = "body" | "tests" | "console";
+type RespTab = "body" | "headers" | "sent" | "tests" | "console";
 
 function ResponsePane({ run }: { run: RunState | undefined }) {
   const t = useT();
@@ -414,6 +505,13 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
         {resp.bytes != null && <span className="tabular-nums text-fg-faint">{resp.bytes} B</span>}
         <div className="ml-2 flex items-center gap-1">
           <button type="button" onClick={() => setTab("body")} className={cn("rounded-sm px-1.5 py-0.5", tab === "body" ? "bg-selected text-fg" : "text-fg-faint hover:text-fg")}>{t("Body")}</button>
+          <button type="button" onClick={() => setTab("headers")} className={cn("flex items-center gap-1 rounded-sm px-1.5 py-0.5", tab === "headers" ? "bg-selected text-fg" : "text-fg-faint hover:text-fg")}>
+            {t("Headers")}
+            {(resp.headers?.length ?? 0) > 0 && <span className="rounded bg-fg/10 px-1 text-[9px]">{resp.headers?.length}</span>}
+          </button>
+          {resp.sent && (
+            <button type="button" onClick={() => setTab("sent")} className={cn("rounded-sm px-1.5 py-0.5", tab === "sent" ? "bg-selected text-fg" : "text-fg-faint hover:text-fg")}>{t("Sent")}</button>
+          )}
           <button type="button" onClick={() => setTab("tests")} className={cn("flex items-center gap-1 rounded-sm px-1.5 py-0.5", tab === "tests" ? "bg-selected text-fg" : "text-fg-faint hover:text-fg")}>
             {t("Tests")}
             {tests.length > 0 && (
@@ -426,7 +524,35 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
         </div>
       </div>
       {run?.scriptError && <div className="shrink-0 border-b border-line bg-status-error/10 px-3 py-1 font-mono text-[10px] text-status-error">⚠ {run.scriptError}</div>}
-      {tab === "body" && <HttpBodyView body={resp.body ?? ""} headers={resp.headers ?? []} className="flex-1" />}
+      {tab === "body" && <HttpBodyView body={resp.body ?? ""} headers={resp.headers ?? []} truncated={resp.truncated} className="flex-1" />}
+      {tab === "headers" && (
+        <div className="min-h-0 flex-1 overflow-auto p-2 font-mono text-[11px]">
+          {(resp.headers ?? []).length === 0 ? (
+            <p className="text-fg-faint">{t("No response headers.")}</p>
+          ) : (
+            (resp.headers ?? []).map(([name, value], i) => (
+              <div key={i} className="flex gap-2 border-b border-line/40 py-0.5">
+                <span className="shrink-0 text-syn-property">{name}:</span>
+                <span className="min-w-0 flex-1 break-all text-fg">{value}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      {tab === "sent" && resp.sent && (
+        <div className="min-h-0 flex-1 overflow-auto p-2 font-mono text-[11px]">
+          <p className="text-fg">{resp.sent.method} {resp.sent.url}</p>
+          {resp.sent.headers.map(([name, value], i) => (
+            <div key={i} className="flex gap-2 py-0.5">
+              <span className="shrink-0 text-syn-property">{name}:</span>
+              <span className="min-w-0 flex-1 break-all text-fg-dim">{value}</span>
+            </div>
+          ))}
+          {resp.sent.body && (
+            <pre className="mt-2 whitespace-pre-wrap break-all border-t border-line pt-2 text-fg">{resp.sent.body}</pre>
+          )}
+        </div>
+      )}
       {tab === "tests" && (
         <div className="min-h-0 flex-1 overflow-auto p-2 text-[11px]">
           {tests.length === 0 ? (
@@ -538,7 +664,8 @@ export function PitcherView() {
 
   const send = async (req: PitcherRequest) => {
     setResponses((s) => ({ ...s, [req.id]: { sending: true, resp: null, tests: [], logs: [] } }));
-    const out = await executeRequest(req);
+    const coll = usePitcher.getState().collectionOf(req.id);
+    const out = await executeRequest(req, { collectionAuth: coll?.auth });
     setResponses((s) => ({ ...s, [req.id]: { sending: false, resp: out.resp, tests: out.tests, logs: out.logs, scriptError: out.scriptError } }));
     if (out.resp.ok) usePitcherHistory.getState().add({ method: req.method, url: out.resp.url ?? req.url, status: out.resp.status ?? 0, ms: out.resp.ms ?? 0 });
   };
