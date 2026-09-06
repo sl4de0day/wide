@@ -112,11 +112,31 @@ async function checkSecurityScanControls() {
   );
   fsSync.writeFileSync(pathSync.join(dir, 'spec', 'fixture.js'), flow('gamma'), 'utf8');
 
+  fsSync.writeFileSync(
+    pathSync.join(dir, 'src', 'sink.js'),
+    `function runQuery(q) {\n  return db.query(q);\n}\nmodule.exports = { runQuery };\n`,
+    'utf8'
+  );
+  fsSync.writeFileSync(
+    pathSync.join(dir, 'src', 'middle.js'),
+    `function handle(input) {\n  return runQuery(input);\n}\nmodule.exports = { handle };\n`,
+    'utf8'
+  );
+  fsSync.writeFileSync(
+    pathSync.join(dir, 'src', 'entry.js'),
+    `const x = req.query.x;\nhandle(x);\n`,
+    'utf8'
+  );
+
   const scan = await invoke('security:scanProject', [dir]);
   const findings = scan.result?.findings ?? [];
   const inFile = (needle) => findings.filter((f) => String(f.file).includes(needle));
 
   report(inFile('plain.js').length > 0, 'security scan reports a taint flow');
+  report(
+    inFile('middle.js').some((f) => String(f.ruleId).startsWith('xfile/')),
+    'cross-file taint propagates transitively through two function hops'
+  );
   report(inFile('hushed.js').length === 0, 'wide-ignore silences the line it sits on');
   report(inFile('fixture.js').length === 0, 'spec folders are out of scope by default');
   report(
@@ -275,7 +295,13 @@ async function checkSca() {
   const dir = pathSync.join(osSync.tmpdir(), `wide-sca-${process.pid}`);
   const src = pathSync.join(dir, 'src');
   fsSync.mkdirSync(src, { recursive: true });
-  fsSync.writeFileSync(pathSync.join(src, 'package.json'), JSON.stringify({ dependencies: { lodash: '4.17.20', express: '4.18.2' } }), 'utf8');
+  fsSync.writeFileSync(pathSync.join(src, 'package.json'), JSON.stringify({ dependencies: { lodash: '4.17.20', express: '4.18.2', foolib: '1.0.0' } }), 'utf8');
+  fsSync.mkdirSync(pathSync.join(dir, '.wide'), { recursive: true });
+  fsSync.writeFileSync(
+    pathSync.join(dir, '.wide', 'osv.json'),
+    JSON.stringify({ npm: [{ name: 'foolib', lt: '2.0.0', id: 'WIDE-TEST-1', cwe: 'CWE-1395', sev: 'high', note: 'test override entry' }] }),
+    'utf8'
+  );
   fsSync.writeFileSync(pathSync.join(src, 'requirements.txt'), 'pyyaml==5.3\nrequests==2.31.0\n', 'utf8');
   fsSync.writeFileSync(
     pathSync.join(src, 'pom.xml'),
@@ -298,6 +324,8 @@ async function checkSca() {
   report(has('vuln-dep-cve-2021-44906'), 'SCA flags vulnerable minimist in package-lock.json');
   report(has('vuln-dep-cve-2020-26160'), 'SCA flags vulnerable jwt-go in go.mod');
   report(!has('vuln-dep-cve-2023-32681'), 'SCA leaves a patched dependency (requests 2.31.0) alone');
+  report(has('vuln-dep-cve-2024-29041'), 'SCA flags express from the offline OSV snapshot');
+  report(has('vuln-dep-wide-test-1'), 'SCA applies a project .wide/osv.json override');
 
   try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
   return failed;

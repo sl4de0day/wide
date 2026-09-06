@@ -1,13 +1,51 @@
-import { ClipboardCopy, FileDown, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { ClipboardCopy, FileDown, Filter, Plus, Printer, Trash2, X } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
-import { bridge } from "@/lib/bridge";
+import { bridge, type ProjectScanFinding } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
-import { findingsReport, findingsReportHtml, SEVERITIES, useFindings, type Severity } from "@/stores/findings";
+import { FINDING_STATUSES, findingsReport, findingsReportHtml, SEVERITIES, useFindings, type Finding, type FindingStatus, type Severity } from "@/stores/findings";
+import { useProjectScan } from "@/stores/projectScan";
 import { toast } from "@/stores/toast";
 import { useWorkspace } from "@/stores/workspace";
+
+function scanToFinding(f: ProjectScanFinding, i: number): Finding {
+  const severity: Severity = f.severity === "error" ? "high" : f.severity === "warning" ? "medium" : "info";
+  return {
+    id: `scan-${i}`,
+    title: `${f.ruleId}${f.cwe ? ` (${f.cwe})` : ""}`,
+    severity,
+    location: `${f.file}:${f.line}`,
+    detail: f.message,
+    status: "open",
+    at: 0,
+  };
+}
+
+function printHtml(html: string): void {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+  iframe.srcdoc = html;
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch {
+      void 0;
+    }
+    setTimeout(() => iframe.remove(), 2000);
+  };
+  document.body.appendChild(iframe);
+}
+
+const STATUS_TONE: Record<FindingStatus, string> = {
+  open: "text-fg-dim",
+  confirmed: "text-rose-300",
+  "false-positive": "text-fg-faint line-through",
+  fixed: "text-emerald-300 line-through",
+};
 
 const SEVERITY_TONE: Record<Severity, string> = {
   critical: "bg-rose-500/15 text-rose-300 border-rose-500/40",
@@ -65,12 +103,24 @@ export function FindingsPanel() {
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const scanCount = useProjectScan((state) => state.findings.length);
+  const canReport = findings.length > 0 || scanCount > 0;
+  const [hideResolved, setHideResolved] = useState(false);
+  const shown = useMemo(
+    () => (hideResolved ? findings.filter((f) => f.status !== "fixed" && f.status !== "false-positive") : findings),
+    [findings, hideResolved],
+  );
 
   const copyReport = async () => {
     if (await copyText(findingsReport(findings))) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
+  };
+
+  const gatherReport = (): Finding[] => {
+    const scan = useProjectScan.getState().findings.map(scanToFinding);
+    return [...findings, ...scan];
   };
 
   const exportHtml = async () => {
@@ -80,10 +130,12 @@ export function FindingsPanel() {
       return;
     }
     const target = `${root}/wide-findings-report.html`;
-    const written = await bridge.writeFile(target, findingsReportHtml(findings));
+    const written = await bridge.writeFile(target, findingsReportHtml(gatherReport()));
     if (written.error) toast.error(t(written.error));
     else toast.success(t("Report saved to wide-findings-report.html."));
   };
+
+  const printReport = () => printHtml(findingsReportHtml(gatherReport()));
 
   return (
     <div className="flex h-full flex-col">
@@ -94,9 +146,19 @@ export function FindingsPanel() {
             <ClipboardCopy className="size-3.5" strokeWidth={1.5} />
           </button>
         )}
-        {findings.length > 0 && (
+        {canReport && (
           <button type="button" onClick={() => void exportHtml()} title={t("Export report (HTML)")} aria-label={t("Export report (HTML)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
             <FileDown className="size-3.5" strokeWidth={1.5} />
+          </button>
+        )}
+        {canReport && (
+          <button type="button" onClick={printReport} title={t("Print / PDF")} aria-label={t("Print / PDF")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
+            <Printer className="size-3.5" strokeWidth={1.5} />
+          </button>
+        )}
+        {findings.length > 0 && (
+          <button type="button" onClick={() => setHideResolved((v) => !v)} aria-pressed={hideResolved} title={t("Hide resolved findings")} aria-label={t("Hide resolved findings")} className={cn("rounded-sm p-1 transition-colors duration-100 hover:bg-hover hover:text-fg", hideResolved ? "text-fg" : "text-fg-faint")}>
+            <Filter className="size-3.5" strokeWidth={1.5} />
           </button>
         )}
         <button type="button" onClick={() => setAdding((v) => !v)} title={t("Add finding")} aria-label={t("Add finding")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
@@ -118,16 +180,31 @@ export function FindingsPanel() {
             {t("Nothing recorded yet. Add an issue, or send one here from the proxy or the comparer.")}
           </p>
         ) : (
-          findings.map((finding) => (
+          shown.map((finding) => (
             <div key={finding.id} className="border-b border-line">
               <button type="button" onClick={() => setOpen(open === finding.id ? null : finding.id)} className="flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors duration-100 hover:bg-hover">
                 <span className={cn("shrink-0 rounded-sm border px-1 py-0.5 text-[9px] uppercase", SEVERITY_TONE[finding.severity])}>
                   {t(finding.severity)}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{t(finding.title)}</span>
+                <span className={cn("min-w-0 flex-1 truncate text-[12px]", STATUS_TONE[finding.status ?? "open"])}>{t(finding.title)}</span>
               </button>
               {open === finding.id && (
                 <div className="px-2 pb-2">
+                  <div className="flex flex-wrap gap-1 pb-1.5">
+                    {FINDING_STATUSES.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => useFindings.getState().update(finding.id, { status: s })}
+                        className={cn(
+                          "rounded-sm border px-1.5 py-0.5 text-[10px] transition-colors duration-100",
+                          (finding.status ?? "open") === s ? "border-line bg-selected text-fg-bright" : "border-line text-fg-faint hover:bg-hover hover:text-fg",
+                        )}
+                      >
+                        {t(s)}
+                      </button>
+                    ))}
+                  </div>
                   {finding.location && (
                     <p className="truncate pb-1 font-mono text-[10px] text-fg-faint" title={finding.location}>
                       {finding.location}

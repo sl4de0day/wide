@@ -9,7 +9,7 @@ const EXTENSIONS_FILE = () =>
 
 
 
-const OPTIONAL_EXTENSIONS = new Set(["codeberg", "github", "comment-cleaner", "javascript", "typescript", "html", "css", "php", "python", "csharp", "java", "go", "ruby", "rust", "elixir", "kotlin", "sql", "graphql", "wasm", "scala", "erlang", "vue", "svelte", "angular", "ai-assistant", "trufflehog", "nuclei", "ffuf", "katana", "httpx", "dalfox", "subfinder", "interactsh", "sqlmap", "arjun", "curlconverter", "retirejs", "secretfinder", "jwt-tool", "commix", "sublist3r", "seclists", "python-debugger", "go-debugger", "ruby-debugger", "cyberchef", "wappalyzer", "js-miner", "selector-test"]);
+const OPTIONAL_EXTENSIONS = new Set(["codeberg", "github", "comment-cleaner", "markdown-viewer", "javascript", "typescript", "html", "css", "php", "python", "csharp", "java", "go", "ruby", "rust", "elixir", "kotlin", "sql", "graphql", "wasm", "scala", "erlang", "vue", "svelte", "angular", "ai-assistant", "trufflehog", "nuclei", "ffuf", "katana", "httpx", "dalfox", "subfinder", "interactsh", "sqlmap", "arjun", "curlconverter", "retirejs", "secretfinder", "jwt-tool", "commix", "sublist3r", "seclists", "python-debugger", "go-debugger", "ruby-debugger", "cyberchef", "wappalyzer", "js-miner", "selector-test"]);
 
 
 

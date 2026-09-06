@@ -1,5 +1,6 @@
 import { parseCurl } from "@/lib/curl";
 import { parseHttpFile } from "@/editor/features/httpFile";
+import { parseYaml } from "@/lib/yaml";
 import { newRequest, type Collection, type Node, type Param, type PitcherRequest, type RawType } from "@/stores/pitcher";
 
 let seq = 0;
@@ -211,19 +212,91 @@ function importInsomnia(doc: { resources?: InsoResource[] }): Collection[] {
   return workspaces.map((ws) => collection(ws.name ?? "Imported (Insomnia)", children(ws._id)));
 }
 
+interface OpenApiSchema {
+  $ref?: string;
+  type?: string;
+  format?: string;
+  example?: unknown;
+  default?: unknown;
+  enum?: unknown[];
+  properties?: Record<string, OpenApiSchema>;
+  items?: OpenApiSchema;
+  allOf?: OpenApiSchema[];
+  oneOf?: OpenApiSchema[];
+  anyOf?: OpenApiSchema[];
+}
 interface OpenApiParam {
-  name: string;
-  in: string;
+  $ref?: string;
+  name?: string;
+  in?: string;
   required?: boolean;
   example?: unknown;
-  schema?: { example?: unknown; default?: unknown };
+  schema?: OpenApiSchema;
 }
 interface OpenApiOp {
   operationId?: string;
   summary?: string;
   tags?: string[];
   parameters?: OpenApiParam[];
-  requestBody?: { content?: Record<string, unknown> };
+  requestBody?: { content?: Record<string, { schema?: OpenApiSchema; example?: unknown }> };
+}
+
+function resolveRef(doc: Record<string, unknown>, ref: string): unknown {
+  if (!ref.startsWith("#/")) return null;
+  let node: unknown = doc;
+  for (const seg of ref.slice(2).split("/")) {
+    const key = seg.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (!node || typeof node !== "object") return null;
+    node = (node as Record<string, unknown>)[key];
+  }
+  return node;
+}
+
+function deref(doc: Record<string, unknown>, schema: OpenApiSchema | undefined, seen: Set<string>): OpenApiSchema | undefined {
+  if (!schema || typeof schema !== "object") return schema;
+  if (schema.$ref) {
+    if (seen.has(schema.$ref)) return undefined;
+    seen.add(schema.$ref);
+    return deref(doc, resolveRef(doc, schema.$ref) as OpenApiSchema | undefined, seen);
+  }
+  return schema;
+}
+
+function exampleFromSchema(doc: Record<string, unknown>, raw: OpenApiSchema | undefined, depth: number, seen: Set<string>): unknown {
+  if (depth > 6) return null;
+  const schema = deref(doc, raw, new Set(seen));
+  if (!schema) return null;
+  if (schema.example !== undefined) return schema.example;
+  if (schema.default !== undefined) return schema.default;
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  const merged = schema.allOf ?? schema.oneOf ?? schema.anyOf;
+  if (Array.isArray(merged) && merged.length) {
+    if (schema.allOf) {
+      const out: Record<string, unknown> = {};
+      for (const part of merged) {
+        const value = exampleFromSchema(doc, part, depth + 1, seen);
+        if (value && typeof value === "object" && !Array.isArray(value)) Object.assign(out, value);
+      }
+      return out;
+    }
+    return exampleFromSchema(doc, merged[0], depth + 1, seen);
+  }
+  const type = schema.type ?? (schema.properties ? "object" : undefined);
+  if (type === "object" || schema.properties) {
+    const out: Record<string, unknown> = {};
+    for (const [key, prop] of Object.entries(schema.properties ?? {})) out[key] = exampleFromSchema(doc, prop, depth + 1, seen);
+    return out;
+  }
+  if (type === "array") return [exampleFromSchema(doc, schema.items, depth + 1, seen)];
+  if (type === "integer" || type === "number") return 0;
+  if (type === "boolean") return false;
+  if (type === "string") {
+    if (schema.format === "date-time") return "1970-01-01T00:00:00Z";
+    if (schema.format === "date") return "1970-01-01";
+    if (schema.format === "uuid") return "00000000-0000-0000-0000-000000000000";
+    return "";
+  }
+  return null;
 }
 
 function importOpenApi(doc: Record<string, unknown>): Collection[] {
@@ -243,6 +316,11 @@ function importOpenApi(doc: Record<string, unknown>): Collection[] {
   const byTag = new Map<string, Node[]>();
   const untagged: Node[] = [];
   const METHODS = ["get", "post", "put", "patch", "delete", "head", "options"];
+  const scalarExample = (p: OpenApiParam): string => {
+    if (p.example !== undefined) return String(p.example);
+    const value = exampleFromSchema(doc, p.schema, 0, new Set());
+    return value === null || value === undefined || typeof value === "object" ? "" : String(value);
+  };
 
   for (const [path, ops] of Object.entries(paths)) {
     if (!ops || typeof ops !== "object") continue;
@@ -250,20 +328,38 @@ function importOpenApi(doc: Record<string, unknown>): Collection[] {
       const op = ops[method];
       if (!op) continue;
       const name = op.summary || op.operationId || `${method.toUpperCase()} ${path}`;
-      const r = mkRequest(name, method, `{{baseUrl}}${path}`);
-      const params = op.parameters ?? [];
-      r.params = params
-        .filter((p) => p.in === "query")
-        .map((p) => param(p.name, String(p.example ?? p.schema?.example ?? p.schema?.default ?? ""), Boolean(p.required)));
-      r.headers = params
-        .filter((p) => p.in === "header")
-        .map((p) => param(p.name, String(p.example ?? p.schema?.example ?? ""), Boolean(p.required)));
-      if (op.requestBody?.content) {
-        const types = Object.keys(op.requestBody.content);
-        if (types.some((t) => t.includes("json"))) {
+      const urlPath = path.replace(/\{([^}]+)\}/g, "{{$1}}");
+      const r = mkRequest(name, method, `{{baseUrl}}${urlPath}`);
+      const params = (op.parameters ?? []).map((p) => (p.$ref ? (resolveRef(doc, p.$ref) as OpenApiParam) : p)).filter((p): p is OpenApiParam => Boolean(p));
+      r.params = params.filter((p) => p.in === "query").map((p) => param(p.name ?? "", scalarExample(p), Boolean(p.required)));
+      r.headers = params.filter((p) => p.in === "header").map((p) => param(p.name ?? "", scalarExample(p), Boolean(p.required)));
+      if (isV3 && op.requestBody?.content) {
+        const content = op.requestBody.content;
+        const jsonKey = Object.keys(content).find((t) => t.includes("json"));
+        const formKey = Object.keys(content).find((t) => t.includes("x-www-form-urlencoded"));
+        if (jsonKey) {
+          const media = content[jsonKey];
           r.body.mode = "raw";
           r.body.rawType = "json";
-          r.body.raw = "{}";
+          const example = media.example ?? exampleFromSchema(doc, media.schema, 0, new Set());
+          r.body.raw = JSON.stringify(example ?? {}, null, 2);
+        } else if (formKey) {
+          const media = content[formKey];
+          const props = deref(doc, media.schema, new Set())?.properties ?? {};
+          r.body.mode = "form";
+          r.body.form = Object.keys(props).map((k) => param(k, ""));
+        }
+      } else if (!isV3) {
+        const bodyParam = params.find((p) => p.in === "body");
+        if (bodyParam?.schema) {
+          r.body.mode = "raw";
+          r.body.rawType = "json";
+          r.body.raw = JSON.stringify(exampleFromSchema(doc, bodyParam.schema, 0, new Set()) ?? {}, null, 2);
+        }
+        const formParams = params.filter((p) => p.in === "formData");
+        if (formParams.length) {
+          r.body.mode = "form";
+          r.body.form = formParams.map((p) => param(p.name ?? "", scalarExample(p)));
         }
       }
       const tag = op.tags?.[0];
@@ -354,6 +450,13 @@ export function importAny(text: string): { collections: Collection[]; format: st
 
     if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) {
       if (/^curl\b/i.test(trimmed)) return { collections: importCurl(trimmed), format: "curl" };
+      if (/^\s*(openapi|swagger)\s*:/m.test(text) || (/^\s*paths\s*:/m.test(text) && /^\s*info\s*:/m.test(text))) {
+        const doc = parseYaml(text);
+        if (doc && typeof doc === "object") {
+          const record = doc as Record<string, unknown>;
+          if (record.openapi || record.swagger || record.paths) return { collections: importOpenApi(record), format: "openapi" };
+        }
+      }
       return { collections: importHttpFile(text), format: "http" };
     }
     let doc: Record<string, unknown>;

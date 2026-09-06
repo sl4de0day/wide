@@ -4,6 +4,10 @@ import { useWorkspace } from "./workspace";
 
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 
+export type FindingStatus = "open" | "confirmed" | "false-positive" | "fixed";
+
+export const FINDING_STATUSES: FindingStatus[] = ["open", "confirmed", "false-positive", "fixed"];
+
 export interface Finding {
   id: string;
   title: string;
@@ -12,6 +16,8 @@ export interface Finding {
   location: string;
 
   detail: string;
+
+  status?: FindingStatus;
 
   at: number;
 }
@@ -90,6 +96,7 @@ export const useFindings = create<FindingsState>((set, get) => ({
       severity: finding.severity ?? "info",
       location: finding.location ?? "",
       detail: finding.detail ?? "",
+      status: finding.status ?? "open",
       at: finding.at ?? Date.now(),
     };
     set((state) => {

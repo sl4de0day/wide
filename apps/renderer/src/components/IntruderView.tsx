@@ -1,4 +1,4 @@
-import { ArrowDownUp, ChevronDown, ChevronRight, Crosshair, Play, Plus, Repeat2, Square, X } from "lucide-react";
+import { ArrowDownUp, ChevronDown, ChevronRight, Crosshair, Download, Flag, Play, Plus, Repeat2, Square, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
@@ -16,7 +16,10 @@ import { cn } from "@/lib/utils";
 import { useCatcher } from "@/stores/catcher";
 import { useComparer } from "@/stores/comparer";
 import { useDecoder } from "@/stores/decoder";
+import { useFindings } from "@/stores/findings";
 import { useIntruder } from "@/stores/intruder";
+import { toast } from "@/stores/toast";
+import { useWorkspace } from "@/stores/workspace";
 
 interface Row {
   index: number;
@@ -336,6 +339,69 @@ export function IntruderView() {
     const parsed = parseHttpMessage(row.request);
     if (parsed) useCatcher.getState().addRepeater(parsed);
   };
+  const saveConfig = () => {
+    const root = useWorkspace.getState().root;
+    if (!root) {
+      toast.error(t("Open a project first."));
+      return;
+    }
+    const config = JSON.stringify(
+      { version: 1, template, mode, wordlists, processors, grep: grepText, extract: grepExtract, concurrency, delayMs, useSession, rangeFrom, rangeTo },
+      null,
+      2,
+    );
+    void bridge.writeFile(`${root}/.wide/intruder-config.json`, config).then((reply) => {
+      if (reply.error) toast.error(t(reply.error));
+      else toast.success(t("Intruder configuration saved."));
+    });
+  };
+  const loadConfig = () => {
+    const root = useWorkspace.getState().root;
+    if (!root) {
+      toast.error(t("Open a project first."));
+      return;
+    }
+    void bridge.readFile(`${root}/.wide/intruder-config.json`).then((file) => {
+      if (file.error || !file.content) {
+        toast.error(t("No saved Intruder configuration found."));
+        return;
+      }
+      try {
+        const c = JSON.parse(file.content);
+        if (typeof c.template === "string") setTemplate(c.template);
+        if (c.mode === "sniper" || c.mode === "ram" || c.mode === "pitchfork" || c.mode === "cluster") setMode(c.mode);
+        if (Array.isArray(c.wordlists)) setWordlists(c.wordlists.length ? (c.wordlists as string[]) : [""]);
+        if (Array.isArray(c.processors)) setProcessors(c.processors as PayloadRule[]);
+        if (typeof c.grep === "string") setGrepText(c.grep);
+        if (typeof c.extract === "string") setGrepExtract(c.extract);
+        if (typeof c.concurrency === "number") setConcurrency(c.concurrency);
+        if (typeof c.delayMs === "number") setDelayMs(c.delayMs);
+        if (typeof c.useSession === "boolean") setUseSession(c.useSession);
+        if (typeof c.rangeFrom === "string") setRangeFrom(c.rangeFrom);
+        if (typeof c.rangeTo === "string") setRangeTo(c.rangeTo);
+        toast.success(t("Intruder configuration loaded."));
+      } catch {
+        toast.error(t("That file is not a valid Intruder configuration."));
+      }
+    });
+  };
+  const flagRow = (row: Row) => {
+    const firstLine = row.request.split("\n")[0] ?? "";
+    const url = firstLine.split(/\s+/)[1] ?? "";
+    const hits = grepPhrases.filter((_, i) => row.grepHits[i]);
+    const detail = [
+      `Payload: ${row.payload}`,
+      `Status: ${row.status}   Length: ${row.length}   Time: ${row.ms}ms`,
+      row.extracted ? `Extracted: ${row.extracted}` : "",
+      hits.length ? `Matched: ${hits.join(", ")}` : "",
+      "",
+      row.request,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    useFindings.getState().add({ title: t("Intruder hit: {payload}", { payload: row.payload }), severity: "medium", location: url, detail });
+    toast.success(t("Sent to Findings."));
+  };
   const addRule = (type: PayloadRule["type"]) => {
     const base = { id: freshRuleId() };
     const rule: PayloadRule =
@@ -365,6 +431,24 @@ export function IntruderView() {
         <Crosshair className="size-4 shrink-0 text-fg-faint" strokeWidth={1.75} />
         <span className="flex-1 text-[12px] font-medium text-fg">{t("Intruder")}</span>
         <span className="text-[11px] text-fg-faint">{running || done > 0 ? `${done}/${total}` : `${total} ${t("requests")}`}</span>
+        <button
+          type="button"
+          onClick={saveConfig}
+          title={t("Save the Intruder configuration")}
+          aria-label={t("Save the Intruder configuration")}
+          className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+        >
+          <Download className="size-3.5" strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          onClick={loadConfig}
+          title={t("Load a saved Intruder configuration")}
+          aria-label={t("Load a saved Intruder configuration")}
+          className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+        >
+          <Upload className="size-3.5" strokeWidth={1.5} />
+        </button>
       </div>
 
       <div className="grid min-h-0 shrink-0 grid-cols-2 gap-2 border-b border-line p-2">
@@ -601,6 +685,10 @@ export function IntruderView() {
             <button type="button" onClick={() => sendRowToRepeater(chosen)} className="flex items-center gap-1 rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-fg-dim hover:bg-hover hover:text-fg">
               <Repeat2 className="size-3" strokeWidth={1.75} />
               {t("Repeater")}
+            </button>
+            <button type="button" onClick={() => flagRow(chosen)} className="flex items-center gap-1 rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-fg-dim hover:bg-hover hover:text-fg">
+              <Flag className="size-3" strokeWidth={1.75} />
+              {t("Findings")}
             </button>
             <button type="button" onClick={() => useDecoder.getState().openDecoder(chosen.body)} className="rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-fg-dim hover:bg-hover hover:text-fg">
               {t("Decoder")}

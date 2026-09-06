@@ -1,46 +1,28 @@
 import { CircleAlert, Server, ShieldAlert, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { languageLabel } from "@/editor/languages";
-import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn, normalisePath } from "@/lib/utils";
 import { useDiagnostics } from "@/stores/diagnostics";
 import { useActiveTab, useEditor } from "@/stores/editor";
 import { useProjectScan } from "@/stores/projectScan";
+import { useRemote } from "@/stores/remote";
 import { useSettings } from "@/stores/settings";
 import { useWorkspace } from "@/stores/workspace";
 
 function RemoteChip() {
   const t = useT();
-  const [host, setHost] = useState<string | null>(null);
+  const active = useRemote((state) => state.profiles.find((p) => p.id === state.activeId) ?? null);
 
-  useEffect(() => {
-    let alive = true;
-    void bridge
-      .remoteGet()
-      .then((reply) => {
-        if (!alive || !reply.ok) return;
-        const config = reply.config;
-        setHost(config?.currentlyRemote ? config.host ?? t("remote") : null);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [t]);
-
-  if (!host) return null;
+  if (!active) return null;
   return (
-    <button
-      type="button"
-      title={t("The backend is running on {host}. Open Settings → Remote.", { host })}
-      onClick={() => useEditor.getState().openSettings()}
-      className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-accent transition-colors duration-100 hover:bg-hover"
+    <span
+      title={t("The terminal is connected to {host}.", { host: active.host })}
+      className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-accent"
     >
       <Server className="size-3" strokeWidth={2} />
-      <span className="max-w-40 truncate">{host}</span>
-    </button>
+      <span className="max-w-40 truncate">{active.name || active.host}</span>
+    </span>
   );
 }
 

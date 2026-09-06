@@ -2838,7 +2838,7 @@ function registerSecScanHandlers() {
           sink.re.lastIndex = 0;
           const m = sink.re.exec(line);
           if (!m) continue;
-          const win = (line + " " + (lines[i + 1] || "") + " " + (lines[i + 2] || "")).replace(sink.re, "");
+          const win = (line + " " + (lines[i + 1] || "") + " " + (lines[i + 2] || "")).replace(sink.re, " ");
           if (nameRe.test(win)) {
             emit(i + 1, m.index, {
               id: sink.id,
@@ -2876,7 +2876,7 @@ function registerSecScanHandlers() {
           sink.re.lastIndex = 0;
           const m = sink.re.exec(text);
           if (!m) continue;
-          if (nameRe.test(text.replace(sink.re, ""))) {
+          if (nameRe.test(text.replace(sink.re, " "))) {
             emit(span.start + 1, 0, {
               id: sink.id,
               cwe: sink.cwe,
@@ -2974,7 +2974,7 @@ function registerSecScanHandlers() {
           sink.re.lastIndex = 0;
           const mm = sink.re.exec(line);
           if (!mm) continue;
-          const win = (line + " " + (bodyLines[i + 1] || "") + " " + (bodyLines[i + 2] || "")).replace(sink.re, "");
+          const win = (line + " " + (bodyLines[i + 1] || "") + " " + (bodyLines[i + 2] || "")).replace(sink.re, " ");
           if (nameRe.test(win)) { result.push({ slot: s, cwe: sink.cwe, message: sink.message, bodyLine: i }); hit = true; break; }
         }
         if (hit) break;
@@ -3025,15 +3025,85 @@ function registerSecScanHandlers() {
 
   function secBaseName(p) { return String(p).split(/[\\/]/).pop(); }
 
-  function crossFilePropagate(entries) {
+  const FLOW_KEYWORD = /^(?:if|for|while|switch|catch|function|return|def|fn|func|foreach|elsif|unless|new|typeof|await|throw)$/;
+
+  function functionFlows(content, lang) {
+    const lines = content.split("\n");
+    const defs = functionDefs(content, lang);
     const out = [];
-    const byName = new Map();
-    for (const e of entries) {
-      for (const s of e.summaries) {
-        if (!byName.has(s.name)) byName.set(s.name, []);
-        byName.get(s.name).push({ ...s, file: e.file });
+    for (let i = 0; i < defs.length; i += 1) {
+      const body = defBody(lines, defs, i);
+      const slots = defs[i].slots;
+      for (let s = 0; s < slots.length; s += 1) {
+        const seed = [...slots[s]];
+        if (!seed.length) continue;
+        const tainted = collectTainted(body, seed);
+        if (!tainted.size) continue;
+        const nameRe = new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b");
+        const callRe = /(?:^|[^.\w$])([A-Za-z_]\w*)\s*\(/g;
+        for (let li = 0; li < body.length; li += 1) {
+          const line = body[li];
+          if (line.length > SEC_MAX_LINE || isSecComment(line)) continue;
+          let m;
+          callRe.lastIndex = 0;
+          while ((m = callRe.exec(line))) {
+            const callee = m[1];
+            if (FLOW_KEYWORD.test(callee) || callee === defs[i].name) continue;
+            const open = line.indexOf("(", m.index + m[0].length - 1);
+            if (open === -1) continue;
+            const args = splitArgs(balancedArgs(line, open));
+            args.forEach((a, idx) => {
+              if (SANITISER_RE.test(a)) return;
+              if (nameRe.test(a)) out.push({ name: defs[i].name, slot: s, callee, calleeSlot: idx, line: defs[i].line + li + 1 });
+            });
+          }
+        }
       }
     }
+    return out;
+  }
+
+  function propagatedSummaries(entries) {
+    const summaries = [];
+    const has = new Set();
+    const addSummary = (name, slot, cwe, message, file, line) => {
+      const key = name + ":" + slot + ":" + cwe + ":" + file;
+      if (has.has(key)) return false;
+      has.add(key);
+      summaries.push({ name, slot, cwe, message, file, line });
+      return true;
+    };
+    for (const e of entries) for (const s of e.summaries || []) addSummary(s.name, s.slot, s.cwe, s.message, e.file, s.line);
+    const flows = [];
+    for (const e of entries) for (const f of e.flows || []) flows.push({ ...f, file: e.file });
+    const byName = new Map();
+    const reindex = () => {
+      byName.clear();
+      for (const s of summaries) {
+        if (!byName.has(s.name)) byName.set(s.name, []);
+        byName.get(s.name).push(s);
+      }
+    };
+    for (let pass = 0; pass < 6; pass += 1) {
+      reindex();
+      let changed = false;
+      for (const f of flows) {
+        const targets = byName.get(f.callee);
+        if (!targets) continue;
+        for (const t of targets) {
+          if (t.slot !== f.calleeSlot) continue;
+          if (addSummary(f.name, f.slot, t.cwe, t.message, f.file, f.line)) changed = true;
+        }
+      }
+      if (!changed || summaries.length >= SEC_MAX_FINDINGS * 4) break;
+    }
+    reindex();
+    return byName;
+  }
+
+  function crossFilePropagate(entries) {
+    const out = [];
+    const byName = propagatedSummaries(entries);
     const seen = new Set();
     for (const e of entries) {
       for (const call of e.calls) {
@@ -3065,6 +3135,7 @@ function registerSecScanHandlers() {
       single: await scanContent(file, content, lang, config, sup),
       summaries: fileSummaries(content, lang),
       calls: taintedCallSites(content, lang),
+      flows: functionFlows(content, lang),
     };
   }
 
@@ -3089,6 +3160,78 @@ function registerSecScanHandlers() {
     return false;
   }
   const SEC_MANIFESTS = new Set(["requirements.txt", "pom.xml", "package-lock.json", "go.mod"]);
+
+  let secProjectOsv = null;
+  const SEC_OSV_CACHE = new Map();
+  const OSV_ECOSYSTEM = { npm: "npm", pypi: "pip", pip: "pip", maven: "maven", go: "go" };
+
+  function parseOsvDoc(parsed) {
+    const db = { npm: [], pip: [], maven: [], go: [] };
+    if (!parsed || typeof parsed !== "object") return db;
+    if (!Array.isArray(parsed) && (parsed.npm || parsed.pip || parsed.maven || parsed.go)) {
+      for (const eco of ["npm", "pip", "maven", "go"]) {
+        if (!Array.isArray(parsed[eco])) continue;
+        for (const v of parsed[eco]) {
+          if (v && typeof v === "object" && v.name && v.lt) {
+            db[eco].push({ name: String(v.name), ge: v.ge ? String(v.ge) : undefined, lt: String(v.lt), id: String(v.id || "advisory"), cwe: v.cwe || "CWE-1395", sev: v.sev || "medium", note: String(v.note || "listed in the project advisory snapshot") });
+          }
+        }
+      }
+      return db;
+    }
+    const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.entries) ? parsed.entries : Array.isArray(parsed.vulns) ? parsed.vulns : [];
+    for (const entry of list) {
+      if (!entry || typeof entry !== "object") continue;
+      const id = String(entry.id || (Array.isArray(entry.aliases) ? entry.aliases[0] : "") || "advisory");
+      const cwe = (entry.database_specific && Array.isArray(entry.database_specific.cwe_ids) && entry.database_specific.cwe_ids[0]) || "CWE-1395";
+      let sev = "medium";
+      const dsev = entry.database_specific && entry.database_specific.severity;
+      if (typeof dsev === "string") sev = dsev.toLowerCase();
+      else if (Array.isArray(entry.severity) && entry.severity.length) sev = "high";
+      const note = String(entry.summary || entry.details || "listed in the OSV snapshot").split("\n")[0].slice(0, 200);
+      for (const aff of Array.isArray(entry.affected) ? entry.affected : []) {
+        const pkg = aff && aff.package;
+        if (!pkg || !pkg.ecosystem || !pkg.name) continue;
+        const eco = OSV_ECOSYSTEM[String(pkg.ecosystem).toLowerCase()];
+        if (!eco) continue;
+        let introduced;
+        let fixed;
+        for (const range of Array.isArray(aff.ranges) ? aff.ranges : []) {
+          for (const ev of Array.isArray(range.events) ? range.events : []) {
+            if (ev.introduced && ev.introduced !== "0") introduced = ev.introduced;
+            if (ev.fixed) fixed = ev.fixed;
+          }
+        }
+        if (!fixed) continue;
+        db[eco].push({ name: String(pkg.name), ge: introduced, lt: String(fixed), id, cwe, sev, note });
+      }
+    }
+    return db;
+  }
+
+  async function readSecOsv(root) {
+    if (!root || typeof root !== "string") return null;
+    const file = node_path.join(root, ".wide", "osv.json");
+    let stamp = "none";
+    try {
+      const stat = await promises.stat(file);
+      stamp = `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      void 0;
+    }
+    const cached = SEC_OSV_CACHE.get(root);
+    if (cached && cached.stamp === stamp) return cached.db;
+    let db = null;
+    if (stamp !== "none") {
+      try {
+        db = parseOsvDoc(JSON.parse(await promises.readFile(file, "utf8")));
+      } catch {
+        db = null;
+      }
+    }
+    SEC_OSV_CACHE.set(root, { stamp, db });
+    return db;
+  }
 
   const SEC_VULN_DB = {
     npm: [
@@ -3127,15 +3270,22 @@ function registerSecScanHandlers() {
     }
     return 0;
   }
+  function vulnList(eco) {
+    const out = [];
+    if (SEC_VULN_DB[eco]) out.push(...SEC_VULN_DB[eco]);
+    if (typeof OSV_SNAPSHOT === "object" && OSV_SNAPSHOT && OSV_SNAPSHOT[eco]) out.push(...OSV_SNAPSHOT[eco]);
+    if (secProjectOsv && secProjectOsv[eco]) out.push(...secProjectOsv[eco]);
+    return out;
+  }
   function matchVuln(eco, name, version) {
-    const list = SEC_VULN_DB[eco] || [];
+    const list = vulnList(eco);
     const lname = String(name).toLowerCase();
     const clean = cleanVer(version);
     if (!clean) return null;
     for (const v of list) {
-      if (v.name !== lname) continue;
-      if (v.ge && verCmp(clean, v.ge) < 0) continue;
-      if (verCmp(clean, v.lt) < 0) return v;
+      if (String(v.name).toLowerCase() !== lname) continue;
+      if (v.ge && verCmp(clean, cleanVer(v.ge)) < 0) continue;
+      if (verCmp(clean, cleanVer(v.lt)) < 0) return v;
     }
     return null;
   }
@@ -3324,6 +3474,7 @@ function registerSecScanHandlers() {
   electron.ipcMain.handle("security:scanProject", async (_event, root) => {
     if (!root || typeof root !== "string") return { findings: [] };
     const config = await readSecConfig(root);
+    secProjectOsv = await readSecOsv(root);
     const baseline = await readSecBaseline(root);
     let fileMap = secCache.get(root);
     if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
@@ -3342,7 +3493,7 @@ function registerSecScanHandlers() {
           const pcached = fileMap.get(osFile);
           if (pcached && pcached.mtime === pstats.mtimeMs && pcached.size === pstats.size) continue;
           let pcontent; try { pcontent = await promises.readFile(file, "utf8"); } catch { continue; }
-          fileMap.set(osFile, { file: osFile, lang: "manifest", single: auditManifest(osFile, pcontent), summaries: [], calls: [], mtime: pstats.mtimeMs, size: pstats.size });
+          fileMap.set(osFile, { file: osFile, lang: "manifest", single: auditManifest(osFile, pcontent), summaries: [], calls: [], flows: [], mtime: pstats.mtimeMs, size: pstats.size });
           continue;
         }
         if (!lang) continue;
@@ -3367,6 +3518,7 @@ function registerSecScanHandlers() {
   electron.ipcMain.handle("security:rescanFile", async (_event, root, filePath, content) => {
     if (!root || typeof root !== "string" || typeof filePath !== "string") return { findings: [] };
     const config = await readSecConfig(root);
+    secProjectOsv = await readSecOsv(root);
     const baseline = await readSecBaseline(root);
     let fileMap = secCache.get(root);
     if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
@@ -3392,7 +3544,7 @@ function registerSecScanHandlers() {
         try { const st = await promises.stat(filePath); mtime = st.mtimeMs; size = st.size; text = await promises.readFile(filePath, "utf8"); } catch { text = null; }
       }
       if (text !== null && size <= SEC_MAX_BYTES) {
-        fileMap.set(osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text), summaries: [], calls: [], mtime, size });
+        fileMap.set(osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text), summaries: [], calls: [], flows: [], mtime, size });
       }
     }
     return collectFindings(fileMap, config, baseline, root);

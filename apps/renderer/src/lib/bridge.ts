@@ -498,18 +498,19 @@ export interface DebugFrame {
 }
 
 
-export interface RemoteConfig {
+export interface RemoteProfile {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  user: string;
+  keyPath: string;
+  cwd: string;
+}
 
-  enabled?: boolean;
-
-  host?: string;
-
-  remotePath?: string;
-
-  node?: string;
-
-
-  currentlyRemote?: boolean;
+export interface RemoteDirEntry {
+  name: string;
+  dir: boolean;
 }
 
 
@@ -874,7 +875,7 @@ export interface HostApi {
   ): Promise<{ actions: CodeAction[] }>;
 
 
-  terminalStart(options: { cols: number; rows: number; cwd?: string; shell?: string }): Promise<TerminalSession>;
+  terminalStart(options: { cols: number; rows: number; cwd?: string; shell?: string; remote?: RemoteProfile }): Promise<TerminalSession>;
   terminalWrite(id: number, data: string): Promise<unknown>;
   terminalResize(id: number, cols: number, rows: number): Promise<unknown>;
   terminalDispose(id: number): Promise<unknown>;
@@ -1052,9 +1053,14 @@ export interface HostApi {
 
 
 
-  remoteGet(): Promise<Ok<{ config?: RemoteConfig }>>;
-
-  remoteSet(config: RemoteConfig): Promise<Ok<{ config?: RemoteConfig }>>;
+  remoteList(): Promise<Ok<{ profiles?: RemoteProfile[] }>>;
+  remoteSave(profile: Partial<RemoteProfile>): Promise<Ok<{ profile?: RemoteProfile }>>;
+  remoteRemove(id: string): Promise<Ok<Record<string, never>>>;
+  remoteTest(profile: Partial<RemoteProfile>): Promise<Ok<{ output?: string }>>;
+  remoteExec(profile: Partial<RemoteProfile>, command: string): Promise<Ok<{ code?: number; stdout?: string; stderr?: string }>>;
+  remoteListDir(profile: Partial<RemoteProfile>, dir: string): Promise<Ok<{ path?: string; entries?: RemoteDirEntry[] }>>;
+  remoteReadFile(profile: Partial<RemoteProfile>, filePath: string): Promise<Ok<{ content?: string }>>;
+  remoteWriteFile(profile: Partial<RemoteProfile>, filePath: string, content: string): Promise<Ok<Record<string, never>>>;
 
 
 
@@ -1406,8 +1412,14 @@ const fallback = {
   debugProperties: async () => (warn(), { properties: [] }),
   debugEvaluate: async () => (warn(), { value: "" }),
   debugSetBreakpoint: async () => (warn(), { ok: false, error: "No bridge" }),
-  remoteGet: async () => (warn(), { ok: false, error: "No bridge" }),
-  remoteSet: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteList: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteSave: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteRemove: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteTest: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteExec: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteListDir: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteReadFile: async () => (warn(), { ok: false, error: "No bridge" }),
+  remoteWriteFile: async () => (warn(), { ok: false, error: "No bridge" }),
   updateCheck: async () => (warn(), { ok: false, error: "No bridge" }),
   updateOpen: async () => (warn(), { ok: false, error: "No bridge" }),
   updateDownload: async () => (warn(), { ok: false, error: "No bridge" }),

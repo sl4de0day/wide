@@ -1,6 +1,6 @@
 {
   "name": "@wide/renderer",
-  "version": "0.76926",
+  "version": "0.86926",
   "private": true,
   "type": "module",
   "scripts": {
@@ -41,6 +41,7 @@
     "codemirror-lang-elixir": "^4.0.1",
     "graphql": "^16.14.2",
     "lucide-react": "^0.487.0",
+    "marked": "^14.1.4",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "tailwind-merge": "^3.0.2",

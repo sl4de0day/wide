@@ -1,4 +1,4 @@
-import { ChevronDown, Eraser, Play, X } from "lucide-react";
+import { ChevronDown, Eraser, Eye, Play, X } from "lucide-react";
 import { MediaView } from "./MediaView";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -15,6 +15,7 @@ import {
   DIFF_PATH,
   EXTENSION_PATH,
   isDirty,
+  MD_PREVIEW_PATH,
   useActiveTab,
   useEditor,
   type FileTab,
@@ -34,6 +35,7 @@ const CatcherView = lazy(() => import("./CatcherView").then((m) => ({ default: m
 const PitcherView = lazy(() => import("./pitcher/PitcherView").then((m) => ({ default: m.PitcherView })));
 const BrowserView = lazy(() => import("./BrowserView").then((m) => ({ default: m.BrowserView })));
 const CyberChefView = lazy(() => import("./CyberChefView").then((m) => ({ default: m.CyberChefView })));
+const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((m) => ({ default: m.MarkdownPreview })));
 const DiffView = lazy(() => import("@/panels/DiffView").then((m) => ({ default: m.DiffView })));
 const ExtensionView = lazy(() => import("./ExtensionView").then((m) => ({ default: m.ExtensionView })));
 const SssfView = lazy(() => import("./SssfView").then((m) => ({ default: m.SssfView })));
@@ -84,6 +86,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
   const setActive = useEditor((state) => state.setActive);
   const root = useWorkspace((state) => state.root);
   const hasCleaner = useExtensions((state) => state.installed.has("comment-cleaner"));
+  const hasMarkdownViewer = useExtensions((state) => state.installed.has("markdown-viewer"));
 
   const [notice, setNotice] = useState("");
 
@@ -165,6 +168,17 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
               className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg-bright"
             >
               <Eraser className="size-3" strokeWidth={1.75} />
+            </button>
+          )}
+          {hasMarkdownViewer && tab.kind === "file" && /\.(?:md|markdown|mdx)$/i.test(tab.name) && (
+            <button
+              type="button"
+              title={t("Preview Markdown")}
+              aria-label={t("Preview Markdown")}
+              onClick={(e) => { e.stopPropagation(); useEditor.getState().openMarkdownPreview(tab.path, tab.name); }}
+              className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg-bright"
+            >
+              <Eye className="size-3" strokeWidth={1.75} />
             </button>
           )}
           {(() => {
@@ -340,6 +354,8 @@ export function EditorArea({ onOpenPanel }: { onOpenPanel?: (id: string) => void
           <PitcherView />
         ) : tab.kind === "cyberchef" ? (
           <CyberChefView />
+        ) : tab.kind === "markdown-preview" ? (
+          <MarkdownPreview sourcePath={tab.path.slice(MD_PREVIEW_PATH.length)} />
         ) : tab.kind === "media" ? (
           <MediaView key={tab.path} tab={tab} />
         ) : tab.kind === "diff" ? (

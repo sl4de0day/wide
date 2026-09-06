@@ -1,7 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { bridge, type RemoteConfig } from "@/lib/bridge";
+import { bridge } from "@/lib/bridge";
 import { LANGUAGES, useT, type Language } from "@/lib/i18n";
 import { THEMES, type ThemeId } from "@/lib/themes";
 import { formatCombo, shortcutFor, useCommandPalette } from "@/stores/commands";
@@ -233,95 +233,6 @@ function ThemePicker({
   );
 }
 
-function RemoteSection() {
-  const t = useT();
-  const [config, setConfig] = useState<RemoteConfig>({ node: "node" });
-  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let alive = true;
-    bridge
-      .remoteGet()
-      .then((reply) => {
-        if (alive && reply.ok && reply.config) setConfig({ node: "node", ...reply.config });
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const field = (key: keyof RemoteConfig, value: string | boolean) => {
-    setConfig((current) => ({ ...current, [key]: value }));
-    setState("idle");
-  };
-
-  const save = async () => {
-    setState("saving");
-    setError("");
-    const reply = await bridge.remoteSet({
-      enabled: Boolean(config.enabled),
-      host: (config.host ?? "").trim(),
-      remotePath: (config.remotePath ?? "").trim(),
-      node: (config.node ?? "node").trim() || "node",
-    });
-    if (reply.ok) setState("saved");
-    else {
-      setState("error");
-      setError(reply.error ?? t("The remote target could not be saved."));
-    }
-  };
-
-  const input = (key: keyof RemoteConfig, placeholder: string) => (
-    <input
-      value={String(config[key] ?? "")}
-      onChange={(event) => field(key, event.target.value)}
-      placeholder={placeholder}
-      spellCheck={false}
-      autoCapitalize="off"
-      autoCorrect="off"
-      className="w-60 rounded-sm border border-line bg-panel px-2 py-1 font-mono text-[12px] text-fg outline-none placeholder:text-fg-faint focus:border-line-strong"
-    />
-  );
-
-  return (
-    <>
-      <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Remote")}</h2>
-      <Row
-        label={t("Run the backend over SSH")}
-        hint={t("When on and saved, Wide reconnects its backend to the remote host instead of this machine.")}
-      >
-        <Toggle value={Boolean(config.enabled)} onChange={(next) => field("enabled", next)} />
-      </Row>
-      <Row label={t("SSH host")} hint={t("user@host, or a Host from your ~/.ssh/config. Key or agent auth only.")}>
-        {input("host", "user@host")}
-      </Row>
-      <Row label={t("Remote path")} hint={t("The folder on the remote holding the synced backend.")}>
-        {input("remotePath", "/home/you/wide-backend")}
-      </Row>
-      <Row label={t("Node command")} hint={t("How node is started on the remote.")}>
-        {input("node", "node")}
-      </Row>
-      <div className="flex items-center gap-3 pt-3">
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={state === "saving"}
-          className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-50"
-        >
-          {t("Save")}
-        </button>
-        {state === "saved" && <span className="text-[11px] text-status-ok">{t("Saved.")}</span>}
-        {state === "error" && <span className="text-[11px] text-status-error">{t(error)}</span>}
-      </div>
-      <p className="pt-2 text-[11px] text-fg-faint">
-        {t("The remote needs Node and a synced copy of Wide's backend at the path above — see scripts/remote-sync.")}
-      </p>
-    </>
-  );
-}
-
 function UpdatesSection() {
   const t = useT();
   const current = useUpdate((state) => state.current);
@@ -444,8 +355,6 @@ export function SettingsView() {
             {t("Open")}
           </button>
         </Row>
-
-        <RemoteSection />
 
         <UpdatesSection />
 

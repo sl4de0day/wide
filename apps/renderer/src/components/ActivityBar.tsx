@@ -12,6 +12,7 @@ import {
   Radar,
   Search,
   Send,
+  Server,
   Settings,
   Terminal,
 } from "lucide-react";
@@ -38,6 +39,7 @@ const CodebergPanel = lazy(() =>
 const AiPanel = lazy(() => import("@/panels/AiPanel").then((m) => ({ default: m.AiPanel })));
 const DebugPanel = lazy(() => import("@/panels/DebugPanel").then((m) => ({ default: m.DebugPanel })));
 const FindingsPanel = lazy(() => import("@/panels/FindingsPanel").then((m) => ({ default: m.FindingsPanel })));
+const RemotePanel = lazy(() => import("@/panels/RemotePanel").then((m) => ({ default: m.RemotePanel })));
 
 function AiMark({ className }: { className?: string; strokeWidth?: number }) {
   const mark = extensionById("ai-assistant");
@@ -122,6 +124,7 @@ export const PANELS: PanelDef[] = [
   },
   { id: "problems", label: "Problems", icon: CircleAlert, component: ProblemsPanel, place: "bottom" },
   { id: "debug", label: "Debug", icon: Bug, component: DebugPanel, place: "bottom" },
+  { id: "remote", label: "Remote", icon: Server, component: RemotePanel, place: "bottom" },
   { id: "terminal", label: "Terminal", icon: Terminal, component: TerminalPanel, place: "bottom" },
 ];
 

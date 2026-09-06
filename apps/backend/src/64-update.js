@@ -1,4 +1,4 @@
-const WIDE_VERSION = "0.76926";
+const WIDE_VERSION = "0.86926";
 const WIDE_REPO = "sl4de0day/wide";
 const WIDE_ASSET_RE = /Wide-Setup-.*\.exe$/i;
 const WIDE_SUMS_RE = /^SHA256SUMS(\.txt)?$/i;
@@ -48,6 +48,14 @@ async function noteAttempt(version) {
   attempt.count = (parseInt(attempt.count, 10) || 0) + 1;
   state.attempt = attempt;
   await writeUpdateState(state);
+}
+
+async function clearAttempt(version) {
+  const state = await readUpdateState();
+  if (state.attempt && (!version || state.attempt.version === version)) {
+    delete state.attempt;
+    await writeUpdateState(state);
+  }
 }
 
 function sha256File(file) {
@@ -207,16 +215,16 @@ function registerUpdateHandlers() {
 
     const expected = await expectedHashFor(sumsUrl, assetName);
     if (!expected) {
-      await noteAttempt(version);
       return {
         ok: false,
-        error: "This release publishes no usable SHA256SUMS entry, so the update cannot be verified.",
+        error: "This release publishes no usable SHA256SUMS entry yet — it may still be publishing. Wide will try again.",
       };
     }
 
     const target = node_path.join(node_os.tmpdir(), `Wide-Setup-${version || "latest"}.exe`);
     const staged = await sha256File(target);
     if (staged && staged === expected) {
+      await clearAttempt(version);
       return { ok: true, path: target, verified: true, cached: true };
     }
 
@@ -239,6 +247,7 @@ function registerUpdateHandlers() {
       return { ok: false, error: "The downloaded update did not match its published checksum." };
     }
 
+    await clearAttempt(version);
     broadcast("update:progress", { phase: "download", state: "done", bytes: result.size });
     return { ok: true, path: target, bytes: result.size, verified: true };
   });

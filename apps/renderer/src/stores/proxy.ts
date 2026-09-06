@@ -44,6 +44,7 @@ interface ProxyState {
   clear(): Promise<void>;
   select(id: number | null): void;
   ingest(entry: ProxyEntry): void;
+  importEntries(entries: ProxyEntry[]): void;
   ingestFrame(frame: ProxyWsFrame): void;
   setRules(rules: MatchReplaceRule[]): Promise<void>;
   setIntercept(on: boolean): Promise<void>;
@@ -166,6 +167,14 @@ export const useProxy = create<ProxyState>((set, get) => ({
   ingestInterceptResponse: (response) => set((state) => ({ heldResponses: [...state.heldResponses, response] })),
 
   toggleScan: () => set((state) => ({ scanning: !state.scanning })),
+
+  importEntries: (list) =>
+    set((state) => {
+      if (!list.length) return state;
+      const entries = [...state.entries, ...list];
+      if (entries.length > MAX) entries.splice(0, entries.length - MAX);
+      return { entries };
+    }),
 
   ingest: (entry) => {
 

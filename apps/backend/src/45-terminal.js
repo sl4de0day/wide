@@ -63,7 +63,22 @@ function registerTerminalHandlers() {
   electron.ipcMain.handle("terminal:start", (event, options) => {
     if (!nodePty) return { error: "The terminal is not available here (no pty for this platform)." };
     const requested = options?.cwd || process.cwd();
-    const { file, args, cwd: shellCwd, label } = shellFor(requested, options?.shell);
+    let file, args, shellCwd, label;
+    const remote = options?.remote;
+    if (remote && typeof remote.host === "string" && remote.host) {
+      const sargs = [];
+      if (remote.port && Number(remote.port) !== 22) sargs.push("-p", String(remote.port));
+      if (remote.keyPath) sargs.push("-i", remote.keyPath);
+      sargs.push("-o", "StrictHostKeyChecking=accept-new");
+      sargs.push("-t", remote.user ? `${remote.user}@${remote.host}` : remote.host);
+      if (remote.cwd) sargs.push(`cd '${remote.cwd.split("'").join("'\\''")}' 2>/dev/null; exec $SHELL -l`);
+      file = "ssh";
+      args = sargs;
+      shellCwd = undefined;
+      label = `ssh ${remote.host}`;
+    } else {
+      ({ file, args, cwd: shellCwd, label } = shellFor(requested, options?.shell));
+    }
     const id = nextId++;
     let child;
     try {

@@ -1,8 +1,10 @@
-import { ArrowUpRight, Braces, Crosshair, Download, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
+import { ArrowUpRight, Braces, Crosshair, Download, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
 import { bridge, type InterceptedRequest, type InterceptedResponse, type MatchReplaceRule, type ProxyEntry } from "@/lib/bridge";
+import { fromHar, toHar } from "@/lib/har";
+import { toast } from "@/stores/toast";
 import { exportCatcherSession, importCatcherSession } from "@/lib/catcherSession";
 import { csrfPocFromRequest } from "@/lib/poc/generate";
 import { useWorkspace } from "@/stores/workspace";
@@ -960,6 +962,53 @@ export function ProxyPanel() {
           className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
         >
           <Upload className="size-3.5" strokeWidth={1.5} />
+        </button>
+        {entries.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              const root = useWorkspace.getState().root;
+              if (!root) {
+                toast.error(t("Open a project first."));
+                return;
+              }
+              void bridge.writeFile(`${root}/wide-traffic.har`, toHar(entries)).then((reply) => {
+                if (reply.error) toast.error(t(reply.error));
+                else toast.success(t("Traffic exported to wide-traffic.har."));
+              });
+            }}
+            title={t("Export traffic as HAR")}
+            aria-label={t("Export traffic as HAR")}
+            className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            <FileDown className="size-3.5" strokeWidth={1.5} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            void bridge.openFile().then((picked) => {
+              if (!picked) return;
+              void bridge.readFile(picked.path).then((file) => {
+                if (file.error) {
+                  toast.error(t(file.error));
+                  return;
+                }
+                const imported = fromHar(file.content);
+                if (!imported.length) {
+                  toast.error(t("No requests found in that HAR file."));
+                  return;
+                }
+                useProxy.getState().importEntries(imported);
+                toast.success(t("Imported requests from HAR: {count}", { count: imported.length }));
+              });
+            });
+          }}
+          title={t("Import a HAR file")}
+          aria-label={t("Import a HAR file")}
+          className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+        >
+          <FileUp className="size-3.5" strokeWidth={1.5} />
         </button>
         {entries.length > 0 && (
           <button

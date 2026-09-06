@@ -8,6 +8,7 @@ import { useT } from "@/lib/i18n";
 import { terminalFontFamily, terminalTheme } from "@/lib/themes";
 import { PanelHeader, panelButtonClass } from "@/components/SidePanel";
 import { bridge } from "@/lib/bridge";
+import { useRemote } from "@/stores/remote";
 import { useRun } from "@/stores/run";
 import { useSettings } from "@/stores/settings";
 import { useWorkspace } from "@/stores/workspace";
@@ -78,8 +79,9 @@ export function TerminalPanel() {
 
     const start = () => {
       if (idRef.current !== null) return;
+      const remote = useRemote.getState().activeProfile() ?? undefined;
       void bridge
-        .terminalStart({ cols: term.cols, rows: term.rows, cwd: root ?? undefined, shell: useSettings.getState().terminalShell })
+        .terminalStart({ cols: term.cols, rows: term.rows, cwd: root ?? undefined, shell: useSettings.getState().terminalShell, remote })
         .then((session) => {
           if (disposed) return;
           if (session?.error || !session?.id) {
@@ -96,6 +98,15 @@ export function TerminalPanel() {
 
     const offShell = useSettings.subscribe((next, prev) => {
       if (next.terminalShell === prev.terminalShell) return;
+      const current = idRef.current;
+      idRef.current = null;
+      if (current !== null) void bridge.terminalDispose(current);
+      term.reset();
+      start();
+    });
+
+    const offRemote = useRemote.subscribe((next, prev) => {
+      if (next.activeId === prev.activeId) return;
       const current = idRef.current;
       idRef.current = null;
       if (current !== null) void bridge.terminalDispose(current);
@@ -126,6 +137,7 @@ export function TerminalPanel() {
       offData?.();
       offExit?.();
       offShell();
+      offRemote();
       if (idRef.current !== null) void bridge.terminalDispose(idRef.current);
       term.dispose();
       termRef.current = null;

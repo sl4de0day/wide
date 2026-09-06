@@ -1,6 +1,6 @@
 {
   "name": "wide",
-  "version": "0.76926",
+  "version": "0.86926",
   "description": "Wide — a security-first IDE for the web stack. Native C++ (Win32 + WebView2) host, React renderer, Node backend sidecar. Electron-free.",
   "private": true,
   "workspaces": [

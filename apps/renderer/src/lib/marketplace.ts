@@ -509,6 +509,24 @@ const SELECTOR_TEST: MarketplaceExtension = {
   server: null,
 };
 
+const MARKDOWN_VIEWER: MarketplaceExtension = {
+  id: "markdown-viewer",
+  name: "Markdown Viewer",
+  version: "1.0.0",
+  colour: "#519aba",
+  kind: "tool",
+  removable: true,
+  summary: "Preview Markdown files rendered, live, in their own tab",
+  description:
+    "Adds a preview button to the tab bar of any Markdown file. Open it and the rendered document appears in a second tab that updates as you type — headings, lists, tables, code blocks and links.\n\nThe preview runs in a sandbox, so a document can be viewed safely without its markup touching the editor.",
+  provides: ["Preview button on Markdown tabs", "Live, updates as you type", "Rendered in a sandbox"],
+  homepage: "",
+  path:
+    "M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm2 4v6h2v-3l2 2 2-2v3h2V9h-2l-2 2-2-2H5zm12 0h-2v3h-2l3 3 3-3h-2V9z",
+  fileExtensions: [],
+  server: null,
+};
+
 const DEBUG_MARK =
   "M12 4a4 4 0 0 1 4 4v1h2a1 1 0 1 1 0 2h-2v2h2a1 1 0 1 1 0 2h-2v1a4 4 0 0 1-8 0v-1H6a1 1 0 1 1 0-2h2v-2H6a1 1 0 1 1 0-2h2V8a4 4 0 0 1 4-4z";
 
@@ -601,6 +619,7 @@ export const CATALOGUE: readonly MarketplaceExtension[] = [
   CODEBERG,
   GITHUB,
   COMMENT_CLEANER,
+  MARKDOWN_VIEWER,
   ...LANGUAGES,
 ];
 

@@ -18,6 +18,8 @@ export const PITCHER_PATH = "wide://pitcher";
 
 export const CYBERCHEF_PATH = "wide://cyberchef";
 
+export const MD_PREVIEW_PATH = "wide://mdpreview/";
+
 export const EXTENSION_PATH = "wide://extension/";
 
 export const AI_CHAT_PATH = "wide://ai/";
@@ -38,7 +40,7 @@ export interface FileTab {
 }
 
 export interface VirtualTab {
-  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef";
+  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview";
   path: string;
   name: string;
 }
@@ -107,6 +109,8 @@ interface EditorState {
   openPitcher(): void;
 
   openCyberchef(): void;
+
+  openMarkdownPreview(sourcePath: string, name: string): void;
   openExtension(id: string, name: string): void;
   openAiChat(id: string, name: string): void;
 
@@ -300,6 +304,16 @@ export const useEditor = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, { kind: "cyberchef", path: CYBERCHEF_PATH, name: "CyberChef" }],
         activePath: CYBERCHEF_PATH,
+      };
+    }),
+
+  openMarkdownPreview: (sourcePath, name) =>
+    set((state) => {
+      const path = `${MD_PREVIEW_PATH}${sourcePath}`;
+      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path };
+      return {
+        tabs: [...state.tabs, { kind: "markdown-preview", path, name: `◹ ${name}` }],
+        activePath: path,
       };
     }),
 
