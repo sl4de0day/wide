@@ -312,7 +312,7 @@ async function aiRunLocalTurn({ model, root, system, messages, allowWrites, sign
 
     for (const call of calls) {
       send({ type: "tool_start", id: call.id, name: call.name, input: call.input });
-      const result = await aiRunTool(root, call.name, call.input ?? {}, send);
+      const result = await aiRunTool(root, call.name, call.input ?? {}, send, allowWrites);
       send({ type: "tool_end", id: call.id, name: call.name, result });
       history.push({ role: "tool", content: result });
       if (signal?.aborted) return { ok: false, error: "stopped" };

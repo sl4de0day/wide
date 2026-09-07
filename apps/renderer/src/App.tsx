@@ -1,9 +1,10 @@
 import { ChevronLeft, ShieldAlert } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { ActivityBar, panelById } from "./components/ActivityBar";
 import { EditorArea } from "./components/EditorArea";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Launcher } from "./components/Launcher";
 import { CodeActionMenu } from "./components/CodeActionMenu";
 import { RenameOverlay } from "./components/RenameOverlay";
@@ -21,6 +22,8 @@ import { subscribeProjectScan, useProjectScan } from "./stores/projectScan";
 import { AiEditsOverlay } from "./components/AiEditsOverlay";
 import { McpTrustPrompt } from "./components/McpTrustPrompt";
 import { useAiEdits } from "./stores/aiEdits";
+import { sendSelectionToChat } from "./lib/sendToChat";
+import { copyConversation, exportConversation } from "./lib/chatExport";
 import { BottomDock, SidePanel } from "./components/SidePanel";
 import { SettingsView } from "./components/SettingsView";
 import { StatusBar } from "./components/StatusBar";
@@ -51,7 +54,7 @@ import { forgetTailwindTheme } from "./editor/features/tailwind";
 import { applyLanguage, isLanguage, useT } from "./lib/i18n";
 import { installCatcherSession } from "./lib/catcherSession";
 import { forgetLastFile, recallLastFile, rememberLastFile } from "./lib/lastFile";
-import { applySyntaxPalette, applyTheme, hasStoredLanguage, useSettings } from "./stores/settings";
+import { applySyntaxPalette, applyTheme, hasStoredLanguage, hydrateSettingsFromDisk, useSettings } from "./stores/settings";
 import { useUpdate } from "./stores/update";
 import { subscribeFsChanges, useWorkspace } from "./stores/workspace";
 import logo from "./assets/wide-logo.png";
@@ -428,21 +431,76 @@ export default function App() {
   }, [t]);
 
   useEffect(() => {
-    if (hasStoredLanguage()) return;
-    void bridge
-      .installLanguage()
-      .then((reply) => {
-        const code = reply.ok ? (reply.language ?? "") : "";
-        if (code && isLanguage(code) && code !== useSettings.getState().language) {
-          useSettings.getState().set({ language: code });
-        }
-      })
-      .catch(() => undefined);
+    let cancelled = false;
+    void (async () => {
+      await hydrateSettingsFromDisk();
+      if (cancelled) return;
+      if (hasStoredLanguage()) return;
+      const reply = await bridge.installLanguage().catch(() => null);
+      const code = reply && reply.ok ? (reply.language ?? "") : "";
+      if (!cancelled && code && isLanguage(code) && code !== useSettings.getState().language) {
+        useSettings.getState().set({ language: code });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     void useUpdate.getState().boot();
   }, []);
+
+  const tabsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabsSig = useRef("");
+  const restoredRoots = useRef(new Set<string>());
+
+  useEffect(() => {
+    const persist = () => {
+      const currentRoot = useWorkspace.getState().root;
+      if (!currentRoot) return;
+      const state = useEditor.getState();
+      const files = state.tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path);
+      const active = state.activePath && files.includes(state.activePath) ? state.activePath : files[files.length - 1] ?? "";
+      void bridge.saveTabs(currentRoot, { files, active }).catch(() => undefined);
+    };
+    const unsub = useEditor.subscribe((state) => {
+      const files = state.tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path);
+      const active = state.activePath && files.includes(state.activePath) ? state.activePath : "";
+      const sig = `${files.join("|")}::${active}`;
+      if (sig === tabsSig.current) return;
+      tabsSig.current = sig;
+      if (tabsSaveTimer.current) clearTimeout(tabsSaveTimer.current);
+      tabsSaveTimer.current = setTimeout(persist, 400);
+    });
+    return () => {
+      unsub();
+      if (tabsSaveTimer.current) clearTimeout(tabsSaveTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!root || restoredRoots.current.has(root)) return;
+    restoredRoots.current.add(root);
+    let cancelled = false;
+    void (async () => {
+      const reply = await bridge.loadTabs(root).catch(() => null);
+      const saved = reply && reply.ok ? reply.tabs : null;
+      if (cancelled || !saved || !Array.isArray(saved.files) || saved.files.length === 0) return;
+      const editor = useEditor.getState();
+      const open = new Set(editor.tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path));
+      for (const path of saved.files) {
+        if (cancelled) return;
+        if (!open.has(path)) await editor.openFile(path);
+      }
+      if (!cancelled && saved.active && useEditor.getState().tabs.some((tab) => tab.path === saved.active)) {
+        useEditor.getState().setActive(saved.active);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [root]);
 
   useEffect(() => {
     if (!root) return undefined;
@@ -556,6 +614,10 @@ export default function App() {
       { id: "view.ai", title: "AI Assistant", group: "View", when: () => has("ai-assistant"), run: () => openPanel("ai") },
       { id: "ai.review", title: "Toggle: Review AI edits before applying", group: "AI", when: () => has("ai-assistant"), run: () => useAiEdits.getState().setReview(!useAiEdits.getState().reviewEnabled) },
       { id: "ai.ghost", title: "Toggle: Inline AI completions (ghost text)", group: "AI", when: () => has("ai-assistant"), run: () => useSettings.getState().set({ aiGhostText: !useSettings.getState().aiGhostText }) },
+      { id: "ai.sendSelection", title: "Send the selection to the assistant", group: "AI", key: "ctrl+alt+a", when: () => has("ai-assistant"), run: () => void sendSelectionToChat() },
+      { id: "ai.explainSelection", title: "Explain the selection", group: "AI", when: () => has("ai-assistant"), run: () => void sendSelectionToChat("Explain this code.") },
+      { id: "ai.copyConversation", title: "Copy the conversation", group: "AI", when: () => has("ai-assistant"), run: () => void copyConversation() },
+      { id: "ai.exportConversation", title: "Export the conversation to Markdown", group: "AI", when: () => has("ai-assistant"), run: () => void exportConversation() },
       { id: "security.toggle", title: "Toggle: Real-time security analysis", group: "Security", run: () => useSettings.getState().set({ securityLint: !useSettings.getState().securityLint }) },
       { id: "security.toFindings", title: "Add this file's security issues to Findings", group: "Security", run: () => { if (addSecurityFindingsForActiveFile() > 0) openPanel("findings"); } },
       { id: "security.projectScan", title: "Scan project for cross-file vulnerabilities", group: "Security", when: hasRoot, run: () => { void useProjectScan.getState().run(); openPanel("problems"); } },
@@ -585,9 +647,11 @@ export default function App() {
         if (!Body) return null;
         return (
           <div key={id} className={cn("h-full", id !== active && "hidden")}>
-            <Suspense fallback={null}>
-              <Body onOpenPanel={openPanel} />
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={null}>
+                <Body onOpenPanel={openPanel} />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         );
       });
@@ -646,7 +710,9 @@ export default function App() {
           {
 
 }
-          <EditorArea key={language} onOpenPanel={openPanel} />
+          <ErrorBoundary>
+            <EditorArea key={language} onOpenPanel={openPanel} />
+          </ErrorBoundary>
           {
 
 }

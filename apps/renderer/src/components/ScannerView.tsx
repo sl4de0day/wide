@@ -1,7 +1,8 @@
 import { KeyRound, Network, Play, Repeat2, Square, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { parseHttpMessage } from "@/lib/httpMessage";
+import { useWindowedRows } from "@/lib/useWindow";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useCatcher } from "@/stores/catcher";
@@ -28,7 +29,13 @@ export function ScannerView() {
   const [showSession, setShowSession] = useState(false);
   const chosen = issues.find((i) => i.id === selected) ?? null;
 
-  const sortedIssues = [...issues].sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
+  const sortedIssues = useMemo(
+    () => [...issues].sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]),
+    [issues],
+  );
+
+  const issuesRef = useRef<HTMLDivElement>(null);
+  const win = useWindowedRows(issuesRef, sortedIssues.length, 21);
 
   const launch = () => {
     if (!parseHttpMessage(draft)) return;
@@ -129,7 +136,7 @@ export function ScannerView() {
       )}
 
       {}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={issuesRef} className="min-h-0 flex-1 overflow-auto">
         {sortedIssues.length === 0 ? (
           <p className="px-3 py-4 text-[12px] text-fg-faint">{t("No issues yet. Scan a request to begin.")}</p>
         ) : (
@@ -143,9 +150,15 @@ export function ScannerView() {
               </tr>
             </thead>
             <tbody>
-              {sortedIssues.map((issue) => (
+              {win.padTop > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={4} style={{ height: win.padTop, padding: 0 }} />
+                </tr>
+              )}
+              {sortedIssues.slice(win.start, win.end).map((issue) => (
                 <tr
                   key={issue.id}
+                  data-vrow=""
                   onClick={() => useScanner.getState().select(issue.id)}
                   className={cn("cursor-pointer border-b border-line text-[11px] hover:bg-hover", selected === issue.id && "bg-selected")}
                 >
@@ -157,6 +170,11 @@ export function ScannerView() {
                   <td className="px-2 py-0.5 font-mono tabular-nums text-fg-faint">{issue.status || "—"}</td>
                 </tr>
               ))}
+              {win.padBottom > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={4} style={{ height: win.padBottom, padding: 0 }} />
+                </tr>
+              )}
             </tbody>
           </table>
         )}

@@ -1,4 +1,4 @@
-const WIDE_VERSION = "0.97926";
+const WIDE_VERSION = "1.07926";
 const WIDE_REPO = "sl4de0day/wide";
 const WIDE_ASSET_RE = /Wide-Setup-.*\.exe$/i;
 const WIDE_SUMS_RE = /^SHA256SUMS(\.txt)?$/i;
@@ -307,6 +307,60 @@ function registerUpdateHandlers() {
       return { ok: true, language: match ? match[1].toLowerCase() : "" };
     } catch {
       return { ok: true, language: "" };
+    }
+  });
+
+  const SETTINGS_FILE = () => node_path.join(electron.app.getPath("userData"), "settings.json");
+
+  electron.ipcMain.handle("settings:load", async () => {
+    try {
+      const parsed = JSON.parse(await promises.readFile(SETTINGS_FILE(), "utf8"));
+      return { ok: true, settings: parsed && typeof parsed === "object" ? parsed : null };
+    } catch {
+      return { ok: true, settings: null };
+    }
+  });
+
+  electron.ipcMain.handle("settings:save", async (_event, settings) => {
+    try {
+      if (!settings || typeof settings !== "object") return { ok: false, error: "Invalid settings." };
+      await writeFileAtomic(SETTINGS_FILE(), JSON.stringify(settings, null, 2), "utf8");
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  });
+
+  const TABS_FILE = () => node_path.join(electron.app.getPath("userData"), "workspace-tabs.json");
+
+  electron.ipcMain.handle("tabs:load", async (_event, root) => {
+    try {
+      if (!root) return { ok: true, tabs: null };
+      const all = JSON.parse(await promises.readFile(TABS_FILE(), "utf8"));
+      return { ok: true, tabs: all && typeof all === "object" ? all[root] ?? null : null };
+    } catch {
+      return { ok: true, tabs: null };
+    }
+  });
+
+  electron.ipcMain.handle("tabs:save", async (_event, root, data) => {
+    try {
+      if (!root) return { ok: false };
+      let all = {};
+      try {
+        const parsed = JSON.parse(await promises.readFile(TABS_FILE(), "utf8"));
+        if (parsed && typeof parsed === "object") all = parsed;
+      } catch {
+
+      }
+      if (data && Array.isArray(data.files) && data.files.length) all[root] = data;
+      else delete all[root];
+      const roots = Object.keys(all);
+      if (roots.length > 40) for (const key of roots.slice(0, roots.length - 40)) delete all[key];
+      await writeFileAtomic(TABS_FILE(), JSON.stringify(all, null, 2), "utf8");
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
     }
   });
 

@@ -83,10 +83,54 @@ const AI_TOOLS = [
       required: ["path", "content"],
     },
   },
+  {
+    name: "edit_file",
+    description:
+      "Make a targeted change to a file by replacing an exact snippet with new text, instead of rewriting the whole file. Read the file first. The `find` text must appear EXACTLY ONCE — include enough surrounding lines to be unique. Far cheaper than write_file for small edits on big files. The change is proposed to the person in the editor, like write_file.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Path relative to the project root." },
+        find: { type: "string", description: "Exact text to replace; must match exactly once, whitespace included." },
+        replace: { type: "string", description: "The replacement text (may be empty to delete the snippet)." },
+      },
+      required: ["path", "find", "replace"],
+    },
+  },
+  {
+    name: "run_command",
+    description:
+      "Run a shell command in the project root and return its combined output and exit code. Use it to build, run the test suite, or run a linter, then react to the result. It runs on the real machine, times out after 60 seconds, and its output is truncated if long.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "The command line to run, e.g. 'npm test'." },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "git",
+    description:
+      "Run a git command in the project and return its output. Allowed: status, diff, log, show, branch, rev-parse, remote, and (when writes are on) add and commit. Destructive or history-rewriting commands (push, pull, reset, clean, rebase, checkout, …) are refused.",
+    parameters: {
+      type: "object",
+      properties: {
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: 'git arguments as an array, e.g. ["status"], ["diff","--staged"], or ["commit","-m","message"].',
+        },
+      },
+      required: ["args"],
+    },
+  },
 ];
 
+const AI_WRITE_TOOLS = new Set(["write_file", "edit_file", "run_command"]);
+
 function aiToolsFor(provider, allowWrites) {
-  const own = allowWrites ? AI_TOOLS : AI_TOOLS.filter((tool) => tool.name !== "write_file");
+  const own = allowWrites ? AI_TOOLS : AI_TOOLS.filter((tool) => !AI_WRITE_TOOLS.has(tool.name));
   const tools = [...own, ...mcpToolSpecs()];
   if (provider === "claude") {
     return tools.map((tool) => ({
@@ -130,7 +174,7 @@ function aiTrim(text) {
   );
 }
 
-const AI_ARGS_MAY_BE_EMPTY = new Set(["content"]);
+const AI_ARGS_MAY_BE_EMPTY = new Set(["content", "replace"]);
 
 function aiMissingArgs(name, input) {
   const spec = AI_TOOLS.find((tool) => tool.name === name);
@@ -152,7 +196,106 @@ function aiAllowed(channel, args) {
   return { ok: true };
 }
 
-async function aiRunTool(root, name, input, send) {
+function aiRunShell(root, command) {
+  return new Promise((resolve) => {
+    let out = "";
+    let done = false;
+    let child;
+    try {
+      child = node_child_process.spawn(command, { cwd: root, shell: true, windowsHide: true });
+    } catch (error) {
+      resolve(`The command could not start: ${String((error && error.message) || error)}`);
+      return;
+    }
+    const capture = (data) => {
+      out += data.toString("utf8");
+      if (out.length > AI_MAX_TOOL_RESULT_BYTES) {
+        out = out.slice(0, AI_MAX_TOOL_RESULT_BYTES);
+        try {
+          killProcessTree(child);
+        } catch {
+
+        }
+      }
+    };
+    if (child.stdout) child.stdout.on("data", capture);
+    if (child.stderr) child.stderr.on("data", capture);
+    const timer = setTimeout(() => {
+      if (done) return;
+      try {
+        killProcessTree(child);
+      } catch {
+
+      }
+      out += "\n… the command ran longer than 60 seconds and was stopped.";
+    }, 60000);
+    child.on("error", (error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(`The command could not start: ${String((error && error.message) || error)}`);
+    });
+    child.on("close", (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(aiTrim(`exit ${code}\n${out || "(no output)"}`));
+    });
+  });
+}
+
+function aiRunGit(root, args) {
+  return new Promise((resolve) => {
+    let out = "";
+    let done = false;
+    let child;
+    try {
+      child = node_child_process.spawn("git", args, { cwd: root, windowsHide: true });
+    } catch (error) {
+      resolve(`git could not run: ${String((error && error.message) || error)}. Is git installed?`);
+      return;
+    }
+    const capture = (data) => {
+      out += data.toString("utf8");
+      if (out.length > AI_MAX_TOOL_RESULT_BYTES) {
+        out = out.slice(0, AI_MAX_TOOL_RESULT_BYTES);
+        try {
+          killProcessTree(child);
+        } catch {
+
+        }
+      }
+    };
+    if (child.stdout) child.stdout.on("data", capture);
+    if (child.stderr) child.stderr.on("data", capture);
+    const timer = setTimeout(() => {
+      if (done) return;
+      try {
+        killProcessTree(child);
+      } catch {
+
+      }
+    }, 30000);
+    child.on("error", (error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(`git could not run: ${String((error && error.message) || error)}. Is git installed?`);
+    });
+    child.on("close", (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(aiTrim(`git ${args.join(" ")} (exit ${code})\n${out || "(no output)"}`));
+    });
+  });
+}
+
+const AI_GIT_READ = new Set(["status", "diff", "log", "show", "branch", "rev-parse", "remote", "blame", "tag", "describe", "shortlog"]);
+const AI_GIT_WRITE = new Set(["add", "commit"]);
+const AI_GIT_BANNED = new Set(["push", "pull", "fetch", "clone", "reset", "clean", "rebase", "merge", "cherry-pick", "revert", "rm", "mv", "config", "gc", "checkout", "switch", "restore", "filter-branch", "update-ref", "reflog", "worktree", "submodule"]);
+
+async function aiRunTool(root, name, input, send, allowWrites) {
   try {
 
     if (isMcpTool(name)) {
@@ -250,6 +393,56 @@ async function aiRunTool(root, name, input, send) {
       return `The change to ${resolved.relative} was handed to the editor. It may still be waiting for the person to accept it, so do not assume the copy on disk matches; do not read it back to check, and describe it as a change you are making rather than one that is finished.`;
     }
 
+    if (name === "edit_file") {
+      const resolved = aiResolvePath(root, input.path);
+      if (resolved.error) return resolved.error;
+      const allowed = aiAllowed("ai:tool.write", [root, resolved.path]);
+      if (!allowed.ok) return allowed.reason;
+      let content;
+      try {
+        content = await promises.readFile(resolved.path, "utf8");
+      } catch {
+        return `Could not read ${resolved.relative}. If it does not exist yet, create it with write_file.`;
+      }
+      const find = String(input.find ?? "");
+      if (!find) return "edit_file needs a non-empty `find` snippet.";
+      const pieces = content.split(find);
+      const count = pieces.length - 1;
+      if (count === 0) return `The snippet was not found in ${resolved.relative}. Read the file again and copy the exact text, whitespace included.`;
+      if (count > 1) return `The snippet matches ${count} times in ${resolved.relative}. Include more surrounding lines so it matches exactly once.`;
+      const next = pieces.join(String(input.replace ?? ""));
+      send({ type: "edit", root, path: resolved.path, content: next, existed: true });
+      return `The edit to ${resolved.relative} was handed to the editor (pending the person's acceptance). Do not read it back to verify; describe it as a change you are making.`;
+    }
+
+    if (name === "run_command") {
+      if (!allowWrites) return "Running commands is turned off. The person can turn on AI writes and commands in the AI settings.";
+      if (!root) return "No project is open.";
+      const command = String(input.command ?? "").trim();
+      if (!command) return "run_command needs a command line.";
+      const allowed = aiAllowed("ai:tool.exec", [root, command]);
+      if (!allowed.ok) return allowed.reason;
+      return await aiRunShell(root, command);
+    }
+
+    if (name === "git") {
+      if (!root) return "No project is open.";
+      const args = Array.isArray(input.args)
+        ? input.args.map((value) => String(value))
+        : String(input.args ?? "").split(/\s+/).filter(Boolean);
+      if (args.length === 0) return 'git needs arguments, for example ["status"].';
+      const sub = args[0];
+      if (AI_GIT_BANNED.has(sub)) return `git ${sub} is not allowed from the assistant.`;
+      const mutating = AI_GIT_WRITE.has(sub);
+      if (!AI_GIT_READ.has(sub) && !mutating) {
+        return `git ${sub} is not in the allowed set (status, diff, log, show, branch, rev-parse, remote, add, commit).`;
+      }
+      if (mutating && !allowWrites) return "Git writes (add/commit) are turned off. The person can turn on AI writes in the AI settings.";
+      const allowed = aiAllowed(mutating ? "ai:tool.write" : "ai:tool.search", [root]);
+      if (!allowed.ok) return allowed.reason;
+      return await aiRunGit(root, args);
+    }
+
     return `There is no tool called ${name}.`;
   } catch (error) {
     return `That tool failed: ${String(error.message || error)}`;
@@ -289,7 +482,7 @@ async function aiRunTurn({ provider, model, key, root, system, messages, allowWr
       send({ type: "tool_start", id: call.id, name: call.name, input: call.input });
       const result = call.truncated
         ? `The call to ${call.name} arrived cut off, so nothing was done. The provider ended the answer mid-argument; send the call again with the whole argument object, or make a smaller change.`
-        : await aiRunTool(root, call.name, call.input ?? {}, send);
+        : await aiRunTool(root, call.name, call.input ?? {}, send, allowWrites);
       send({ type: "tool_end", id: call.id, name: call.name, result });
       history.push(aiToolResultTurn(provider, call, result));
       if (signal?.aborted) return { ok: false, error: "stopped" };

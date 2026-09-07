@@ -18,7 +18,7 @@ import {
   Terminal,
   TestTube2,
 } from "lucide-react";
-import { lazy, type ComponentType } from "react";
+import { lazy, useEffect, useRef, useState, type ComponentType } from "react";
 
 import { useT } from "@/lib/i18n";
 import { extensionById } from "@/lib/marketplace";
@@ -167,12 +167,6 @@ const BROWSER_BUTTON: ToolButton = {
   open: () => useEditor.getState().openBrowser(),
 };
 
-const CYBERCHEF_BUTTON: ToolButton = {
-  id: "cyberchef",
-  label: "CyberChef",
-  icon: FlaskConical,
-  open: () => useEditor.getState().openCyberchef(),
-};
 
 const SETTINGS_BUTTON: ToolButton = {
   id: "settings",
@@ -236,6 +230,99 @@ function ToolBarButton({ tool, active }: { tool: ToolButton; active: boolean }) 
   );
 }
 
+interface FlyoutItem {
+  id: string;
+  label: string;
+  icon: LucideIcon | ComponentType<{ className?: string; strokeWidth?: number }>;
+  active: boolean;
+  onOpen: () => void;
+}
+
+function ExtensionsFlyout({
+  panel,
+  active,
+  onSelect,
+  extras,
+}: {
+  panel: PanelDef;
+  active: boolean;
+  onSelect: (id: string) => void;
+  extras: FlyoutItem[];
+}) {
+  const t = useT();
+  const Icon = panel.icon;
+  const [open, setOpen] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancel = () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+  const show = () => {
+    cancel();
+    if (extras.length) setOpen(true);
+  };
+  const hideSoon = () => {
+    cancel();
+    timer.current = setTimeout(() => setOpen(false), 180);
+  };
+  useEffect(() => () => cancel(), []);
+  const label = t(panel.label);
+
+  return (
+    <div className="relative" onMouseEnter={show} onMouseLeave={hideSoon}>
+      <button
+        type="button"
+        title={label}
+        aria-label={label}
+        aria-pressed={active}
+        aria-expanded={open}
+        onClick={() => onSelect(panel.id)}
+        className={cn(
+          "relative flex size-8 shrink-0 items-center justify-center rounded-md transition-colors duration-100",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          active ? "bg-selected text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
+        )}
+      >
+        <Icon className="size-6" strokeWidth={1.5} />
+      </button>
+      <div
+        onMouseEnter={show}
+        onMouseLeave={hideSoon}
+        className={cn(
+          "absolute left-full top-0 z-50 ml-1 flex flex-col items-center gap-1 rounded-md border border-line bg-chrome p-1 shadow-xl",
+          "origin-left transition-[opacity,transform] duration-150",
+          open ? "pointer-events-auto translate-x-0 scale-100 opacity-100" : "pointer-events-none -translate-x-1 scale-95 opacity-0",
+        )}
+      >
+        {extras.map((item) => {
+          const ItemIcon = item.icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              title={t(item.label)}
+              aria-label={t(item.label)}
+              aria-pressed={item.active}
+              onClick={() => {
+                item.onOpen();
+                setOpen(false);
+              }}
+              className={cn(
+                "relative flex size-8 shrink-0 items-center justify-center rounded-md transition-colors duration-100 hover:bg-hover",
+                item.active ? "bg-selected text-fg-bright" : "text-fg-dim hover:text-fg",
+              )}
+            >
+              <ItemIcon className="size-6" strokeWidth={1.5} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function ActivityBar({
   isActive,
   onSelect,
@@ -249,28 +336,38 @@ export function ActivityBar({
   const activePath = useEditor((state) => state.activePath);
 
   const topBuiltin = PANELS.filter((panel) => panel.place === "top" && !panel.extension);
-  const topExtension = PANELS.filter((panel) => panel.place === "top" && panel.extension && installed.has(panel.extension));
   const bottom = PANELS.filter((panel) => panel.place === "bottom" && (!panel.extension || installed.has(panel.extension)));
+
+  const extensionItems: FlyoutItem[] = [
+    ...PANELS.filter((panel) => panel.place === "top" && panel.extension && installed.has(panel.extension)).map((panel) => ({
+      id: panel.id,
+      label: panel.label,
+      icon: panel.icon,
+      active: isActive(panel.id),
+      onOpen: () => onSelect(panel.id),
+    })),
+    ...(installed.has("cyberchef")
+      ? [{ id: "cyberchef", label: "CyberChef", icon: FlaskConical, active: activePath === CYBERCHEF_PATH, onOpen: () => useEditor.getState().openCyberchef() }]
+      : []),
+  ];
+
   return (
     <nav
       aria-label={t("Tools")}
       className="flex shrink-0 flex-col items-center gap-1 border-r border-line bg-chrome py-2"
       style={{ width: "var(--w-activitybar)" }}
     >
-      {topBuiltin.map((panel) => (
-        <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />
-      ))}
+      {topBuiltin.map((panel) =>
+        panel.id === "tools" ? (
+          <ExtensionsFlyout key="tools" panel={panel} active={isActive(panel.id)} onSelect={onSelect} extras={extensionItems} />
+        ) : (
+          <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />
+        ),
+      )}
       {}
       <ToolBarButton tool={CATCHER_BUTTON} active={activePath === CATCHER_PATH} />
       <ToolBarButton tool={PITCHER_BUTTON} active={activePath === PITCHER_PATH} />
       <ToolBarButton tool={BROWSER_BUTTON} active={activePath === BROWSER_PATH} />
-      {installed.has("cyberchef") && (
-        <ToolBarButton tool={CYBERCHEF_BUTTON} active={activePath === CYBERCHEF_PATH} />
-      )}
-      {topExtension.length > 0 && <div className="my-1 h-px w-5 shrink-0 bg-line" />}
-      {topExtension.map((panel) => (
-        <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />
-      ))}
       <div className="flex-1" />
       {bottom.map((panel) => (
         <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />

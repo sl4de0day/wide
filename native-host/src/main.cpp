@@ -54,6 +54,7 @@ wil::com_ptr<ICoreWebView2Controller> g_controller;
 wil::com_ptr<ICoreWebView2> g_webview;
 SidecarClient g_sidecar;
 HWND g_mainWindow = nullptr;
+bool g_windowShown = false;
 
 std::wstring g_pendingOpenPath;
 
@@ -226,6 +227,29 @@ bool RegWriteString(const std::wstring& subkey, const wchar_t* name, const std::
                           static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
   RegCloseKey(key);
   return r == ERROR_SUCCESS;
+}
+
+bool RegWriteBinary(const std::wstring& subkey, const wchar_t* name, const void* data, DWORD size) {
+  HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, subkey.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &key,
+                      nullptr) != ERROR_SUCCESS) {
+    return false;
+  }
+  LONG r = RegSetValueExW(key, name, 0, REG_BINARY, reinterpret_cast<const BYTE*>(data), size);
+  RegCloseKey(key);
+  return r == ERROR_SUCCESS;
+}
+
+bool RegReadBinary(const std::wstring& subkey, const wchar_t* name, void* out, DWORD size) {
+  HKEY key = nullptr;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, subkey.c_str(), 0, KEY_READ, &key) != ERROR_SUCCESS) {
+    return false;
+  }
+  DWORD type = 0;
+  DWORD got = size;
+  LONG r = RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(out), &got);
+  RegCloseKey(key);
+  return r == ERROR_SUCCESS && type == REG_BINARY && got == size;
 }
 
 void RegisterShellIntegration() {
@@ -1343,8 +1367,18 @@ void ConfigureWebView(HWND hwnd) {
       Callback<ICoreWebView2NavigationCompletedEventHandler>(
           [hwnd](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*)
               -> HRESULT {
+            if (g_windowShown) return S_OK;
+            g_windowShown = true;
 
-            ShowWindow(hwnd, SW_MAXIMIZE);
+            WINDOWPLACEMENT wp = {};
+            wp.length = sizeof(wp);
+            if (RegReadBinary(L"Software\\Wide", L"WindowPlacement", &wp, sizeof(wp)) &&
+                wp.length == sizeof(wp)) {
+              if (wp.showCmd == SW_SHOWMINIMIZED) wp.showCmd = SW_SHOWNORMAL;
+              SetWindowPlacement(hwnd, &wp);
+            } else {
+              ShowWindow(hwnd, SW_MAXIMIZE);
+            }
             SetForegroundWindow(hwnd);
             DestroySplash();
             return S_OK;
@@ -1434,20 +1468,36 @@ void ConfigureWebView(HWND hwnd) {
   g_webview->Navigate(L"https://app.local/index.html");
 }
 
+static void FatalWebViewError(HWND hwnd, HRESULT hr) {
+  wchar_t msg[512];
+  swprintf_s(msg,
+             L"Wide could not start the Microsoft Edge WebView2 runtime (error 0x%08X).\n\n"
+             L"Please install the WebView2 Runtime from Microsoft, then launch Wide again.",
+             static_cast<unsigned>(hr));
+  MessageBoxW(hwnd, msg, L"Wide", MB_OK | MB_ICONERROR);
+  PostQuitMessage(1);
+}
+
 void InitWebView(HWND hwnd) {
   std::wstring userData = UserDataFolder();
-  CreateCoreWebView2EnvironmentWithOptions(
+  HRESULT created = CreateCoreWebView2EnvironmentWithOptions(
       nullptr, userData.c_str(), nullptr,
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
           [hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-            if (FAILED(result) || !env) return result;
+            if (FAILED(result) || !env) {
+              FatalWebViewError(hwnd, result);
+              return result;
+            }
             g_env = env;
             env->CreateCoreWebView2Controller(
                 hwnd,
                 Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                     [hwnd](HRESULT r, ICoreWebView2Controller* controller)
                         -> HRESULT {
-                      if (FAILED(r) || !controller) return r;
+                      if (FAILED(r) || !controller) {
+                        FatalWebViewError(hwnd, r);
+                        return r;
+                      }
                       g_controller = controller;
                       g_controller->get_CoreWebView2(&g_webview);
 
@@ -1474,6 +1524,7 @@ void InitWebView(HWND hwnd) {
             return S_OK;
           })
           .Get());
+  if (FAILED(created)) FatalWebViewError(hwnd, created);
 }
 
 HWND g_splash = nullptr;
@@ -1747,6 +1798,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       }
       return TRUE;
     }
+    case WM_DROPFILES: {
+      HDROP drop = reinterpret_cast<HDROP>(wparam);
+      wchar_t path[MAX_PATH * 2] = {};
+      if (DragQueryFileW(drop, 0, path, MAX_PATH * 2) > 0) {
+        HostEmitOpenPath(path);
+      }
+      DragFinish(drop);
+      return 0;
+    }
     case WM_NCCALCSIZE: {
 
       if (wparam == FALSE) return DefWindowProc(hwnd, msg, wparam, lparam);
@@ -1792,7 +1852,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       DeleteObject(brush);
       return 1;
     }
-    case WM_DESTROY:
+    case WM_DESTROY: {
+      WINDOWPLACEMENT wp = {};
+      wp.length = sizeof(wp);
+      if (GetWindowPlacement(hwnd, &wp)) {
+        RegWriteBinary(L"Software\\Wide", L"WindowPlacement", &wp, sizeof(wp));
+      }
       g_sidecar.Stop();
       for (auto& entry : g_tabs) {
         if (entry.second.controller) entry.second.controller->Close();
@@ -1804,6 +1869,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       g_env.reset();
       PostQuitMessage(0);
       return 0;
+    }
     default:
       return DefWindowProc(hwnd, msg, wparam, lparam);
   }
@@ -1817,6 +1883,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
   HANDLE instanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\Wide.SingleInstance");
   if (instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
     HWND existing = FindWindowW(kWindowClass, nullptr);
+    for (int attempt = 0; !existing && attempt < 50; attempt += 1) {
+      Sleep(100);
+      existing = FindWindowW(kWindowClass, nullptr);
+    }
     if (existing) {
 
       if (!launchPath.empty()) {
@@ -1872,6 +1942,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
       nullptr, nullptr, hInstance, nullptr);
   if (!hwnd) return 1;
   g_mainWindow = hwnd;
+  DragAcceptFiles(hwnd, TRUE);
 
   BOOL dark = TRUE;
   DwmSetWindowAttribute(hwnd,  20, &dark,

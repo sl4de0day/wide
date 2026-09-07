@@ -1,9 +1,11 @@
-import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, RotateCw, Trash2, Upload, X } from "lucide-react";
+import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, RotateCw, ScrollText, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
+import { Modal } from "@/components/ui/Modal";
 import { bridge, type ProjectScanFinding } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
+import { emptyReportMeta, pentestReportHtml, pentestReportMarkdown, type ReportMeta } from "@/lib/pentestReport";
 import { cn, copyText } from "@/lib/utils";
 import { diffFindings, FINDING_STATUSES, findingsReport, findingsReportHtml, findingsReportJson, parseImportedFindings, SEVERITIES, useFindings, type Finding, type FindingStatus, type Severity } from "@/stores/findings";
 import { useProjectScan } from "@/stores/projectScan";
@@ -38,6 +40,101 @@ function printHtml(html: string): void {
     setTimeout(() => iframe.remove(), 2000);
   };
   document.body.appendChild(iframe);
+}
+
+const REPORT_META_KEY = "wide.report.meta";
+function loadReportMeta(): ReportMeta {
+  try {
+    const raw = localStorage.getItem(REPORT_META_KEY);
+    if (raw) return { ...emptyReportMeta(), ...JSON.parse(raw), date: new Date().toISOString().slice(0, 10) };
+  } catch {
+    void 0;
+  }
+  return emptyReportMeta();
+}
+
+function ReportDialog({ findings, onClose }: { findings: Finding[]; onClose: () => void }) {
+  const t = useT();
+  const [meta, setMeta] = useState<ReportMeta>(loadReportMeta);
+
+  const persist = (next: ReportMeta) => {
+    setMeta(next);
+    try {
+      localStorage.setItem(REPORT_META_KEY, JSON.stringify(next));
+    } catch {
+      void 0;
+    }
+  };
+  const field = (key: keyof ReportMeta, value: string | boolean) => persist({ ...meta, [key]: value });
+
+  const saveTo = async (ext: "html" | "md", body: string) => {
+    const root = useWorkspace.getState().root;
+    if (!root) {
+      toast.error(t("Open a project to save the report."));
+      return;
+    }
+    const written = await bridge.writeFile(`${root}/wide-pentest-report.${ext}`, body);
+    if (written.error) toast.error(t(written.error));
+    else toast.success(t("Report saved to wide-pentest-report.{ext}.", { ext }));
+  };
+
+  const input =
+    "w-full rounded-sm border border-line bg-panel px-2 py-1 text-[12px] text-fg outline-none transition-colors duration-100 focus:border-accent placeholder:text-fg-faint";
+  const label = "text-[11px] uppercase tracking-wide text-fg-faint";
+
+  return (
+    <Modal title={t("Generate report")} onClose={onClose} wide>
+      <div className="flex max-h-[70vh] flex-col gap-2 overflow-auto">
+        <div>
+          <p className={label}>{t("Report title")}</p>
+          <input value={meta.title} onChange={(e) => field("title", e.target.value)} className={cn(input, "mt-1")} spellCheck={false} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <p className={label}>{t("Client")}</p>
+            <input value={meta.client} onChange={(e) => field("client", e.target.value)} className={cn(input, "mt-1")} spellCheck={false} />
+          </div>
+          <div>
+            <p className={label}>{t("Target")}</p>
+            <input value={meta.target} onChange={(e) => field("target", e.target.value)} className={cn(input, "mt-1 font-mono")} spellCheck={false} />
+          </div>
+          <div>
+            <p className={label}>{t("Prepared by")}</p>
+            <input value={meta.author} onChange={(e) => field("author", e.target.value)} className={cn(input, "mt-1")} spellCheck={false} />
+          </div>
+          <div>
+            <p className={label}>{t("Date")}</p>
+            <input value={meta.date} onChange={(e) => field("date", e.target.value)} className={cn(input, "mt-1 font-mono")} spellCheck={false} />
+          </div>
+        </div>
+        <div>
+          <p className={label}>{t("Scope")}</p>
+          <textarea value={meta.scope} onChange={(e) => field("scope", e.target.value)} rows={2} className={cn(input, "mt-1 resize-y")} spellCheck={false} />
+        </div>
+        <div>
+          <p className={label}>{t("Executive summary")}</p>
+          <textarea value={meta.summary} onChange={(e) => field("summary", e.target.value)} rows={3} className={cn(input, "mt-1 resize-y")} spellCheck={false} />
+        </div>
+        <label className="flex items-center gap-2 text-[12px] text-fg-dim">
+          <input type="checkbox" checked={meta.confidential} onChange={(e) => field("confidential", e.target.checked)} />
+          {t("Mark as confidential")}
+        </label>
+        <p className="text-[11px] text-fg-faint">{t("{count} findings will be included.", { count: findings.length })}</p>
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          <button type="button" onClick={() => printHtml(pentestReportHtml(meta, findings))} className="flex items-center gap-1.5 rounded-sm border border-accent px-3 py-1.5 text-[12px] text-accent transition-colors duration-100 hover:bg-accent hover:text-bg">
+            <Printer className="size-3.5" strokeWidth={1.75} />
+            {t("Print / Save as PDF")}
+          </button>
+          <button type="button" onClick={() => void saveTo("html", pentestReportHtml(meta, findings))} className="rounded-sm border border-line px-3 py-1.5 text-[12px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
+            {t("Save HTML")}
+          </button>
+          <button type="button" onClick={() => void saveTo("md", pentestReportMarkdown(meta, findings))} className="rounded-sm border border-line px-3 py-1.5 text-[12px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
+            {t("Save Markdown")}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 const STATUS_TONE: Record<FindingStatus, string> = {
@@ -106,6 +203,7 @@ export function FindingsPanel() {
   const scanCount = useProjectScan((state) => state.findings.length);
   const canReport = findings.length > 0 || scanCount > 0;
   const [hideResolved, setHideResolved] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [osv, setOsv] = useState<{ exists?: boolean; updatedAt?: string; count?: number } | null>(null);
   const [osvBusy, setOsvBusy] = useState(false);
 
@@ -226,6 +324,11 @@ export function FindingsPanel() {
             <Printer className="size-3.5" strokeWidth={1.5} />
           </button>
         )}
+        {canReport && (
+          <button type="button" onClick={() => setShowReport(true)} title={t("Generate report")} aria-label={t("Generate report")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
+            <ScrollText className="size-3.5" strokeWidth={1.5} />
+          </button>
+        )}
         <button type="button" onClick={() => void importFindings()} title={t("Import findings (SARIF or JSON)")} aria-label={t("Import findings (SARIF or JSON)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
           <Upload className="size-3.5" strokeWidth={1.5} />
         </button>
@@ -251,6 +354,7 @@ export function FindingsPanel() {
 
       {copied && <p className="shrink-0 border-b border-line px-3 py-1 text-[11px] text-emerald-300">{t("Report copied.")}</p>}
       {adding && <AddForm onClose={() => setAdding(false)} />}
+      {showReport && <ReportDialog findings={gatherReport()} onClose={() => setShowReport(false)} />}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {findings.length === 0 ? (

@@ -18,7 +18,7 @@ const WIN_SHELLS = {
   powershell: () => ({ file: "powershell.exe", args: ["-NoLogo"], label: "PowerShell" }),
   pwsh: () => ({ file: "pwsh.exe", args: ["-NoLogo"], label: "pwsh" }),
   gitbash: () => ({
-    file: node_path.join(process.env.ProgramFiles || "C:\Program Files", "Git", "bin", "bash.exe"),
+    file: node_path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe"),
     args: ["-l", "-i"],
     label: "Git Bash",
   }),
@@ -71,12 +71,13 @@ function registerTerminalHandlers() {
       args = ["exec", "-it", container.id, container.shell || "sh"];
       shellCwd = undefined;
       label = `docker ${container.name || container.id}`;
-    } else if (remote && typeof remote.host === "string" && remote.host) {
+    } else if (remote && typeof remote.host === "string" && remote.host && !remote.host.startsWith("-")) {
       const sargs = [];
       if (remote.port && Number(remote.port) !== 22) sargs.push("-p", String(remote.port));
-      if (remote.keyPath) sargs.push("-i", remote.keyPath);
-      sargs.push("-o", "StrictHostKeyChecking=accept-new");
-      sargs.push("-t", remote.user ? `${remote.user}@${remote.host}` : remote.host);
+      if (remote.keyPath) sargs.push("-i", remote.keyPath, "-o", "IdentitiesOnly=yes");
+      sargs.push("-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3");
+      const user = typeof remote.user === "string" && !remote.user.startsWith("-") ? remote.user : "";
+      sargs.push("-t", user ? `${user}@${remote.host}` : remote.host);
       if (remote.cwd) sargs.push(`cd '${remote.cwd.split("'").join("'\\''")}' 2>/dev/null; exec $SHELL -l`);
       file = "ssh";
       args = sargs;

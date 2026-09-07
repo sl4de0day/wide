@@ -1077,8 +1077,8 @@ export interface HostApi {
   remoteTest(profile: Partial<RemoteProfile>): Promise<Ok<{ output?: string }>>;
   remoteExec(profile: Partial<RemoteProfile>, command: string): Promise<Ok<{ code?: number; stdout?: string; stderr?: string }>>;
   remoteListDir(profile: Partial<RemoteProfile>, dir: string): Promise<Ok<{ path?: string; entries?: RemoteDirEntry[] }>>;
-  remoteReadFile(profile: Partial<RemoteProfile>, filePath: string): Promise<Ok<{ content?: string }>>;
-  remoteWriteFile(profile: Partial<RemoteProfile>, filePath: string, content: string): Promise<Ok<Record<string, never>>>;
+  remoteReadFile(profile: Partial<RemoteProfile>, filePath: string): Promise<Ok<{ content?: string; size?: number; tooLarge?: boolean; binary?: boolean }>>;
+  remoteWriteFile(profile: Partial<RemoteProfile>, filePath: string, content: string, expectedSize?: number): Promise<Ok<{ conflict?: boolean }>>;
   remoteMkdir(profile: Partial<RemoteProfile>, dir: string): Promise<Ok<Record<string, never>>>;
   remoteNewFile(profile: Partial<RemoteProfile>, filePath: string): Promise<Ok<Record<string, never>>>;
   remoteDelete(profile: Partial<RemoteProfile>, target: string): Promise<Ok<Record<string, never>>>;
@@ -1120,6 +1120,10 @@ export interface HostApi {
   updateInstall(info: { version?: string; asset?: string; sums?: string }): Promise<Ok>;
   onUpdateProgress: Subscriber<{ phase: string; state: string; bytes?: number; error?: string }>;
   installLanguage(): Promise<Ok<{ language?: string }>>;
+  loadSettings(): Promise<Ok<{ settings?: Record<string, unknown> | null }>>;
+  saveSettings(settings: Record<string, unknown>): Promise<Ok<unknown>>;
+  loadTabs(root: string): Promise<Ok<{ tabs?: { files: string[]; active: string } | null }>>;
+  saveTabs(root: string, data: { files: string[]; active: string }): Promise<Ok<unknown>>;
   openExternal(url: string): Promise<Ok>;
 
 
@@ -1468,6 +1472,10 @@ const fallback = {
   updateInstall: async () => (warn(), { ok: false, error: "No bridge" }),
   onUpdateProgress: noSub<{ phase: string; state: string; bytes?: number; error?: string }>(),
   installLanguage: async () => (warn(), { ok: false, error: "No bridge" }),
+  loadSettings: async () => (warn(), { ok: true, settings: null }),
+  saveSettings: async () => (warn(), { ok: false, error: "No bridge" }),
+  loadTabs: async () => (warn(), { ok: true, tabs: null }),
+  saveTabs: async () => (warn(), { ok: false, error: "No bridge" }),
   openExternal: async () => (warn(), { ok: false, error: "No bridge" }),
   onDebugEvent: noSub<DebugEvent>(),
   toolScanRun: async () => (warn(), { ok: false, error: "No bridge" }),

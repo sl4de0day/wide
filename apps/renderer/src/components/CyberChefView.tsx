@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { useCyberchef } from "@/stores/cyberchef";
+import { useSettings } from "@/stores/settings";
 
 function toBase64(text: string): string {
   try {
@@ -23,6 +24,7 @@ export function CyberChefView() {
   const [loading, setLoading] = useState(true);
   const input = useCyberchef((state) => state.input);
   const seq = useCyberchef((state) => state.seq);
+  const theme = useSettings((state) => state.theme);
 
   const load = useCallback(() => {
     let alive = true;
@@ -43,9 +45,10 @@ export function CyberChefView() {
 
   const src = useMemo(() => {
     if (!url) return "";
-    if (seq > 0 && input) return `${url}?w=${seq}#input=${toBase64(input)}`;
-    return url;
-  }, [url, input, seq]);
+    const base = `${url}${url.includes("?") ? "&" : "?"}wct=${encodeURIComponent(theme)}`;
+    if (seq > 0 && input) return `${base}&w=${seq}#input=${toBase64(input)}`;
+    return base;
+  }, [url, input, seq, theme]);
 
   if (src) {
     return <iframe title="CyberChef" src={src} className="h-full w-full border-0 bg-canvas" />;

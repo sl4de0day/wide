@@ -1,10 +1,11 @@
-import { CornerDownRight, Crosshair, FileWarning, Hash, ListTree, Radar, Redo2, Send, Terminal, KeyRound } from "lucide-react";
+import { CornerDownRight, Crosshair, FileCode2, FileWarning, Hash, ListTree, Radar, Redo2, Send, Terminal, KeyRound } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { parseCurl } from "@/lib/curl";
 import { hasHeader, parseHttpMessage, serializeHttpMessage, setHeader } from "@/lib/httpMessage";
 import { csrfPocFromRequest } from "@/lib/poc/generate";
+import { goToRouteInCode } from "@/lib/trafficBridge";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useCatcher } from "@/stores/catcher";
@@ -119,6 +120,10 @@ export function RepeaterView({ id }: { id: string }) {
   };
 
   const sendToIntruder = () => useIntruder.getState().openIntruder(text);
+  const goToRoute = () => {
+    const parsed = parseHttpMessage(text);
+    if (parsed) void goToRouteInCode(parsed.method, parsed.url);
+  };
   const activeScan = () => {
     useScanner.getState().scan(text);
     useCatcher.getState().show("scanner");
@@ -165,6 +170,9 @@ export function RepeaterView({ id }: { id: string }) {
           </button>
           <button type="button" onClick={() => void csrfPocFromRequest(text)} title={t("Generate CSRF PoC")} className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
             <FileWarning className="size-3" strokeWidth={1.75} />
+          </button>
+          <button type="button" onClick={goToRoute} title={t("Go to the route in the code")} className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
+            <FileCode2 className="size-3" strokeWidth={1.75} />
           </button>
           <button
             type="button"

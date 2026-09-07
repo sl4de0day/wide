@@ -23,14 +23,20 @@ export const MD_PREVIEW_PATH = "wide://mdpreview/";
 export const REMOTE_PATH = "wide://remote/";
 
 export function remoteTabPath(profileId: string, remotePath: string): string {
-  return REMOTE_PATH + profileId + (remotePath.startsWith("/") ? remotePath : "/" + remotePath);
+  return REMOTE_PATH + profileId + "/" + encodeURIComponent(remotePath);
 }
 
 export function parseRemoteTab(path: string): { id: string; remotePath: string } {
   const rest = path.slice(REMOTE_PATH.length);
   const cut = rest.indexOf("/");
-  if (cut === -1) return { id: rest, remotePath: "/" };
-  return { id: rest.slice(0, cut), remotePath: rest.slice(cut) };
+  if (cut === -1) return { id: rest, remotePath: "." };
+  let remotePath = rest.slice(cut + 1);
+  try {
+    remotePath = decodeURIComponent(remotePath);
+  } catch {
+    void 0;
+  }
+  return { id: rest.slice(0, cut), remotePath };
 }
 
 export const EXTENSION_PATH = "wide://extension/";
@@ -226,6 +232,11 @@ export const useEditor = create<EditorState>((set, get) => ({
         toast.error(reply.error ? t(reply.error) : t("Could not read the remote file."));
         return false;
       }
+      if (reply.binary) {
+        const { toast } = await import("./toast");
+        toast.error(t("That looks like a binary file — Wide can't edit it over SSH yet."));
+        return false;
+      }
       const content = reply.content ?? "";
       const tab: FileTab = {
         kind: "file",
@@ -233,8 +244,8 @@ export const useEditor = create<EditorState>((set, get) => ({
         name: basename(remotePath),
         content,
         savedContent: content,
-        tooLarge: false,
-        size: content.length,
+        tooLarge: Boolean(reply.tooLarge),
+        size: reply.size ?? content.length,
       };
       set((state) => ({ tabs: [...state.tabs, tab], activePath: path, lastFilePath: path }));
       return true;
@@ -624,11 +635,23 @@ export const useEditor = create<EditorState>((set, get) => ({
         toast.error(t("That remote host is no longer configured."));
         return;
       }
-      const reply = await bridge.remoteWriteFile(profile, remotePath, tab.content);
+      const bytes = new TextEncoder().encode(tab.content).length;
+      let reply = await bridge.remoteWriteFile(profile, remotePath, tab.content, tab.size);
+      if (reply.conflict) {
+        const { confirm } = await import("./confirm");
+        const overwrite = await confirm({
+          title: t("This file changed on the remote host"),
+          message: t("Saving will overwrite the newer copy on the remote with your version. Overwrite it?"),
+          confirmLabel: t("Overwrite"),
+          danger: true,
+        });
+        if (!overwrite) return;
+        reply = await bridge.remoteWriteFile(profile, remotePath, tab.content, -1);
+      }
       if (reply.ok) {
         set((state) => ({
           tabs: state.tabs.map((item) =>
-            item.path === tab.path && item.kind === "file" ? { ...item, savedContent: tab.content } : item,
+            item.path === tab.path && item.kind === "file" ? { ...item, savedContent: tab.content, size: bytes } : item,
           ),
         }));
       } else {

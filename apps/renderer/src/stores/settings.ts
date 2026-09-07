@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { bridge } from "@/lib/bridge";
 import { applyLanguage, isLanguage, type Language } from "@/lib/i18n";
 import { BASE_THEME, isTheme, type ThemeId } from "@/lib/themes";
 
@@ -40,6 +41,8 @@ export interface Settings {
 
   updateManifestUrl: string;
   terminalShell: "default" | "cmd" | "powershell" | "pwsh" | "gitbash" | "wsl";
+
+  autoOpenDevServer: boolean;
 }
 
 export const DEFAULTS: Settings = {
@@ -57,11 +60,44 @@ export const DEFAULTS: Settings = {
   securityLint: true,
   updateManifestUrl: "",
   terminalShell: "default",
+  autoOpenDevServer: true,
 };
 
 interface SettingsState extends Settings {
   set(patch: Partial<Settings>): void;
   reset(): void;
+}
+
+function valuesOf(state: SettingsState): Settings {
+  const { set: _set, reset: _reset, ...values } = state;
+  return values;
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function persistToDisk(values: Settings): void {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    void bridge.saveSettings(values as unknown as Record<string, unknown>).catch(() => undefined);
+  }, 250);
+}
+
+let hydrated = false;
+
+export async function hydrateSettingsFromDisk(): Promise<void> {
+  if (hydrated) return;
+  hydrated = true;
+  try {
+    const reply = await bridge.loadSettings();
+    const disk = reply.ok ? reply.settings : null;
+    if (disk && typeof disk === "object") {
+      const patch = { ...(disk as Partial<Settings>) };
+      if (!isLanguage(patch.language)) delete patch.language;
+      if (patch.theme && !isTheme(patch.theme)) delete patch.theme;
+      useSettings.getState().set(patch);
+    }
+  } catch {
+
+  }
 }
 
 function load(): Settings {
@@ -92,12 +128,13 @@ export const useSettings = create<SettingsState>((set, get) => ({
   set: (patch) => {
     const next = { ...get(), ...patch };
     set(patch);
+    const values = valuesOf(next);
     try {
-      const { set: _set, reset: _reset, ...values } = next;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
     } catch {
 
     }
+    persistToDisk(values);
     applySyntaxPalette();
     applyLanguage();
     applyTheme();
@@ -110,6 +147,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
     } catch {
 
     }
+    persistToDisk({ ...DEFAULTS });
     applySyntaxPalette();
     applyLanguage();
     applyTheme();

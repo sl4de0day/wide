@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/sl4de0day/wide/releases/latest">Download</a> ·
   <a href="#building-from-source">Build</a> ·
+  <a href="https://github.com/sl4de0day/wide/releases">Changelog</a> ·
   <a href="LICENSE">License</a>
 </p>
 

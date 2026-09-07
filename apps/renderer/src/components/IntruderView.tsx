@@ -1,8 +1,9 @@
 import { ArrowDownUp, ChevronDown, ChevronRight, Crosshair, Download, Flag, Play, Plus, Repeat2, Square, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { parseHttpMessage } from "@/lib/httpMessage";
+import { useWindowedRows } from "@/lib/useWindow";
 import { useT } from "@/lib/i18n";
 import {
   applyProcessors,
@@ -18,7 +19,9 @@ import { useComparer } from "@/stores/comparer";
 import { useDecoder } from "@/stores/decoder";
 import { useFindings } from "@/stores/findings";
 import { useIntruder } from "@/stores/intruder";
+import { promptText } from "@/stores/prompt";
 import { toast } from "@/stores/toast";
+import { useWordlists } from "@/stores/wordlists";
 import { useWorkspace } from "@/stores/workspace";
 
 interface Row {
@@ -202,6 +205,7 @@ export function IntruderView() {
   const seed = useIntruder((state) => state.seed);
   const [template, setTemplate] = useState("");
   const [wordlists, setWordlists] = useState<string[]>([""]);
+  const savedLists = useWordlists((state) => state.lists);
   const [mode, setMode] = useState<Mode>("sniper");
   const [rows, setRows] = useState<Row[]>([]);
   const [running, setRunning] = useState(false);
@@ -222,12 +226,43 @@ export function IntruderView() {
   const [rangeTo, setRangeTo] = useState("100");
   const stop = useRef(false);
 
+  const pendingRows = useRef<Row[]>([]);
+  const pendingDone = useRef(0);
+  const flushFrame = useRef(0);
+  const flush = useCallback(() => {
+    flushFrame.current = 0;
+    if (pendingRows.current.length) {
+      const batch = pendingRows.current;
+      pendingRows.current = [];
+      setRows((current) => current.concat(batch));
+    }
+    if (pendingDone.current) {
+      const advanced = pendingDone.current;
+      pendingDone.current = 0;
+      setDone((current) => current + advanced);
+    }
+  }, []);
+  const scheduleFlush = useCallback(() => {
+    if (flushFrame.current) return;
+    flushFrame.current = requestAnimationFrame(flush);
+  }, [flush]);
+  const resetRows = useCallback(() => {
+    if (flushFrame.current) cancelAnimationFrame(flushFrame.current);
+    flushFrame.current = 0;
+    pendingRows.current = [];
+    pendingDone.current = 0;
+    setRows([]);
+    setDone(0);
+  }, []);
+  useEffect(() => () => {
+    if (flushFrame.current) cancelAnimationFrame(flushFrame.current);
+  }, []);
+
   useEffect(() => {
     setTemplate(seed);
-    setRows([]);
+    resetRows();
     setChosen(null);
-    setDone(0);
-  }, [seed]);
+  }, [seed, resetRows]);
 
   const positions = useMemo(() => countPositions(template), [template]);
   const marked = positions > 0;
@@ -240,6 +275,18 @@ export function IntruderView() {
       next[i] = value;
       return next;
     });
+
+  const saveWordlist = async (i: number) => {
+    const body = wordlists[i] ?? "";
+    if (!body.trim()) {
+      toast.error(t("This list is empty."));
+      return;
+    }
+    const name = await promptText({ title: t("Save list"), placeholder: t("Wordlist name") });
+    if (!name || !name.trim()) return;
+    useWordlists.getState().save(name.trim(), body);
+    toast.success(t("Wordlist saved."));
+  };
 
   const view = useMemo(() => {
     let list = rows;
@@ -261,12 +308,15 @@ export function IntruderView() {
     return copy;
   }, [rows, filterText, onlyHits, sortCol, sortDir]);
 
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const colCount = 1 + (grepExtract ? 1 : 0) + grepPhrases.length + 3;
+  const win = useWindowedRows(resultsRef, view.length, 21);
+
   const attack = async () => {
     if (!marked || jobs.length === 0 || running) return;
     setRunning(true);
-    setRows([]);
+    resetRows();
     setChosen(null);
-    setDone(0);
     stop.current = false;
     const phrases = grepPhrases;
     let extractRe: RegExp | null = null;
@@ -294,34 +344,32 @@ export function IntruderView() {
             const reply = await bridge.proxyReplay(request, { session: useSession });
             const body = reply.ok ? reply.body ?? "" : "";
             const extracted = extractRe ? (body.match(extractRe)?.[1] ?? body.match(extractRe)?.[0] ?? "") : "";
-            setRows((current) => [
-              ...current,
-              {
-                index,
-                payload: jobs[index].label,
-                request: requestText,
-                status: reply.ok ? reply.status ?? 0 : 0,
-                length: reply.ok ? reply.bytes ?? body.length : 0,
-                ms: reply.ok ? reply.ms ?? 0 : 0,
-                body,
-                headers: reply.ok ? reply.headers ?? [] : [],
-                error: !reply.ok,
-                grepHits: phrases.map((ph) => body.includes(ph)),
-                extracted,
-              },
-            ]);
+            pendingRows.current.push({
+              index,
+              payload: jobs[index].label,
+              request: requestText,
+              status: reply.ok ? reply.status ?? 0 : 0,
+              length: reply.ok ? reply.bytes ?? body.length : 0,
+              ms: reply.ok ? reply.ms ?? 0 : 0,
+              body,
+              headers: reply.ok ? reply.headers ?? [] : [],
+              error: !reply.ok,
+              grepHits: phrases.map((ph) => body.includes(ph)),
+              extracted,
+            });
+            scheduleFlush();
           } catch {
-            setRows((current) => [
-              ...current,
-              { index, payload: jobs[index].label, request: requestText, status: 0, length: 0, ms: 0, body: "", headers: [], error: true, grepHits: phrases.map(() => false), extracted: "" },
-            ]);
+            pendingRows.current.push({ index, payload: jobs[index].label, request: requestText, status: 0, length: 0, ms: 0, body: "", headers: [], error: true, grepHits: phrases.map(() => false), extracted: "" });
+            scheduleFlush();
           }
         }
-        setDone((d) => d + 1);
+        pendingDone.current += 1;
+        scheduleFlush();
         if (delayMs > 0) await sleep(delayMs);
       }
     };
     await Promise.all(Array.from({ length: Math.max(1, Math.min(32, concurrency)) }, () => worker()));
+    flush();
     setRunning(false);
   };
 
@@ -521,6 +569,26 @@ export function IntruderView() {
                       {t(preset.label)}
                     </button>
                   ))}
+                  {savedLists.map((list) => (
+                    <button
+                      key={list.id}
+                      type="button"
+                      onClick={() => setWordlistAt(i, list.body)}
+                      onContextMenu={(e) => { e.preventDefault(); useWordlists.getState().remove(list.id); }}
+                      title={t("Click to load; right-click to delete")}
+                      className="rounded-sm border border-accent/40 px-1 py-0.5 text-[9px] text-accent transition-colors duration-100 hover:bg-hover"
+                    >
+                      {list.name}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => void saveWordlist(i)}
+                    title={t("Save this list for reuse")}
+                    className="rounded-sm border border-line px-1 py-0.5 text-[9px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+                  >
+                    {t("Save list")}
+                  </button>
                 </div>
                 <div className="flex items-center gap-1 pb-0.5">
                   <span className="text-[9px] text-fg-faint">{t("Range")}</span>
@@ -621,7 +689,7 @@ export function IntruderView() {
         <span className="text-[10px] tabular-nums text-fg-faint">{view.length}</span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={resultsRef} className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-left">
           <thead className="sticky top-0 bg-panel">
             <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
@@ -648,9 +716,15 @@ export function IntruderView() {
             </tr>
           </thead>
           <tbody>
-            {view.map((row) => (
+            {win.padTop > 0 && (
+              <tr aria-hidden="true">
+                <td colSpan={colCount} style={{ height: win.padTop, padding: 0 }} />
+              </tr>
+            )}
+            {view.slice(win.start, win.end).map((row) => (
               <tr
                 key={row.index}
+                data-vrow=""
                 onClick={() => setChosen(row)}
                 className={cn("cursor-pointer border-b border-line text-[11px] transition-colors duration-100 hover:bg-hover", chosen?.index === row.index && "bg-selected")}
               >
@@ -672,6 +746,11 @@ export function IntruderView() {
                 <td className="px-2 py-0.5 font-mono tabular-nums text-fg-faint">{row.ms}</td>
               </tr>
             ))}
+            {win.padBottom > 0 && (
+              <tr aria-hidden="true">
+                <td colSpan={colCount} style={{ height: win.padBottom, padding: 0 }} />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

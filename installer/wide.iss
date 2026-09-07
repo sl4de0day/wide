@@ -1,5 +1,5 @@
 ﻿#define AppName "Wide"
-#define AppVersion "0.97926"
+#define AppVersion "1.07926"
 #define AppPublisher "sl4de"
 #define AppRepo "https://github.com/sl4de0day/wide"
 
@@ -125,14 +125,27 @@ begin
   end;
 end;
 
+procedure RemoveShellIntegration();
+begin
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Applications\wide.exe');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Directory\shell\OpenWithWide');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Directory\Background\shell\OpenWithWide');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\*\shell\OpenWithWide');
+end;
+
 procedure CurUninstallStepChanged(CurStep: TUninstallStep);
 begin
   if CurStep = usPostUninstall then
   begin
-    if MsgBox('Remove Wide''s data too (settings, saved keys, proxy CA, extensions, browser data)? Choose No to keep them.', mbConfirmation, MB_YESNO) = IDYES then
+    RemoveShellIntegration();
+    if not UninstallSilent() then
     begin
-      DelTree(ExpandConstant('{userappdata}\wide'), True, True, True);
-      DelTree(ExpandConstant('{localappdata}\wide'), True, True, True);
+      if MsgBox('Remove Wide''s data too (settings, saved keys, proxy CA, extensions, browser data)? Choose No to keep them.', mbConfirmation, MB_YESNO) = IDYES then
+      begin
+        DelTree(ExpandConstant('{userappdata}\wide'), True, True, True);
+        DelTree(ExpandConstant('{localappdata}\wide'), True, True, True);
+        RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Wide');
+      end;
     end;
   end;
 end;

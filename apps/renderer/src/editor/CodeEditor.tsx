@@ -34,6 +34,7 @@ import { useSettings } from "@/stores/settings";
 import { useWorkspace } from "@/stores/workspace";
 import { recallLastFile, rememberScroll } from "@/lib/lastFile";
 import { extname, normalisePath } from "@/lib/utils";
+import { clearActiveEditorView, setActiveEditorView } from "./activeView";
 import { colorSwatches } from "./features/colors";
 import { emmet } from "./features/emmet";
 import { diagnosticMarks } from "./features/diagnostics";
@@ -144,6 +145,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
             lastPushed.current = text;
             updateContent(pathRef.current, text);
           }
+          if (update.focusChanged && update.view.hasFocus) setActiveEditorView(update.view);
           if (update.selectionSet || update.docChanged) {
             const head = update.state.selection.main.head;
             const line = update.state.doc.lineAt(head);
@@ -165,6 +167,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
 
     const instance = new EditorView({ state, parent: holder.current });
     view.current = instance;
+    setActiveEditorView(instance);
 
     void languageFor(tab.path).then((language) => {
       if (language && view.current === instance) {
@@ -183,6 +186,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
 
     return () => {
       unsubscribe();
+      clearActiveEditorView(instance);
       instance.destroy();
       view.current = null;
     };

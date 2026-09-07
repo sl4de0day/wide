@@ -94,6 +94,9 @@ interface AiState {
 
   revealTurn: { session: string; index: number } | null;
 
+  pendingDraft: { session: string; text: string } | null;
+  setPendingDraft(session: string, text: string): void;
+
   attachments: Record<string, string[]>;
   attach(sessionId: string, path: string): void;
   detach(sessionId: string, path: string): void;
@@ -109,6 +112,7 @@ interface AiState {
   setKey(provider: string, key: string): Promise<boolean>;
 
   ask(sessionId: string, text: string): Promise<void>;
+  regenerate(sessionId: string): Promise<void>;
   stop(sessionId: string): Promise<void>;
 
   setQuery(query: string): void;
@@ -121,7 +125,38 @@ interface AiState {
 
 const root = () => useWorkspace.getState().root ?? "";
 
-function systemPrompt(): string {
+const INSTRUCTION_FILES = [".wide/ai-instructions.md", ".wide/ai-instructions"];
+const instructionCache = new Map<string, string>();
+
+async function projectInstructions(projectRoot: string): Promise<string> {
+  if (!projectRoot) return "";
+  const cached = instructionCache.get(projectRoot);
+  if (cached !== undefined) return cached;
+  const separator = projectRoot.includes("\\") ? "\\" : "/";
+  const base = projectRoot.replace(/[\\/]+$/, "");
+  let found = "";
+  for (const relative of INSTRUCTION_FILES) {
+    const path = `${base}${separator}${separator === "\\" ? relative.replace(/\//g, "\\") : relative}`;
+    try {
+      const file = await bridge.readFile(path);
+      if (file && !file.error && !file.tooLarge && file.content) {
+        found = String(file.content).trim();
+        if (found) break;
+      }
+    } catch {
+
+    }
+  }
+  instructionCache.set(projectRoot, found);
+  return found;
+}
+
+export function forgetProjectInstructions(projectRoot?: string): void {
+  if (projectRoot) instructionCache.delete(projectRoot);
+  else instructionCache.clear();
+}
+
+function systemPrompt(instructions = ""): string {
   const workspace = useWorkspace.getState();
 
   const open = useEditor.getState().lastFilePath ?? "";
@@ -132,6 +167,7 @@ function systemPrompt(): string {
     "Use the tools to look at the project rather than guessing or asking the person to paste code.",
     "When you change a file, read it first: write_file replaces the whole file.",
     "Be brief. Answer the question that was asked.",
+    instructions ? `\nProject instructions from .wide/ai-instructions (follow these):\n${instructions}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -200,7 +236,10 @@ export const useAi = create<AiState>((set, get) => ({
   error: "",
   busy: false,
   revealTurn: null,
+  pendingDraft: null,
   attachments: {},
+
+  setPendingDraft: (session, text) => set({ pendingDraft: { session, text } }),
 
   load: async () => {
     const [config, keys] = await Promise.all([bridge.aiConfig(), bridge.aiKeyStatus()]);
@@ -353,14 +392,6 @@ export const useAi = create<AiState>((set, get) => ({
     const unreadable = missing.length
       ? t("{name} could not be opened.", { name: missing.map(basename).join(", ") })
       : "";
-    if (attachments.length > 0) {
-      set((state) => ({
-        attachments: {
-          ...state.attachments,
-          [sessionId]: (state.attachments[sessionId] ?? []).filter((held) => !attachments.includes(held)),
-        },
-      }));
-    }
 
     const projectRoot = chat.root || root();
     let cut = chat.history.length;
@@ -392,7 +423,7 @@ export const useAi = create<AiState>((set, get) => ({
         provider,
         model,
         messages: providerMessages,
-        system: systemPrompt(),
+        system: systemPrompt(await projectInstructions(projectRoot)),
       })
       .catch(
         (failure: unknown): Ok<{ answered?: boolean }> => ({
@@ -400,6 +431,15 @@ export const useAi = create<AiState>((set, get) => ({
           error: failure instanceof Error ? failure.message : String(failure),
         }),
       );
+
+    if ((reply.ok || reply.error === "stopped") && attachments.length > 0) {
+      set((state) => ({
+        attachments: {
+          ...state.attachments,
+          [sessionId]: (state.attachments[sessionId] ?? []).filter((held) => !attachments.includes(held)),
+        },
+      }));
+    }
 
     set((state) => ({
       chats: patchChat(state.chats, sessionId, (current) => ({
@@ -437,6 +477,33 @@ export const useAi = create<AiState>((set, get) => ({
         sessions: [meta, ...state.sessions.filter((session) => session.id !== sessionId)],
       }));
     }
+  },
+
+  regenerate: async (sessionId) => {
+    const chat = get().chats[sessionId];
+    if (!chat || chat.activeTurn || !chat.loaded) return;
+
+    let turnIndex = chat.turns.length - 1;
+    while (turnIndex >= 0 && chat.turns[turnIndex].role !== "user") turnIndex -= 1;
+    if (turnIndex < 0) return;
+    const text = chat.turns[turnIndex].text;
+    if (!text.trim()) return;
+
+    const keptTurns = chat.turns.slice(0, turnIndex);
+    let cut = chat.history.length;
+    while (cut > 0 && chat.history[cut - 1]?.role === "assistant") cut -= 1;
+    while (cut > 0 && chat.history[cut - 1]?.role === "user") cut -= 1;
+    const keptHistory = chat.history.slice(0, cut);
+
+    set((state) => ({
+      chats: patchChat(state.chats, sessionId, (current) => ({
+        ...current,
+        turns: keptTurns,
+        history: keptHistory,
+        error: "",
+      })),
+    }));
+    await get().ask(sessionId, text);
   },
 
   stop: async (sessionId) => {

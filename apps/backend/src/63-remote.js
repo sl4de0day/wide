@@ -24,13 +24,15 @@ async function writeRemoteProfiles(profiles) {
 function normalizeRemoteProfile(input) {
   const src = input && typeof input === "object" ? input : {};
   const host = typeof src.host === "string" ? src.host.trim() : "";
-  if (!host) return null;
+  if (!host || host.startsWith("-") || /[\s]/.test(host)) return null;
+  const portNum = typeof src.port === "number" ? src.port : parseInt(String(src.port ?? ""), 10);
+  const user = typeof src.user === "string" ? src.user.trim() : "";
   return {
     id: typeof src.id === "string" && src.id ? src.id : `r${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
     name: typeof src.name === "string" && src.name.trim() ? src.name.trim() : host,
     host,
-    port: Number.isFinite(src.port) && src.port > 0 ? Math.floor(src.port) : 22,
-    user: typeof src.user === "string" ? src.user.trim() : "",
+    port: Number.isFinite(portNum) && portNum > 0 && portNum <= 65535 ? Math.floor(portNum) : 22,
+    user: user.startsWith("-") ? "" : user,
     keyPath: typeof src.keyPath === "string" ? src.keyPath.trim() : "",
     cwd: typeof src.cwd === "string" ? src.cwd.trim() : "",
   };
@@ -39,8 +41,8 @@ function normalizeRemoteProfile(input) {
 function remoteSshArgs(profile, extra, batch) {
   const args = [];
   if (profile.port && profile.port !== 22) args.push("-p", String(profile.port));
-  if (profile.keyPath) args.push("-i", profile.keyPath);
-  args.push("-o", "StrictHostKeyChecking=accept-new");
+  if (profile.keyPath) args.push("-i", profile.keyPath, "-o", "IdentitiesOnly=yes");
+  args.push("-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3");
   if (batch) args.push("-o", "BatchMode=yes", "-o", "ConnectTimeout=12");
   args.push(profile.user ? `${profile.user}@${profile.host}` : profile.host);
   if (Array.isArray(extra)) for (const part of extra) args.push(part);
@@ -71,7 +73,7 @@ function runSsh(profile, remoteCommand, options) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { child.kill(); } catch {}
+      try { killProcessTree(child); } catch { try { child.kill(); } catch {} }
       resolve({ code: -1, stdout, stderr: stderr || "The remote command timed out." });
     }, opts.timeout || 20000);
     child.stdout.on("data", (chunk) => { if (stdout.length < cap) stdout += chunk.toString("utf8"); });
@@ -154,13 +156,13 @@ function registerRemoteHandlers() {
     const at = profiles.findIndex((p) => p.id === profile.id);
     if (at === -1) profiles.push(profile);
     else profiles[at] = profile;
-    await writeRemoteProfiles(profiles);
+    if (!(await writeRemoteProfiles(profiles))) return { ok: false, error: "The remote profile could not be saved." };
     return { ok: true, profile };
   });
 
   electron.ipcMain.handle("remote:remove", async (_event, id) => {
     const profiles = (await readRemoteProfiles()).map(normalizeRemoteProfile).filter(Boolean);
-    await writeRemoteProfiles(profiles.filter((p) => p.id !== id));
+    if (!(await writeRemoteProfiles(profiles.filter((p) => p.id !== id)))) return { ok: false, error: "The change could not be saved." };
     return { ok: true };
   });
 
@@ -186,7 +188,7 @@ function registerRemoteHandlers() {
     const profile = normalizeRemoteProfile(input);
     if (!profile) return { ok: false, error: "A remote profile needs a host." };
     const target = typeof dir === "string" && dir ? dir : profile.cwd || ".";
-    const result = await runSsh(profile, `ls -1Ap -- ${remoteShellQuote(target)}`, { timeout: 20000, batch: true });
+    const result = await runSsh(profile, `ls -1ApL -- ${remoteShellQuote(target)}`, { timeout: 20000, batch: true });
     if (result.code !== 0) return { ok: false, error: (result.stderr || "Could not list that directory.").trim() };
     const entries = result.stdout
       .split("\n")
@@ -200,9 +202,20 @@ function registerRemoteHandlers() {
     const profile = normalizeRemoteProfile(input);
     if (!profile) return { ok: false, error: "A remote profile needs a host." };
     if (typeof filePath !== "string" || !filePath) return { ok: false, error: "No file path." };
-    const result = await runSsh(profile, `cat -- ${remoteShellQuote(filePath)}`, { timeout: 30000, batch: true });
-    if (result.code !== 0) return { ok: false, error: (result.stderr || "Could not read that file.").trim() };
-    return { ok: true, content: result.stdout };
+    const q = remoteShellQuote(filePath);
+    const MAX = 3 * 1024 * 1024;
+    const script = `f=${q}; if [ ! -f "$f" ]; then echo __WIDE_NOFILE__ 1>&2; exit 1; fi; s=$(wc -c < "$f" | tr -d ' '); echo "__WIDE_SIZE__$s"; if [ "$s" -le ${MAX} ]; then base64 < "$f"; fi`;
+    const result = await runSsh(profile, script, { timeout: 40000, batch: true, maxBytes: MAX * 2 + 8192 });
+    if (result.code !== 0) return { ok: false, error: (/__WIDE_NOFILE__/.test(result.stderr) ? "That file does not exist." : (result.stderr || "Could not read that file.")).trim() };
+    const nl = result.stdout.indexOf("\n");
+    const head = nl === -1 ? result.stdout : result.stdout.slice(0, nl);
+    const sizeMatch = /__WIDE_SIZE__(\d+)/.exec(head);
+    const size = sizeMatch ? Number(sizeMatch[1]) : 0;
+    if (size > MAX) return { ok: true, tooLarge: true, size, content: "" };
+    let buf;
+    try { buf = Buffer.from((nl === -1 ? "" : result.stdout.slice(nl + 1)).replace(/\s+/g, ""), "base64"); } catch { buf = Buffer.alloc(0); }
+    if (buf.includes(0)) return { ok: true, binary: true, size, content: "" };
+    return { ok: true, content: buf.toString("utf8"), size };
   });
 
   electron.ipcMain.handle("remote:mkdir", async (_event, input, dir) => {
@@ -238,7 +251,7 @@ function registerRemoteHandlers() {
     const profile = normalizeRemoteProfile(input);
     if (!profile || typeof query !== "string" || !query.trim()) return { ok: false, error: "No search text." };
     const where = typeof dir === "string" && dir ? dir : profile.cwd || ".";
-    const cmd = `grep -rIni --binary-files=without-match -e ${remoteShellQuote(query)} -- ${remoteShellQuote(where)} 2>/dev/null | head -n 500`;
+    const cmd = `grep -rInFi --binary-files=without-match --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=venv --exclude-dir=dist --exclude-dir=build --exclude-dir=target -e ${remoteShellQuote(query)} -- ${remoteShellQuote(where)} 2>/dev/null | head -n 500`;
     const result = await runSsh(profile, cmd, { timeout: 30000, batch: true });
     const matches = [];
     for (const line of result.stdout.split("\n")) {
@@ -248,15 +261,19 @@ function registerRemoteHandlers() {
     return { ok: true, matches };
   });
 
-  electron.ipcMain.handle("remote:writeFile", async (_event, input, filePath, content) => {
+  electron.ipcMain.handle("remote:writeFile", async (_event, input, filePath, content, expectedSize) => {
     const profile = normalizeRemoteProfile(input);
     if (!profile) return { ok: false, error: "A remote profile needs a host." };
     if (typeof filePath !== "string" || !filePath) return { ok: false, error: "No file path." };
-    const result = await runSsh(profile, `cat > ${remoteShellQuote(filePath)}`, {
-      timeout: 30000,
-      batch: true,
-      input: typeof content === "string" ? content : "",
-    });
+    const q = remoteShellQuote(filePath);
+    const b64 = Buffer.from(typeof content === "string" ? content : "", "utf8").toString("base64");
+    const guard =
+      Number.isFinite(expectedSize) && expectedSize >= 0
+        ? `cur=$(wc -c < "$f" 2>/dev/null | tr -d ' '); if [ -n "$cur" ] && [ "$cur" != "${Math.floor(expectedSize)}" ]; then echo __WIDE_CONFLICT__ 1>&2; exit 3; fi; `
+        : "";
+    const script = `f=${q}; ${guard}t="$f.wide-tmp-$$"; base64 -d > "$t" && mv -- "$t" "$f"`;
+    const result = await runSsh(profile, script, { timeout: 40000, batch: true, input: b64 });
+    if (result.code === 3 || /__WIDE_CONFLICT__/.test(result.stderr)) return { ok: false, conflict: true, error: "The remote file changed since you opened it." };
     if (result.code !== 0) return { ok: false, error: (result.stderr || "Could not write that file.").trim() };
     return { ok: true };
   });

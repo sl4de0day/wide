@@ -136,7 +136,7 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
       {file ? (
         <Breadcrumbs path={file.path} root={root} rootName={rootName} onOpenPanel={onOpenPanel} />
       ) : (
-        <span className="text-fg-faint">{tab ? tab.name : t("Ready")}</span>
+        <span className="text-fg-faint">{tab ? (tab.kind === "file" ? tab.name : t(tab.name)) : t("Ready")}</span>
       )}
 
       <div className="flex-1" />

@@ -5,9 +5,11 @@ import { bridge } from "@/lib/bridge";
 import { LANGUAGES, useT, type Language } from "@/lib/i18n";
 import { THEMES, type ThemeId } from "@/lib/themes";
 import { formatCombo, shortcutFor, useCommandPalette } from "@/stores/commands";
-import { cn } from "@/lib/utils";
+import { cn, copyText } from "@/lib/utils";
 import { useEditor } from "@/stores/editor";
-import { useSettings } from "@/stores/settings";
+import { DEFAULTS, useSettings } from "@/stores/settings";
+import { promptText } from "@/stores/prompt";
+import { toast } from "@/stores/toast";
 import { useUpdate } from "@/stores/update";
 
 const ABOUT_DESCRIPTION =
@@ -259,6 +261,32 @@ export function SettingsView() {
     if (!aboutVersion) void useUpdate.getState().check();
   }, [aboutVersion]);
 
+  const exportSettings = async () => {
+    const { set: _s, reset: _r, ...values } = useSettings.getState();
+    const ok = await copyText(JSON.stringify(values, null, 2));
+    if (ok) toast.success(t("Settings copied to the clipboard."));
+    else toast.error(t("Could not copy the settings."));
+  };
+  const importSettings = async () => {
+    const raw = await promptText({
+      title: t("Import settings"),
+      placeholder: t("Paste exported settings JSON"),
+    });
+    if (!raw || !raw.trim()) return;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object") throw new Error("bad");
+      const patch: Record<string, unknown> = {};
+      for (const key of Object.keys(DEFAULTS)) {
+        if (key in parsed) patch[key] = (parsed as Record<string, unknown>)[key];
+      }
+      settings.set(patch as Partial<typeof DEFAULTS>);
+      toast.success(t("Settings imported."));
+    } catch {
+      toast.error(t("That is not valid settings JSON."));
+    }
+  };
+
   return (
     <div className="wide-enter-fade h-full overflow-auto px-6 py-5">
       <div className="mx-auto w-full max-w-[560px]">
@@ -335,6 +363,12 @@ export function SettingsView() {
         >
           <Toggle value={settings.formatOnSave} onChange={(next) => settings.set({ formatOnSave: next })} />
         </Row>
+        <Row
+          label={t("Open dev-server URLs in the built-in browser")}
+          hint={t("When a run task prints a localhost URL, open it automatically in Wide's browser.")}
+        >
+          <Toggle value={settings.autoOpenDevServer} onChange={(next) => settings.set({ autoOpenDevServer: next })} />
+        </Row>
 
         <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Security")}</h2>
         <Row
@@ -361,7 +395,7 @@ export function SettingsView() {
         <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("About")}</h2>
         <div className="border-b border-line py-3">
           <p className="text-[14px] font-semibold text-fg-bright">{t("About Wide")}</p>
-          <p className="pt-2 text-[12px] leading-relaxed text-fg-dim">{ABOUT_DESCRIPTION}</p>
+          <p className="pt-2 text-[12px] leading-relaxed text-fg-dim">{t(ABOUT_DESCRIPTION)}</p>
           <div className="flex flex-col gap-1.5 pt-3">
             <div className="flex items-center justify-between text-[12px]">
               <span className="text-fg-dim">{t("Version")}</span>
@@ -388,13 +422,29 @@ export function SettingsView() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => settings.reset()}
-          className="mt-6 rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
-        >
-          {t("Reset to defaults")}
-        </button>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void exportSettings()}
+            className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            {t("Export settings")}
+          </button>
+          <button
+            type="button"
+            onClick={() => void importSettings()}
+            className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            {t("Import settings")}
+          </button>
+          <button
+            type="button"
+            onClick={() => settings.reset()}
+            className="rounded-md border border-line px-3 py-1.5 text-[12px] text-fg-muted transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            {t("Reset to defaults")}
+          </button>
+        </div>
       </div>
     </div>
   );

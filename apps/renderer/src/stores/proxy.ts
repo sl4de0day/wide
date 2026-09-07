@@ -9,7 +9,7 @@ import {
   type ProxyWsFrame,
 } from "@/lib/bridge";
 import { passiveChecks } from "@/lib/passiveScan";
-import { useFindings } from "./findings";
+import { useFindings, type Severity } from "./findings";
 
 const MAX = 5000;
 const FRAME_MAX = 5000;
@@ -44,6 +44,7 @@ interface ProxyState {
   clear(): Promise<void>;
   select(id: number | null): void;
   ingest(entry: ProxyEntry): void;
+  ingestBatch(entries: ProxyEntry[]): void;
   importEntries(entries: ProxyEntry[]): void;
   ingestFrame(frame: ProxyWsFrame): void;
   setRules(rules: MatchReplaceRule[]): Promise<void>;
@@ -176,6 +177,38 @@ export const useProxy = create<ProxyState>((set, get) => ({
       return { entries };
     }),
 
+  ingestBatch: (list) => {
+    if (!list.length) return;
+    const findingsToAdd: { title: string; severity: Severity; location: string; detail: string }[] = [];
+    if (get().scanning) {
+      for (const entry of list) {
+        if (entry.websocket) continue;
+        for (const issue of passiveChecks(entry)) {
+          const key = `${entry.host}:${issue.checkId}`;
+          if (scannedKeys.has(key)) continue;
+          scannedKeys.add(key);
+          findingsToAdd.push({ title: issue.title, severity: issue.severity, location: entry.url, detail: issue.detail });
+        }
+      }
+    }
+    set((state) => {
+      const entries = state.entries.slice();
+      const indexById = new Map<number, number>();
+      for (let i = 0; i < entries.length; i += 1) indexById.set(entries[i].id, i);
+      for (const entry of list) {
+        const at = indexById.get(entry.id);
+        if (at !== undefined) entries[at] = entry;
+        else {
+          indexById.set(entry.id, entries.length);
+          entries.push(entry);
+        }
+      }
+      if (entries.length > MAX) entries.splice(0, entries.length - MAX);
+      return { entries };
+    });
+    for (const finding of findingsToAdd) useFindings.getState().add(finding);
+  },
+
   ingest: (entry) => {
 
     if (get().scanning && !entry.websocket) {
@@ -264,8 +297,7 @@ export const useProxy = create<ProxyState>((set, get) => ({
 
 export function subscribeProxyTraffic(): () => void {
   const offTraffic = bridge.onProxyTraffic((batch) => {
-    const s = useProxy.getState();
-    for (const entry of batch) s.ingest(entry);
+    useProxy.getState().ingestBatch(batch);
   });
   const offWs = bridge.onProxyWs((batch) => {
     const s = useProxy.getState();

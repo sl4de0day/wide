@@ -1,5 +1,5 @@
-import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
 import { bridge, type InterceptedRequest, type InterceptedResponse, type MatchReplaceRule, type ProxyEntry } from "@/lib/bridge";
@@ -11,6 +11,8 @@ import { curlFromParts } from "@/lib/pitcher/codegen";
 import { useWorkspace } from "@/stores/workspace";
 import { useT } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
+import { useWindowedRows } from "@/lib/useWindow";
+import { goToRouteInCode } from "@/lib/trafficBridge";
 import { useCyberchef } from "@/stores/cyberchef";
 import { useDecoder } from "@/stores/decoder";
 import { useExtensions } from "@/stores/extensions";
@@ -166,6 +168,17 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
         >
           <Globe className="size-3.5" strokeWidth={2} />
         </button>
+        {!entry.websocket && (
+          <button
+            type="button"
+            onClick={() => void goToRouteInCode(entry.method, entry.url)}
+            title={t("Go to the route in the code")}
+            aria-label={t("Go to the route in the code")}
+            className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+          >
+            <FileCode2 className="size-3.5" strokeWidth={2} />
+          </button>
+        )}
         {
 }
         {!entry.websocket && (
@@ -828,6 +841,7 @@ const TrafficRow = memo(function TrafficRow({ entry, selected }: { entry: ProxyE
   return (
     <button
       type="button"
+      data-vrow=""
       onClick={() => useProxy.getState().select(selected ? null : entry.id)}
       className={cn(
         "flex w-full items-baseline gap-2 border-b border-line px-3 py-1.5 text-left transition-colors duration-100",
@@ -892,6 +906,9 @@ export function ProxyPanel() {
   }, [entries, filter]);
   const grouped = useMemo(() => (byHost ? groupByHost(shown) : []), [byHost, shown]);
   const chosen = useMemo(() => entries.find((entry) => entry.id === selected) ?? null, [entries, selected]);
+
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const win = useWindowedRows(scrollerRef, byHost ? 0 : shown.length, 29);
 
   return (
     <div className="flex h-full flex-col">
@@ -1083,7 +1100,7 @@ export function ProxyPanel() {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
         {shown.length === 0 ? (
           <p className="px-3 py-4 text-[12px] leading-relaxed text-fg-faint">
             {running
@@ -1103,7 +1120,13 @@ export function ProxyPanel() {
             </div>
           ))
         ) : (
-          shown.map((entry) => <TrafficRow key={entry.id} entry={entry} selected={entry.id === selected} />)
+          <>
+            {win.padTop > 0 && <div style={{ height: win.padTop }} aria-hidden="true" />}
+            {shown.slice(win.start, win.end).map((entry) => (
+              <TrafficRow key={entry.id} entry={entry} selected={entry.id === selected} />
+            ))}
+            {win.padBottom > 0 && <div style={{ height: win.padBottom }} aria-hidden="true" />}
+          </>
         )}
       </div>
 

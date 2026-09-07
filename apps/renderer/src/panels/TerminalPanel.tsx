@@ -8,6 +8,8 @@ import { useT } from "@/lib/i18n";
 import { terminalFontFamily, terminalTheme } from "@/lib/themes";
 import { PanelHeader, panelButtonClass } from "@/components/SidePanel";
 import { bridge } from "@/lib/bridge";
+import { openInBrowser } from "@/lib/browserActions";
+import { useDevServers } from "@/stores/devServers";
 import { useRemote } from "@/stores/remote";
 import { useRun } from "@/stores/run";
 import { useSettings } from "@/stores/settings";
@@ -48,6 +50,28 @@ export function TerminalPanel() {
     termRef.current = term;
     fitRef.current = fit;
 
+    const openLink = (url: string) => {
+      if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/|\?|#|$)/i.test(url)) openInBrowser(url);
+      else void bridge.openExternal(url);
+    };
+    term.registerLinkProvider({
+      provideLinks(bufferLine, callback) {
+        const line = term.buffer.active.getLine(bufferLine - 1)?.translateToString(true) ?? "";
+        const re = /\bhttps?:\/\/[^\s"'`<>()[\]]+/g;
+        const links: { range: { start: { x: number; y: number }; end: { x: number; y: number } }; text: string; activate: () => void }[] = [];
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(line)) !== null) {
+          const url = m[0].replace(/[.,;:]+$/, "");
+          links.push({
+            range: { start: { x: m.index + 1, y: bufferLine }, end: { x: m.index + url.length, y: bufferLine } },
+            text: url,
+            activate: () => openLink(url),
+          });
+        }
+        callback(links.length ? links : undefined);
+      },
+    });
+
     const stack = term.options.fontFamily ?? "";
     void (async () => {
       try {
@@ -67,8 +91,32 @@ export function TerminalPanel() {
     })();
 
     let disposed = false;
+
+    let urlBuffer = "";
+    const openedOrigins = new Set<string>();
+    const detectDevServer = (chunk: string) => {
+      urlBuffer = (urlBuffer + chunk).slice(-600);
+      const re = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/[^\s"'`<>()[\]]*)?/gi;
+      const autoOpen = useSettings.getState().autoOpenDevServer;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(urlBuffer)) !== null) {
+        const url = match[0].replace(/[.,;:)\]]+$/, "");
+        try {
+          const origin = new URL(url).origin;
+          useDevServers.getState().add(origin.replace("0.0.0.0", "localhost"));
+          if (!autoOpen || openedOrigins.has(origin)) continue;
+          openedOrigins.add(origin);
+          openInBrowser(url.replace("0.0.0.0", "localhost"));
+        } catch {
+
+        }
+      }
+    };
+
     const offData = bridge.onTerminalData(({ id, text }) => {
-      if (id === idRef.current) term.write(text);
+      if (id !== idRef.current) return;
+      term.write(text);
+      detectDevServer(text);
     });
     const offExit = bridge.onTerminalExit(({ id }) => {
       if (id !== idRef.current) return;
@@ -162,6 +210,7 @@ export function TerminalPanel() {
     }
   }, [pending, drain, status]);
   const t = useT();
+  const devServers = useDevServers((state) => state.origins);
 
   return (
     <div className="flex h-full flex-col">
@@ -185,6 +234,22 @@ export function TerminalPanel() {
           <Trash2 className="size-3.5" strokeWidth={1.5} />
         </button>
       </PanelHeader>
+      {devServers.length > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-2 py-1">
+          <span className="text-[10px] uppercase tracking-wide text-fg-faint">{t("Local servers")}</span>
+          {devServers.map((origin) => (
+            <button
+              key={origin}
+              type="button"
+              title={t("Open in the built-in browser")}
+              onClick={() => openInBrowser(origin)}
+              className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-[10px] text-accent transition-colors duration-100 hover:bg-hover"
+            >
+              {origin.replace(/^https?:\/\//, "")}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-hidden bg-canvas p-1">
         <div ref={holder} className="h-full" />
       </div>
