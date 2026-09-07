@@ -1,13 +1,10 @@
 import {
-  Command,
   FilePlus2,
   FileText,
   Folder,
   FolderOpen,
   Layers,
-  Search,
   Settings,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -20,7 +17,6 @@ import { bridge, type Project } from "@/lib/bridge";
 import logo from "@/assets/wide-logo.png";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { useCommandPalette } from "@/stores/commands";
 import { useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
 
@@ -185,23 +181,6 @@ export function Launcher() {
 
         <Section title={t("Configure")}>
           <ActionRow icon={Settings} label={t("Settings")} onClick={openSettings} />
-        </Section>
-
-        <Section title={t("Tips")}>
-          <ActionRow
-            icon={Command}
-            label={t("Search everything")}
-            title={t("Commands, files and findings — one place")}
-            shortcut="Ctrl+Shift+P"
-            onClick={() => useCommandPalette.getState().openPalette()}
-          />
-          <ActionRow icon={Search} label={t("Search in files")} shortcut="Ctrl+Shift+F" onClick={() => void openFolder()} />
-          <ActionRow
-            icon={Sparkles}
-            label={t("Real-time security analysis as you type")}
-            title={t("Open a project to start")}
-            onClick={() => void openFolder()}
-          />
         </Section>
 
         {error && <p className="pt-4 text-[12px] text-status-error">{t(error)}</p>}
