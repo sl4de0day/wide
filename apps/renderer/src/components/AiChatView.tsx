@@ -1,4 +1,4 @@
-import { ArrowDown, AtSign, Check, ChevronDown, ChevronRight, Copy, FilePlus, FileUp, RefreshCw, Send, Square, X } from "lucide-react";
+import { ArrowDown, AtSign, Check, ChevronDown, ChevronRight, Copy, FilePlus, FileUp, ImagePlus, RefreshCw, Send, Square, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ModelPicker, useModelLabel } from "@/components/ai/ModelPicker";
@@ -10,7 +10,7 @@ import { basename, cn, copyText } from "@/lib/utils";
 import { confirm } from "@/stores/confirm";
 import { promptText } from "@/stores/prompt";
 import { toast } from "@/stores/toast";
-import { useAi, type AiToolStep, type AiTurn } from "@/stores/ai";
+import { AI_IMAGE_PROVIDERS, useAi, type AiImage, type AiToolStep, type AiTurn } from "@/stores/ai";
 import { useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
 
@@ -20,6 +20,7 @@ const keptFor = (id: string) => (kept[id] ??= { draft: "", scroll: 0, pinned: tr
 const unfolded: Record<string, boolean> = {};
 
 const NOTHING_ATTACHED: string[] = [];
+const NO_IMAGES: AiImage[] = [];
 
 const BODY = "text-[13px] leading-relaxed text-fg";
 
@@ -507,6 +508,62 @@ export function AiChatView({ id }: { id: string }) {
     composer.current?.focus();
   };
 
+  const images = useAi((state) => state.images[id] ?? NO_IMAGES);
+  const providerSupportsImages = useAi((state) => {
+    const config = state.config;
+    if (!config) return false;
+    return AI_IMAGE_PROVIDERS.has(config.tab === "local" ? "local" : config.provider);
+  });
+
+  const addImage = useCallback(
+    (name: string, mime: string, data: string) => {
+      if (!providerSupportsImages) {
+        toast.error(t("This model cannot read images. Switch to Claude, DeepSeek or a local vision model."));
+        return;
+      }
+      if (!useAi.getState().attachImage(id, { name, mime, data })) {
+        toast.error(t("That image is too large, or too many are attached."));
+      }
+    },
+    [id, providerSupportsImages, t],
+  );
+
+  const pickImage = useCallback(async () => {
+    const picked = await bridge.openFile();
+    if (!picked) return;
+    if (!/\.(png|jpe?g|webp|gif)$/i.test(picked.name)) {
+      toast.error(t("Pick a PNG, JPEG, WebP or GIF image."));
+      return;
+    }
+    const reply = await bridge.readBinary(picked.path);
+    if (!reply.ok || !reply.base64) {
+      toast.error(t(reply.error ?? "That image could not be read."));
+      return;
+    }
+    const ext = picked.name.split(".").pop()?.toLowerCase() ?? "png";
+    const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
+    addImage(picked.name, mime, reply.base64);
+  }, [addImage, t]);
+
+  const onPasteImages = useCallback(
+    (event: React.ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith("image/"));
+      if (files.length === 0) return;
+      event.preventDefault();
+      for (const file of files) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result ?? "");
+          const comma = result.indexOf(",");
+          if (comma < 0) return;
+          addImage(file.name || t("Pasted image"), file.type, result.slice(comma + 1));
+        };
+        reader.readAsDataURL(file);
+      }
+    },
+    [addImage, t],
+  );
+
   const [mentionFiles, setMentionFiles] = useState<{ path: string; relativePath: string }[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
   useEffect(() => {
@@ -860,10 +917,32 @@ export function AiChatView({ id }: { id: string }) {
               ))}
             </div>
           )}
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pb-1.5">
+              {images.map((image) => (
+                <span key={image.id} className="group/img relative block" title={image.name}>
+                  <img
+                    src={`data:${image.mime};base64,${image.data}`}
+                    alt={image.name}
+                    className="block size-12 rounded-sm border border-line object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => useAi.getState().detachImage(id, image.id)}
+                    aria-label={t("Remove")}
+                    className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full border border-line bg-panel text-fg-faint opacity-0 transition-opacity duration-100 hover:text-fg group-hover/img:opacity-100"
+                  >
+                    <X className="size-2.5" strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             ref={composer}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onPaste={onPasteImages}
             onKeyDown={(event) => {
               if (mentionOpen) {
                 if (event.key === "ArrowDown") {
@@ -932,6 +1011,18 @@ export function AiChatView({ id }: { id: string }) {
 }
           <div className="flex items-center gap-2 pt-2">
             <AttachButton session={id} />
+            <button
+              type="button"
+              onClick={() => void pickImage()}
+              title={t("Attach an image")}
+              aria-label={t("Attach an image")}
+              className={cn(
+                "flex size-6 items-center justify-center rounded-md border border-line transition-colors duration-100 hover:bg-hover",
+                "text-fg-faint hover:text-fg",
+              )}
+            >
+              <ImagePlus className="size-3.5" strokeWidth={1.75} />
+            </button>
             <ModelPicker />
             {contextTokens > 0 && (
               <span

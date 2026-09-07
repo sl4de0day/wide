@@ -42,6 +42,8 @@ export interface PmContext {
   iteration: number;
   results: TestResult[];
   logs: string[];
+
+  pending?: Promise<void>[];
 }
 
 function typeName(v: unknown): string {
@@ -369,9 +371,16 @@ export function createPm(ctx: PmContext): Record<string, unknown> {
       try {
         const out = fn();
         if (out && typeof (out as Promise<void>).then === "function") {
-          return (out as Promise<void>)
-            .then(() => ctx.results.push({ name, passed: true }))
-            .catch((e) => ctx.results.push({ name, passed: false, error: e instanceof Error ? e.message : String(e) }));
+          const settled = (out as Promise<void>)
+            .then(() => {
+              ctx.results.push({ name, passed: true });
+            })
+            .catch((e) => {
+              ctx.results.push({ name, passed: false, error: e instanceof Error ? e.message : String(e) });
+            });
+
+          (ctx.pending ??= []).push(settled);
+          return settled;
         }
         ctx.results.push({ name, passed: true });
       } catch (e) {

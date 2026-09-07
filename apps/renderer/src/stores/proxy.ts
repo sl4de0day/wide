@@ -80,11 +80,24 @@ export const useProxy = create<ProxyState>((set, get) => ({
 
   refresh: async () => {
     const [status, traffic] = await Promise.all([bridge.proxyStatus(), bridge.proxyTraffic()]);
+
+    const fromBackend = traffic.ok ? (traffic.entries ?? []) : [];
+    const merged = (() => {
+      if (fromBackend.length === 0) return get().entries;
+      const known = new Set(fromBackend.map((entry) => entry.id));
+
+      const rendererOnly = get().entries.filter((entry) => !known.has(entry.id));
+      if (rendererOnly.length === 0) return fromBackend;
+      const all = [...rendererOnly, ...fromBackend];
+      if (all.length > MAX) all.splice(0, all.length - MAX);
+      return all;
+    })();
+
     set({
       running: Boolean(status.ok && status.running),
       port: status.ok ? (status.port ?? 0) : 0,
       scope: status.ok ? (status.scope ?? []) : [],
-      entries: traffic.ok && (traffic.entries?.length ?? 0) > 0 ? (traffic.entries ?? []) : get().entries,
+      entries: merged,
 
       intercepting: status.ok ? Boolean(status.intercepting) : false,
       interceptingResponses: status.ok ? Boolean(status.interceptingResponses) : false,
@@ -119,6 +132,8 @@ export const useProxy = create<ProxyState>((set, get) => ({
 
   clear: async () => {
     await bridge.proxyClear();
+
+    scannedKeys.clear();
     set({ entries: [], selected: null });
   },
 

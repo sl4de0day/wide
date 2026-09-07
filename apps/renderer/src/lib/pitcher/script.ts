@@ -30,8 +30,24 @@ export async function runScript(code: string, ctx: PmContext): Promise<ScriptOut
     ) => (...args: unknown[]) => Promise<void>;
     const fn = AsyncFunction("pm", "console", "tests", code);
     await fn(pm, console, tests);
+
+    while (ctx.pending && ctx.pending.length > 0) {
+      const waiting = ctx.pending;
+      ctx.pending = [];
+      await Promise.all(waiting);
+    }
     return {};
   } catch (e) {
+
+    try {
+      while (ctx.pending && ctx.pending.length > 0) {
+        const waiting = ctx.pending;
+        ctx.pending = [];
+        await Promise.all(waiting);
+      }
+    } catch {
+      void 0;
+    }
     return { error: e instanceof Error ? e.message : String(e) };
   }
 }

@@ -23,7 +23,7 @@ const ANY = "";
 const EXTRACTORS: Extractor[] = [
   {
     framework: "Express/Node",
-    re: /\b(?:app|router|api|server|route|_?router)\s*\.\s*(get|post|put|delete|patch|options|head|all)\s*\(\s*(['"`])([^'"`]+)\2/i,
+    re: /(?<!@)\b(?:app|router|api|server|route|_?router)\s*\.\s*(get|post|put|delete|patch|options|head|all)\s*\(\s*(['"`])([^'"`]+)\2/i,
     method: (m) => (m[1].toLowerCase() === "all" ? ANY : m[1].toUpperCase()),
     path: (m) => m[3],
   },
@@ -97,6 +97,37 @@ function isParam(segment: string): boolean {
     segment.includes("(") ||
     segment.includes("%")
   );
+}
+
+export interface RouteHit {
+  line: number;
+  method: string;
+  path: string;
+  framework: string;
+}
+
+export function detectRoutesInText(text: string, filePath = ""): RouteHit[] {
+  const out: RouteHit[] = [];
+  const lines = text.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.length > 400) continue;
+    for (const extractor of EXTRACTORS) {
+      if (extractor.fileHint && !extractor.fileHint.test(filePath)) continue;
+      const match = extractor.re.exec(line);
+      if (!match) continue;
+      const path = extractor.path(match);
+      if (!path || (!path.startsWith("/") && !/^\w/.test(path))) continue;
+      out.push({
+        line: index + 1,
+        method: extractor.method(match) || "GET",
+        path: normalizePath(path),
+        framework: extractor.framework,
+      });
+      break;
+    }
+  }
+  return out;
 }
 
 const cache = new Map<string, RouteEntry[]>();

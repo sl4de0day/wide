@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Crosshair, Dices, Layers, Pickaxe, Plus, Radar, Radio, Repeat2, Target, X, type LucideIcon } from "lucide-react";
+import { ArrowLeftRight, Crosshair, Dices, KeyRound, Layers, Pickaxe, Plus, Radar, Radio, Repeat2, Target, X, type LucideIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import { CollaboratorView } from "@/components/CollaboratorView";
@@ -8,6 +8,7 @@ import { RepeaterView } from "@/components/RepeaterView";
 import { ScannerView } from "@/components/ScannerView";
 import { SequencerView } from "@/components/SequencerView";
 import { TechnologiesView } from "@/components/TechnologiesView";
+import { VaultView } from "@/components/VaultView";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { ProxyPanel } from "@/panels/ProxyPanel";
@@ -24,6 +25,7 @@ const TOOLS: { id: CatcherTool; label: string; icon: LucideIcon }[] = [
   { id: "scanner", label: "Scanner", icon: Radar },
   { id: "collaborator", label: "Collaborator", icon: Radio },
   { id: "sequencer", label: "Sequencer", icon: Dices },
+  { id: "vault", label: "Vault", icon: KeyRound },
 ];
 
 const BLANK_SEED = { method: "GET", url: "https://example.com/", headers: [] as [string, string][], body: "" };
@@ -169,6 +171,9 @@ export function CatcherView() {
         </div>
         <div className={cn("h-full", tool !== "sequencer" && "hidden")}>
           <SequencerView />
+        </div>
+        <div className={cn("h-full", tool !== "vault" && "hidden")}>
+          <VaultView />
         </div>
         {hasMiner && tool === "miner" && (
           <div className="h-full">

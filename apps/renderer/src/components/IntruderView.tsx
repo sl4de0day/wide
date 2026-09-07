@@ -725,8 +725,15 @@ export function IntruderView() {
               <tr
                 key={row.index}
                 data-vrow=""
+                tabIndex={0}
+                aria-selected={chosen?.index === row.index}
                 onClick={() => setChosen(row)}
-                className={cn("cursor-pointer border-b border-line text-[11px] transition-colors duration-100 hover:bg-hover", chosen?.index === row.index && "bg-selected")}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  setChosen(row);
+                }}
+                className={cn("cursor-pointer border-b border-line text-[11px] transition-colors duration-100 hover:bg-hover focus-visible:bg-hover", chosen?.index === row.index && "bg-selected")}
               >
                 <td className="max-w-0 truncate px-2 py-0.5 font-mono text-fg" title={row.payload}>
                   {row.payload}

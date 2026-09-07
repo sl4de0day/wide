@@ -274,6 +274,15 @@ export interface OastInteraction {
 
 
 
+export interface VaultEntry {
+  id: string;
+  name: string;
+  kind: "bearer" | "header" | "cookie" | "basic";
+  headerName: string;
+  note: string;
+  updatedAt: number;
+}
+
 export interface ProxyEntry {
   id: number;
   at: number;
@@ -963,6 +972,13 @@ export interface HostApi {
 
   proxyCaCert(): Promise<Ok<{ pem?: string }>>;
   proxyCaCertPath(): Promise<Ok<{ path?: string }>>;
+  proxyCaStatus(): Promise<Ok<{ supported?: boolean; thumbprint?: string; trusted?: boolean }>>;
+  vaultList(): Promise<Ok<{ entries?: VaultEntry[] }>>;
+  vaultSave(input: { id?: string; name: string; kind: string; headerName?: string; note?: string; secret?: string }): Promise<Ok<{ entries?: VaultEntry[] }>>;
+  vaultRemove(id: string): Promise<Ok<{ entries?: VaultEntry[] }>>;
+  vaultHeaders(id: string): Promise<Ok<{ headers?: [string, string][] }>>;
+  proxyCaTrust(): Promise<Ok<{ trusted?: boolean }>>;
+  proxyCaUntrust(): Promise<Ok<{ trusted?: boolean }>>;
 
   proxyReplay(
     request: {
@@ -1407,6 +1423,13 @@ const fallback = {
   proxyClear: async () => (warn(), { ok: false, error: "No bridge" }),
   proxyCaCert: async () => (warn(), { ok: false, error: "No bridge" }),
   proxyCaCertPath: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxyCaStatus: async () => (warn(), { ok: false, error: "No bridge" }),
+  vaultList: async () => (warn(), { ok: true, entries: [] }),
+  vaultSave: async () => (warn(), { ok: false, error: "No bridge" }),
+  vaultRemove: async () => (warn(), { ok: false, error: "No bridge" }),
+  vaultHeaders: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxyCaTrust: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxyCaUntrust: async () => (warn(), { ok: false, error: "No bridge" }),
   proxyReplay: async () => (warn(), { ok: false, error: "No bridge" }),
   onProxyTraffic: noSub<ProxyEntry[]>(),
   onProxyWs: noSub<ProxyWsFrame[]>(),

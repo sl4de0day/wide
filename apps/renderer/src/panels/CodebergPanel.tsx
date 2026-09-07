@@ -18,6 +18,7 @@ import { PanelHeader } from "@/components/SidePanel";
 import type { CodebergFile } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { providerById } from "@/lib/gitProviders";
 import { partition, statusLetter, useCodeberg } from "@/stores/codeberg";
 import { useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
@@ -147,7 +148,7 @@ function Setup({
   );
 }
 
-export function CodebergPanel({ builtin }: { builtin?: boolean; onOpenPanel?: (id: string) => void } = {}) {
+export function CodebergPanel({ builtin, providerId }: { builtin?: boolean; providerId?: string; onOpenPanel?: (id: string) => void } = {}) {
   const t = useT();
   const root = useWorkspace((state) => state.root);
   const status = useCodeberg((state) => state.status);
@@ -157,11 +158,18 @@ export function CodebergPanel({ builtin }: { builtin?: boolean; onOpenPanel?: (i
   const busy = useCodeberg((state) => state.busy);
   const error = useCodeberg((state) => state.error);
   const notice = useCodeberg((state) => state.notice);
-  const signedIn = useCodeberg((state) => state.signedIn);
-  const username = useCodeberg((state) => state.username);
   const branches = useCodeberg((state) => state.branches);
 
-  const provider = useCodeberg((state) => state.provider);
+  const remoteProvider = useCodeberg((state) => state.provider);
+
+  const provider = providerId ? providerById(providerId) : remoteProvider;
+  const account = useCodeberg((state) => state.accounts[provider.host]);
+  const signedIn = Boolean(account?.signedIn);
+  const username = account?.username ?? "";
+
+  useEffect(() => {
+    if (provider.host) void useCodeberg.getState().checkAccount(provider.host);
+  }, [provider.host]);
 
   const [signInUser, setSignInUser] = useState("");
   const [signInToken, setSignInToken] = useState("");
@@ -622,7 +630,7 @@ export function CodebergPanel({ builtin }: { builtin?: boolean; onOpenPanel?: (i
               </span>
               <button
                 type="button"
-                onClick={() => void act().signOut()}
+                onClick={() => void act().signOut(provider.host)}
                 className="shrink-0 rounded-sm border border-line px-2 py-0.5 text-[11px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
               >
                 {t("Sign out")}
@@ -650,7 +658,7 @@ export function CodebergPanel({ builtin }: { builtin?: boolean; onOpenPanel?: (i
                 disabled={!signInUser.trim() || !signInToken}
                 onClick={() => {
                   void act()
-                    .signIn(signInUser.trim(), signInToken)
+                    .signIn(signInUser.trim(), signInToken, provider.host)
                     .then(() => setSignInToken(""));
                 }}
                 className="mx-2 rounded-sm border border-line px-2 py-1 text-[11px] text-fg transition-colors duration-100 hover:bg-hover disabled:opacity-40"

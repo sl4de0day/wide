@@ -51,6 +51,19 @@ export interface AiChat {
   loaded: boolean;
 }
 
+export interface AiImage {
+  id: string;
+  name: string;
+  mime: string;
+
+  data: string;
+}
+
+export const AI_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const AI_IMAGE_MAX_COUNT = 4;
+
+export const AI_IMAGE_PROVIDERS = new Set(["claude", "deepseek", "local"]);
+
 export interface AiPullState {
   reference: string;
   status: string;
@@ -100,6 +113,10 @@ interface AiState {
   attachments: Record<string, string[]>;
   attach(sessionId: string, path: string): void;
   detach(sessionId: string, path: string): void;
+
+  images: Record<string, AiImage[]>;
+  attachImage(sessionId: string, image: Omit<AiImage, "id">): boolean;
+  detachImage(sessionId: string, id: string): void;
 
   load(): Promise<void>;
   listSessions(): Promise<void>;
@@ -174,6 +191,7 @@ function systemPrompt(instructions = ""): string {
 }
 
 let turnCounter = 0;
+let imageCounter = 0;
 const turnId = (sessionId: string) => `${sessionId}#${(turnCounter += 1)}`;
 const sessionOf = (id: string) => id.split("#")[0];
 
@@ -193,6 +211,13 @@ const dropAttachments = (
 ): Record<string, string[]> => {
   if (!attachments[sessionId]) return attachments;
   const rest = { ...attachments };
+  delete rest[sessionId];
+  return rest;
+};
+
+const dropImages = (images: Record<string, AiImage[]>, sessionId: string): Record<string, AiImage[]> => {
+  if (!images[sessionId]) return images;
+  const rest = { ...images };
   delete rest[sessionId];
   return rest;
 };
@@ -302,13 +327,13 @@ export const useAi = create<AiState>((set, get) => ({
     const chat = get().chats[id];
     if (!chat) return;
     if (chat.activeTurn) {
-      set((state) => ({ attachments: dropAttachments(state.attachments, id) }));
+      set((state) => ({ attachments: dropAttachments(state.attachments, id), images: dropImages(state.images, id) }));
       return;
     }
     set((state) => {
       const chats = { ...state.chats };
       delete chats[id];
-      return { chats, attachments: dropAttachments(state.attachments, id) };
+      return { chats, attachments: dropAttachments(state.attachments, id), images: dropImages(state.images, id) };
     });
   },
 
@@ -321,6 +346,7 @@ export const useAi = create<AiState>((set, get) => ({
       return {
         chats,
         attachments: dropAttachments(state.attachments, id),
+        images: dropImages(state.images, id),
         sessions: state.sessions.filter((session) => session.id !== id),
       };
     });
@@ -356,6 +382,27 @@ export const useAi = create<AiState>((set, get) => ({
       attachments: {
         ...state.attachments,
         [sessionId]: (state.attachments[sessionId] ?? []).filter((held) => held !== path),
+      },
+    })),
+
+  images: {},
+
+  attachImage: (sessionId, image) => {
+    const held = get().images[sessionId] ?? [];
+    if (held.length >= AI_IMAGE_MAX_COUNT) return false;
+
+    if (Math.ceil((image.data.length * 3) / 4) > AI_IMAGE_MAX_BYTES) return false;
+    imageCounter += 1;
+    const entry: AiImage = { ...image, id: `img-${imageCounter}` };
+    set((state) => ({ images: { ...state.images, [sessionId]: [...(state.images[sessionId] ?? []), entry] } }));
+    return true;
+  },
+
+  detachImage: (sessionId, id) =>
+    set((state) => ({
+      images: {
+        ...state.images,
+        [sessionId]: (state.images[sessionId] ?? []).filter((held) => held.id !== id),
       },
     })),
 
@@ -397,8 +444,19 @@ export const useAi = create<AiState>((set, get) => ({
     let cut = chat.history.length;
     while (cut > 0 && chat.history[cut - 1]?.role === "user") cut -= 1;
     const answered = chat.history.slice(0, cut);
+    const images = get().images[sessionId] ?? [];
     const history: AiMessage[] = [...chat.history, { role: "user", content: message }];
     const providerMessages = alternating([...answered, { role: "user", content: contextBlock + message }]);
+
+    if (images.length > 0) {
+      const last = providerMessages[providerMessages.length - 1];
+      if (last && last.role === "user") {
+        providerMessages[providerMessages.length - 1] = {
+          ...last,
+          images: images.map((image) => ({ mime: image.mime, data: image.data })),
+        };
+      }
+    }
 
     set((state) => ({
       chats: patchChat(state.chats, sessionId, (current) => ({
@@ -437,6 +495,16 @@ export const useAi = create<AiState>((set, get) => ({
         attachments: {
           ...state.attachments,
           [sessionId]: (state.attachments[sessionId] ?? []).filter((held) => !attachments.includes(held)),
+        },
+      }));
+    }
+
+    if ((reply.ok || reply.error === "stopped") && images.length > 0) {
+      const sent = new Set(images.map((image) => image.id));
+      set((state) => ({
+        images: {
+          ...state.images,
+          [sessionId]: (state.images[sessionId] ?? []).filter((held) => !sent.has(held.id)),
         },
       }));
     }

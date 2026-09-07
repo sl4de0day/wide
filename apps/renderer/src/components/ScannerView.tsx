@@ -159,8 +159,15 @@ export function ScannerView() {
                 <tr
                   key={issue.id}
                   data-vrow=""
+                  tabIndex={0}
+                  aria-selected={selected === issue.id}
                   onClick={() => useScanner.getState().select(issue.id)}
-                  className={cn("cursor-pointer border-b border-line text-[11px] hover:bg-hover", selected === issue.id && "bg-selected")}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    useScanner.getState().select(issue.id);
+                  }}
+                  className={cn("cursor-pointer border-b border-line text-[11px] hover:bg-hover focus-visible:bg-hover", selected === issue.id && "bg-selected")}
                 >
                   <td className={cn("px-2 py-0.5 font-medium uppercase", SEV_TONE[issue.severity])}>{issue.severity}</td>
                   <td className="px-2 py-0.5 text-fg">{issue.name}</td>

@@ -131,7 +131,18 @@ export function CollaboratorView() {
             </thead>
             <tbody>
               {interactions.map((i, idx) => (
-                <tr key={idx} onClick={() => setChosen(i === chosen ? null : i)} className={cn("cursor-pointer border-b border-line/60 text-[11px] hover:bg-hover", chosen === i && "bg-selected")}>
+                <tr
+                  key={idx}
+                  tabIndex={0}
+                  aria-selected={chosen === i}
+                  onClick={() => setChosen(i === chosen ? null : i)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    setChosen(i === chosen ? null : i);
+                  }}
+                  className={cn("cursor-pointer border-b border-line/60 text-[11px] hover:bg-hover focus-visible:bg-hover", chosen === i && "bg-selected")}
+                >
                   <td className={cn("px-2 py-0.5 font-mono uppercase", protoTone(String(i.protocol ?? "")))}>{String(i.protocol ?? "?")}</td>
                   <td className="max-w-40 truncate px-2 py-0.5 font-mono text-fg" title={String(i["full-id"] ?? "")}>
                     {String(i["full-id"] ?? "")}

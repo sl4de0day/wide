@@ -439,12 +439,13 @@ function leafFor(host) {
 
 function inScope(host) {
   const name = String(host || "").toLowerCase().replace(/:\d+$/, "");
-  return proxyScope.some((pattern) => {
-    if (pattern.startsWith("*.")) {
-      const base = pattern.slice(2);
-      return name === base || name.endsWith(`.${base}`);
-    }
-    return name === pattern;
+  return proxyScope.some((raw) => {
+    const pattern = String(raw || "").toLowerCase().trim().replace(/:\d+$/, "");
+    if (!pattern) return false;
+
+    const base = pattern.startsWith("*.") ? pattern.slice(2) : pattern;
+    if (!base) return false;
+    return name === base || name.endsWith(`.${base}`);
   });
 }
 
@@ -1032,6 +1033,87 @@ function relayWebSocket(scheme, req, clientSocket, head) {
 
 const mitmServers = new Map();
 
+function runCertutil(args) {
+  return new Promise((resolve) => {
+    try {
+      node_child_process.execFile(
+        "certutil",
+        args,
+        { windowsHide: true, timeout: 30000 },
+        (error, stdout, stderr) => {
+          resolve({ ok: !error, out: `${String(stdout || "")}\n${String(stderr || "")}` });
+        },
+      );
+    } catch (error) {
+      resolve({ ok: false, out: String((error && error.message) || error) });
+    }
+  });
+}
+
+async function caThumbprint() {
+  const ca = await loadOrMakeCa();
+  const der = forge.asn1.toDer(forge.pki.certificateToAsn1(ca.cert)).getBytes();
+  const digest = forge.md.sha1.create();
+  digest.update(der);
+  return digest.digest().toHex().toUpperCase();
+}
+
+async function caIsTrusted() {
+  if (process.platform !== "win32") return false;
+  const thumbprint = await caThumbprint();
+  const result = await runCertutil(["-user", "-store", "Root", thumbprint]);
+  if (!result.ok) return false;
+  return result.out.replace(/[^0-9a-fA-F]/g, "").toUpperCase().includes(thumbprint);
+}
+
+function certutilMessage(out) {
+  const lines = String(out || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.slice(-2).join(" ") || "certutil did not report a reason.";
+}
+
+const tlsErrorReported = new Map();
+const TLS_ERROR_QUIET_MS = 30000;
+
+function reportTlsClientError(host, error) {
+  const now = Date.now();
+  const last = tlsErrorReported.get(host) || 0;
+  if (now - last < TLS_ERROR_QUIET_MS) return;
+  tlsErrorReported.set(host, now);
+
+  const text = String((error && (error.message || error.code)) || error || "").toLowerCase();
+  const untrusted =
+    text.includes("unknown ca") ||
+    text.includes("bad certificate") ||
+    text.includes("certificate unknown") ||
+    text.includes("unknown_ca") ||
+    text.includes("decrypt error") ||
+    text.includes("sslv3 alert") ||
+    text.includes("tlsv1 alert");
+
+  const message = untrusted
+    ? "TLS handshake failed: the client rejected Wide's CA certificate, so this request could not be captured. Trust the Catcher CA (Proxy tab, CA certificate, Trust) and reload the page."
+    : `TLS handshake failed: ${String((error && error.message) || error || "unknown error")}`;
+
+  recordEntry({
+    id: ++proxyCounter,
+    at: now,
+    ms: 0,
+    method: "CONNECT",
+    url: `https://${host}/`,
+    host,
+    scheme: "https",
+    status: 0,
+    reqHeaders: [],
+    reqBody: "",
+    resHeaders: [],
+    resBody: "",
+    error: message,
+  });
+}
+
 function mitmServerFor(host, secure) {
   const scheme = secure ? "https" : "http";
   const key = `${scheme}:${host}`;
@@ -1048,6 +1130,7 @@ function mitmServerFor(host, secure) {
 
   server.on("upgrade", (req, socket, head) => relayWebSocket(scheme, req, socket, head));
   server.on("error", () => {});
+  if (secure) server.on("tlsClientError", (error) => reportTlsClientError(host, error));
   mitmServers.set(key, server);
   return server;
 }
@@ -1398,5 +1481,54 @@ function registerProxyHandlers() {
     if (gate) return gate;
     await loadOrMakeCa();
     return { ok: true, path: PROXY_CA_CERT() };
+  });
+
+  electron.ipcMain.handle("proxy:caStatus", async () => {
+    const gate = await requireInstalled("proxy");
+    if (gate) return gate;
+    try {
+      return {
+        ok: true,
+        supported: process.platform === "win32",
+        thumbprint: await caThumbprint(),
+        trusted: await caIsTrusted(),
+      };
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  });
+
+  electron.ipcMain.handle("proxy:caTrust", async () => {
+    const gate = await requireInstalled("proxy");
+    if (gate) return gate;
+    if (process.platform !== "win32") {
+      return { ok: false, error: "Installing the CA automatically is only supported on Windows." };
+    }
+    try {
+      await loadOrMakeCa();
+      const result = await runCertutil(["-user", "-addstore", "Root", PROXY_CA_CERT()]);
+      tlsErrorReported.clear();
+      if (!result.ok) return { ok: false, error: certutilMessage(result.out) };
+      return { ok: true, trusted: await caIsTrusted() };
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  });
+
+  electron.ipcMain.handle("proxy:caUntrust", async () => {
+    const gate = await requireInstalled("proxy");
+    if (gate) return gate;
+    if (process.platform !== "win32") {
+      return { ok: false, error: "Removing the CA automatically is only supported on Windows." };
+    }
+    try {
+      const thumbprint = await caThumbprint();
+      const result = await runCertutil(["-user", "-delstore", "Root", thumbprint]);
+      tlsErrorReported.clear();
+      if (!result.ok) return { ok: false, error: certutilMessage(result.out) };
+      return { ok: true, trusted: await caIsTrusted() };
+    } catch (error) {
+      return { ok: false, error: String((error && error.message) || error) };
+    }
   });
 }

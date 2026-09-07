@@ -109,6 +109,7 @@ electron.app.whenReady().then(async () => {
   registerToolScanHandlers();
   registerWebtoolsHandlers();
   registerOastHandlers();
+  registerVaultHandlers();
   registerRealtimeHandlers();
   registerGrpcHandlers();
   createWindow();

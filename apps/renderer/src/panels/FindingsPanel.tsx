@@ -1,10 +1,11 @@
-import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, RotateCw, ScrollText, Trash2, Upload, X } from "lucide-react";
+import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, Radar, RotateCw, ScrollText, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
 import { Modal } from "@/components/ui/Modal";
 import { bridge, type ProjectScanFinding } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
+import { canVerifyLive, verifyFindingLive } from "@/lib/liveVerify";
 import { emptyReportMeta, pentestReportHtml, pentestReportMarkdown, type ReportMeta } from "@/lib/pentestReport";
 import { cn, copyText } from "@/lib/utils";
 import { diffFindings, FINDING_STATUSES, findingsReport, findingsReportHtml, findingsReportJson, parseImportedFindings, SEVERITIES, useFindings, type Finding, type FindingStatus, type Severity } from "@/stores/findings";
@@ -397,10 +398,23 @@ export function FindingsPanel() {
                       {t(finding.detail)}
                     </pre>
                   )}
-                  <button type="button" onClick={() => useFindings.getState().remove(finding.id)} className="mt-1 flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-rose-300">
-                    <X className="size-3" strokeWidth={1.75} />
-                    {t("Remove")}
-                  </button>
+                  <div className="mt-1 flex items-center gap-1">
+                    {canVerifyLive(finding.location) && (
+                      <button
+                        type="button"
+                        onClick={() => void verifyFindingLive(finding.id)}
+                        title={t("Send a live request to this route and see whether the issue reproduces")}
+                        className="flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-accent"
+                      >
+                        <Radar className="size-3" strokeWidth={1.75} />
+                        {t("Verify live")}
+                      </button>
+                    )}
+                    <button type="button" onClick={() => useFindings.getState().remove(finding.id)} className="flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-rose-300">
+                      <X className="size-3" strokeWidth={1.75} />
+                      {t("Remove")}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

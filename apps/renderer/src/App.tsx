@@ -455,14 +455,24 @@ export default function App() {
   const tabsSig = useRef("");
   const restoredRoots = useRef(new Set<string>());
 
+  const readyRoots = useRef(new Set<string>());
+
   useEffect(() => {
     const persist = () => {
       const currentRoot = useWorkspace.getState().root;
-      if (!currentRoot) return;
+
+      if (!currentRoot || !readyRoots.current.has(currentRoot)) return;
       const state = useEditor.getState();
       const files = state.tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path);
       const active = state.activePath && files.includes(state.activePath) ? state.activePath : files[files.length - 1] ?? "";
       void bridge.saveTabs(currentRoot, { files, active }).catch(() => undefined);
+    };
+    const flush = () => {
+      if (tabsSaveTimer.current) {
+        clearTimeout(tabsSaveTimer.current);
+        tabsSaveTimer.current = null;
+      }
+      persist();
     };
     const unsub = useEditor.subscribe((state) => {
       const files = state.tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path);
@@ -471,10 +481,15 @@ export default function App() {
       if (sig === tabsSig.current) return;
       tabsSig.current = sig;
       if (tabsSaveTimer.current) clearTimeout(tabsSaveTimer.current);
-      tabsSaveTimer.current = setTimeout(persist, 400);
+      tabsSaveTimer.current = setTimeout(persist, 300);
     });
+
+    window.addEventListener("beforeunload", flush);
+    window.addEventListener("pagehide", flush);
     return () => {
       unsub();
+      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("pagehide", flush);
       if (tabsSaveTimer.current) clearTimeout(tabsSaveTimer.current);
     };
   }, []);
@@ -482,23 +497,32 @@ export default function App() {
   useEffect(() => {
     if (!root || restoredRoots.current.has(root)) return;
     restoredRoots.current.add(root);
+
+    tabsSig.current = "";
     let cancelled = false;
     void (async () => {
-      const reply = await bridge.loadTabs(root).catch(() => null);
-      const saved = reply && reply.ok ? reply.tabs : null;
-      if (cancelled || !saved || !Array.isArray(saved.files) || saved.files.length === 0) return;
-      const editor = useEditor.getState();
-      const open = new Set(editor.tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path));
-      for (const path of saved.files) {
-        if (cancelled) return;
-        if (!open.has(path)) await editor.openFile(path);
-      }
-      if (!cancelled && saved.active && useEditor.getState().tabs.some((tab) => tab.path === saved.active)) {
-        useEditor.getState().setActive(saved.active);
+      try {
+        const reply = await bridge.loadTabs(root).catch(() => null);
+        const saved = reply && reply.ok ? reply.tabs : null;
+        if (cancelled || !saved || !Array.isArray(saved.files) || saved.files.length === 0) return;
+        const editor = useEditor.getState();
+        const open = new Set(editor.tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path));
+        for (const path of saved.files) {
+          if (cancelled) return;
+          if (!open.has(path)) await editor.openFile(path);
+        }
+        if (!cancelled && saved.active && useEditor.getState().tabs.some((tab) => tab.path === saved.active)) {
+          useEditor.getState().setActive(saved.active);
+        }
+      } finally {
+
+        if (!cancelled) readyRoots.current.add(root);
       }
     })();
     return () => {
       cancelled = true;
+
+      if (!readyRoots.current.has(root)) restoredRoots.current.delete(root);
     };
   }, [root]);
 

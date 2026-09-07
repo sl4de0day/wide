@@ -251,7 +251,8 @@ export const usePitcher = create<PitcherState>((set, get) => ({
     const node: Node = { id: uid("n"), kind: "request", request: req };
     set((s) => {
       let collections = s.collections;
-      let target = collections.find((c) => c.name === "Captured") ?? collections[0];
+
+      let target = collections.find((c) => c.name === "Captured");
       if (!target) {
         target = { id: uid("c"), name: "Captured", nodes: [], vars: [] };
         collections = [...collections, target];

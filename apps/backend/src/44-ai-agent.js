@@ -571,6 +571,70 @@ const AI_HOUSE_STYLE = [
   "Reply in the language the person wrote to you in.",
 ].join(" ");
 
+const AI_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+function aiCleanImages(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const image of value) {
+    const mime = String((image && image.mime) || "").toLowerCase();
+    const data = String((image && image.data) || "");
+    if (!AI_IMAGE_MIMES.has(mime) || !data) continue;
+    out.push({ mime, data });
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+function aiApplyImages(messages, provider) {
+  const list = Array.isArray(messages) ? messages : [];
+  return list.map((message) => {
+    const images = aiCleanImages(message && message.images);
+    if (images.length === 0) {
+      if (message && message.images) {
+        const { images: _drop, ...rest } = message;
+        return rest;
+      }
+      return message;
+    }
+    const { images: _drop, ...rest } = message;
+    const text = String(rest.content ?? "");
+
+    if (provider === "claude") {
+      return {
+        ...rest,
+        content: [
+          ...(text ? [{ type: "text", text }] : []),
+          ...images.map((image) => ({
+            type: "image",
+            source: { type: "base64", media_type: image.mime, data: image.data },
+          })),
+        ],
+      };
+    }
+
+    if (provider === "deepseek") {
+      return {
+        ...rest,
+        content: [
+          ...(text ? [{ type: "text", text }] : []),
+          ...images.map((image) => ({
+            type: "image_url",
+            image_url: { url: `data:${image.mime};base64,${image.data}` },
+          })),
+        ],
+      };
+    }
+
+    if (provider === "local") {
+
+      return { ...rest, images: images.map((image) => image.data) };
+    }
+
+    return rest;
+  });
+}
+
 function aiSystemPrompt(system) {
   return [String(system || '').trim(), AI_HOUSE_STYLE].filter(Boolean).join(' ');
 }
@@ -618,7 +682,7 @@ function registerAiAgentHandlers() {
     }
 
     const prompt = aiSystemPrompt(system);
-    const turn = aiWithHouseStyle(messages);
+    const turn = aiApplyImages(aiWithHouseStyle(messages), provider);
 
     const config = await readAiConfig();
     const key = await aiKeyFor(provider === "claude-code" ? "claude" : provider);

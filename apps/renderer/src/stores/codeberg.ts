@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
 import { bridge, type CodebergCommit, type CodebergFile, type CodebergStatus, type GitBranch } from "@/lib/bridge";
-import { providerFor, type GitProvider } from "@/lib/gitProviders";
+import { providerById, providerFor, type GitProvider } from "@/lib/gitProviders";
+
 import { useWorkspace } from "./workspace";
 
 export type SyncStage = "" | "pushing" | "pulling" | "committing" | "staging" | "stashing";
@@ -25,8 +26,7 @@ interface CodebergState {
   error: Message | null;
 
   notice: Message | null;
-  signedIn: boolean;
-  username: string;
+  accounts: Record<string, { signedIn: boolean; username: string }>;
 
   provider: GitProvider;
 
@@ -46,8 +46,9 @@ interface CodebergState {
   init(branch: string): Promise<void>;
   setRemote(url: string): Promise<void>;
   setIdentity(name: string, email: string): Promise<void>;
-  signIn(username: string, token: string): Promise<boolean>;
-  signOut(): Promise<void>;
+  signIn(username: string, token: string, host?: string): Promise<boolean>;
+  signOut(host?: string): Promise<void>;
+  checkAccount(host: string): Promise<void>;
   tag(name: string, message: string, push: boolean): Promise<void>;
   dismiss(): void;
 }
@@ -85,8 +86,7 @@ export const useCodeberg = create<CodebergState>((set, get) => ({
   busy: "",
   error: null,
   notice: null,
-  signedIn: false,
-  username: "",
+  accounts: {},
   provider: providerFor(null),
 
   refresh: async () => {
@@ -111,12 +111,17 @@ export const useCodeberg = create<CodebergState>((set, get) => ({
       bridge.codebergSignedIn(provider.host),
       bridge.codebergBranches(where),
     ]);
-    set({
+    set((state) => ({
       commits: log.ok ? (log.commits ?? []) : [],
-      signedIn: Boolean(session.ok && session.signedIn),
-      username: session.ok ? (session.username ?? "") : "",
+      accounts: {
+        ...state.accounts,
+        [provider.host]: {
+          signedIn: Boolean(session.ok && session.signedIn),
+          username: session.ok ? (session.username ?? "") : "",
+        },
+      },
       branches: branchList.ok ? (branchList.branches ?? []) : [],
-    });
+    }));
   },
 
   setMessage: (message) => set({ message }),
@@ -271,26 +276,44 @@ export const useCodeberg = create<CodebergState>((set, get) => ({
     await get().refresh();
   },
 
-  signIn: async (username, token) => {
+  signIn: async (username, token, host) => {
     set({ error: null, notice: null });
-    const provider = get().provider;
+    const provider = host ? providerById(host) : get().provider;
     const reply = await bridge.codebergSignIn(username, token, provider.host);
     if (!reply.ok) {
       set({ error: failure(reply) });
       return false;
     }
 
-    set({
-      signedIn: true,
-      username,
+    set((state) => ({
+      accounts: { ...state.accounts, [provider.host]: { signedIn: true, username } },
       notice: { key: "Signed in to {provider}.", params: { provider: provider.name } },
-    });
+    }));
     return true;
   },
 
-  signOut: async () => {
-    await bridge.codebergSignOut(get().username, get().provider.host);
-    set({ signedIn: false, username: "", notice: { key: "Signed out." } });
+  signOut: async (host) => {
+    const provider = host ? providerById(host) : get().provider;
+    const account = get().accounts[provider.host];
+    await bridge.codebergSignOut(account?.username ?? "", provider.host);
+    set((state) => ({
+      accounts: { ...state.accounts, [provider.host]: { signedIn: false, username: "" } },
+      notice: { key: "Signed out." },
+    }));
+  },
+
+  checkAccount: async (host) => {
+    if (!host) return;
+    const session = await bridge.codebergSignedIn(host);
+    set((state) => ({
+      accounts: {
+        ...state.accounts,
+        [host]: {
+          signedIn: Boolean(session.ok && session.signedIn),
+          username: session.ok ? (session.username ?? "") : "",
+        },
+      },
+    }));
   },
 
   tag: async (name, message, push) => {

@@ -1,5 +1,5 @@
 import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
 import { bridge, type InterceptedRequest, type InterceptedResponse, type MatchReplaceRule, type ProxyEntry } from "@/lib/bridge";
@@ -460,6 +460,17 @@ function Scope() {
   const scope = useProxy((state) => state.scope);
   const [draft, setDraft] = useState("");
   const [caCopied, setCaCopied] = useState(false);
+  const [caTrusted, setCaTrusted] = useState<boolean | null>(null);
+  const [caBusy, setCaBusy] = useState(false);
+
+  const refreshCaStatus = useCallback(async () => {
+    const reply = await bridge.proxyCaStatus();
+    setCaTrusted(reply.ok ? Boolean(reply.trusted) : null);
+  }, []);
+
+  useEffect(() => {
+    void refreshCaStatus();
+  }, [refreshCaStatus]);
 
   const revealCa = async () => {
     const reply = await bridge.proxyCaCertPath();
@@ -470,6 +481,28 @@ function Scope() {
     if (reply.ok && reply.pem && (await copyText(reply.pem))) {
       setCaCopied(true);
       setTimeout(() => setCaCopied(false), 1500);
+    }
+  };
+  const trustCa = async () => {
+    setCaBusy(true);
+    const reply = await bridge.proxyCaTrust();
+    setCaBusy(false);
+    if (reply.ok) {
+      setCaTrusted(Boolean(reply.trusted));
+      toast.success(t("The Catcher CA is now trusted. Reload the page you were testing."));
+    } else {
+      toast.error(t(reply.error ?? "The CA could not be trusted."));
+    }
+  };
+  const untrustCa = async () => {
+    setCaBusy(true);
+    const reply = await bridge.proxyCaUntrust();
+    setCaBusy(false);
+    if (reply.ok) {
+      setCaTrusted(Boolean(reply.trusted));
+      toast.success(t("The Catcher CA was removed from the trust store."));
+    } else {
+      toast.error(t(reply.error ?? "The CA could not be removed."));
     }
   };
 
@@ -521,7 +554,7 @@ function Scope() {
               add();
             }
           }}
-          placeholder={t("example.com or *.example.com")}
+          placeholder={t("example.com (subdomains included)")}
           spellCheck={false}
           className="min-w-0 flex-1 bg-transparent py-1 text-[12px] text-fg outline-none placeholder:text-fg-faint"
         />
@@ -539,9 +572,39 @@ function Scope() {
 
       {
 }
-      <div className="mt-2 flex items-center gap-1.5 border-t border-line pt-2">
-        <ShieldCheck className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate text-[10px] text-fg-faint">{t("CA certificate")}</span>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-line pt-2">
+        <ShieldCheck
+          className={cn("size-3.5 shrink-0", caTrusted ? "text-status-ok" : "text-fg-faint")}
+          strokeWidth={1.75}
+        />
+        <span className="min-w-0 flex-1 truncate text-[10px] text-fg-faint">
+          {caTrusted === null
+            ? t("CA certificate")
+            : caTrusted
+              ? t("CA certificate · trusted")
+              : t("CA certificate · not trusted")}
+        </span>
+        {caTrusted === false && (
+          <button
+            type="button"
+            onClick={() => void trustCa()}
+            disabled={caBusy}
+            title={t("Install the CA into your user trust store so HTTPS pages can be captured")}
+            className="shrink-0 rounded-sm border border-accent px-1.5 py-0.5 text-[10px] text-accent transition-colors duration-100 hover:bg-accent hover:text-bg disabled:opacity-40"
+          >
+            {caBusy ? t("Working…") : t("Trust")}
+          </button>
+        )}
+        {caTrusted === true && (
+          <button
+            type="button"
+            onClick={() => void untrustCa()}
+            disabled={caBusy}
+            className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg disabled:opacity-40"
+          >
+            {caBusy ? t("Working…") : t("Remove trust")}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void revealCa()}

@@ -23,7 +23,6 @@ export function TerminalPanel() {
 
   const startRef = useRef<(() => void) | null>(null);
   const [status, setStatus] = useState<"idle" | "running" | "error">("idle");
-  const root = useWorkspace((state) => state.root);
   const pending = useRun((state) => state.pending);
   const drain = useRun((state) => state.drain);
   const theme = useSettings((state) => state.theme);
@@ -132,7 +131,7 @@ export function TerminalPanel() {
       const container = containerId ? { id: containerId, name: remoteState.containers.find((c) => c.id === containerId)?.name } : undefined;
       const remote = container ? undefined : remoteState.activeProfile() ?? undefined;
       void bridge
-        .terminalStart({ cols: term.cols, rows: term.rows, cwd: root ?? undefined, shell: useSettings.getState().terminalShell, remote, container })
+        .terminalStart({ cols: term.cols, rows: term.rows, cwd: useWorkspace.getState().root ?? undefined, shell: useSettings.getState().terminalShell, remote, container })
         .then((session) => {
           if (disposed) return;
           if (session?.error || !session?.id) {
@@ -165,6 +164,17 @@ export function TerminalPanel() {
       start();
     });
 
+    const offWorkspace = useWorkspace.subscribe((next, prev) => {
+      if (next.root === prev.root) return;
+      const current = idRef.current;
+      idRef.current = null;
+      if (current !== null) void bridge.terminalDispose(current);
+      term.reset();
+      openedOrigins.clear();
+      useDevServers.getState().clear();
+      start();
+    });
+
     term.onData((data) => {
       if (idRef.current !== null) void bridge.terminalWrite(idRef.current, data);
     });
@@ -189,6 +199,7 @@ export function TerminalPanel() {
       offExit?.();
       offShell();
       offRemote();
+      offWorkspace();
       if (idRef.current !== null) void bridge.terminalDispose(idRef.current);
       term.dispose();
       termRef.current = null;

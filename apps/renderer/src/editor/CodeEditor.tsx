@@ -44,6 +44,8 @@ import { lspSupport } from "./features/lsp";
 import { pathCompletion } from "./features/paths";
 import { snippets } from "./features/snippets";
 import { httpRunner } from "./features/httpRun";
+import { routeLens } from "./features/routeLens";
+import { openRouteMenu } from "./features/routeLensMenu";
 import { tailwindCompletion } from "./features/tailwind";
 import { breakpointSupport } from "./features/breakpoints";
 import { gitGutter } from "./features/gitGutter";
@@ -127,6 +129,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
           useEditor.getState().openHttpResponse();
           void useHttp.getState().send(request);
         }),
+        routeLens(extname(tab.path), tab.path, openRouteMenu),
         languageComp.of([]),
         tabSizeComp.of(indentUnit.of(useTabs ? "	" : " ".repeat(tabSize))),
         wrapComp.of(lineWrapping ? EditorView.lineWrapping : []),

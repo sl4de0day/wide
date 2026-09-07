@@ -36,7 +36,10 @@ const TerminalPanel = lazy(() =>
   import("@/panels/TerminalPanel").then((m) => ({ default: m.TerminalPanel })),
 );
 const CodebergPanel = lazy(() =>
-  import("@/panels/CodebergPanel").then((m) => ({ default: m.CodebergPanel })),
+  import("@/panels/CodebergPanel").then((m) => ({ default: () => <m.CodebergPanel providerId="codeberg" /> })),
+);
+const GitHubPanel = lazy(() =>
+  import("@/panels/CodebergPanel").then((m) => ({ default: () => <m.CodebergPanel providerId="github" /> })),
 );
 const AiPanel = lazy(() => import("@/panels/AiPanel").then((m) => ({ default: m.AiPanel })));
 const DebugPanel = lazy(() => import("@/panels/DebugPanel").then((m) => ({ default: m.DebugPanel })));
@@ -117,7 +120,7 @@ export const PANELS: PanelDef[] = [
     id: "github",
     label: "GitHub",
     icon: GitHubMark,
-    component: CodebergPanel,
+    component: GitHubPanel,
     place: "top",
     extension: "github",
   },
@@ -290,10 +293,16 @@ function ExtensionsFlyout({
       <div
         onMouseEnter={show}
         onMouseLeave={hideSoon}
+        style={{
+          transitionTimingFunction: "var(--ease)",
+          willChange: open ? "opacity, transform" : undefined,
+        }}
         className={cn(
-          "absolute left-full top-0 z-50 ml-1 flex flex-col items-center gap-1 rounded-md border border-line bg-chrome p-1 shadow-xl",
-          "origin-left transition-[opacity,transform] duration-150",
-          open ? "pointer-events-auto translate-x-0 scale-100 opacity-100" : "pointer-events-none -translate-x-1 scale-95 opacity-0",
+          "absolute left-full top-0 z-50 ml-1 flex flex-col items-center gap-1 rounded-md border border-line bg-chrome p-1 shadow-lg",
+          "transform-gpu origin-left transition-[opacity,transform] duration-200",
+          open
+            ? "pointer-events-auto translate-x-0 opacity-100"
+            : "pointer-events-none -translate-x-2 opacity-0",
         )}
       >
         {extras.map((item) => {

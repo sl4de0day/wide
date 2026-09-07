@@ -23,7 +23,7 @@ interface ScannerState {
   tasks: ScanTask[];
   issues: ScanIssue[];
   selected: string | null;
-  scan(requestText: string): void;
+  scan(requestText: string, onDone?: (issues: ScanIssue[]) => void): void;
 
   crawlScan(seedUrl: string): void;
   cancel(taskId: string): void;
@@ -84,8 +84,9 @@ export const useScanner = create<ScannerState>((set, get) => ({
     set({ session: text });
   },
 
-  scan: (requestText) => {
+  scan: (requestText, onDone) => {
     const id = `t${(taskSeq += 1)}`;
+    const collected: ScanIssue[] = [];
     const signal = { cancelled: false };
     const task: ScanTask = {
       id,
@@ -117,6 +118,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
         sessionHeaders: parseSession(get().session),
         onProgress: (done, total) => set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, done, total } : t)) })),
         onIssue: (issue) => {
+          collected.push(issue);
           set((s) => ({
             issues: [issue, ...s.issues],
             tasks: s.tasks.map((t) => (t.id === id ? { ...t, issueCount: t.issueCount + 1 } : t)),
@@ -130,9 +132,10 @@ export const useScanner = create<ScannerState>((set, get) => ({
         },
       },
       oastHook,
-    ).then(() =>
-      set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, status: t.signal.cancelled ? "cancelled" : "done" } : t)) })),
-    );
+    ).then(() => {
+      set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, status: t.signal.cancelled ? "cancelled" : "done" } : t)) }));
+      onDone?.(collected);
+    });
   },
 
   crawlScan: (seedUrl) => {

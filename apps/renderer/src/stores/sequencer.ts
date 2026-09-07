@@ -196,11 +196,15 @@ export const useSequencer = create<SequencerState>((set, get) => ({
     const extract = extractorFor(get().rule);
     const conc = Math.max(1, Math.min(8, count));
     let next = 0;
+
+    const isCurrent = () => get()._signal === signal && !signal.cancelled;
     const worker = async () => {
       while (next < count && !signal.cancelled) {
         next += 1;
         try {
           const reply = await bridge.proxyReplay(req);
+
+          if (!isCurrent()) return;
           if (reply.ok) {
             const raw = `HTTP ${reply.status ?? 0}\n${(reply.headers ?? []).map(([n, v]) => `${n}: ${v}`).join("\n")}\n\n${reply.body ?? ""}`;
             const tok = extract(reply, raw);
@@ -209,10 +213,13 @@ export const useSequencer = create<SequencerState>((set, get) => ({
         } catch {
 
         }
+        if (!isCurrent()) return;
         set((s) => ({ done: s.done + 1 }));
       }
     };
     void Promise.all(Array.from({ length: conc }, () => worker())).then(() => {
+
+      if (get()._signal !== signal) return;
       set((s) => ({ running: false, stats: s.tokens.length > 1 ? computeStats(s.tokens) : null }));
     });
   },

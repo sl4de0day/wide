@@ -10,6 +10,7 @@ import { WappalyzerPanel } from "@/components/browser/WappalyzerPanel";
 import { clickjackingPocForUrl } from "@/lib/poc/generate";
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
+import { hostInScope } from "@/lib/scope";
 import { passiveChecks } from "@/lib/passiveScan";
 import { cn } from "@/lib/utils";
 import { useBrowser } from "@/stores/browser";
@@ -18,15 +19,6 @@ import { useCatcher } from "@/stores/catcher";
 import { useFindings } from "@/stores/findings";
 import { useProxy } from "@/stores/proxy";
 import { useExtensions } from "@/stores/extensions";
-
-function hostInScope(host: string, scope: string[]): boolean {
-  if (!host) return false;
-  return scope.some((raw) => {
-    const s = raw.toLowerCase();
-    if (s.startsWith("*.")) return host === s.slice(2) || host.endsWith(s.slice(1));
-    return host === s;
-  });
-}
 
 const navigatedUrls = new Map<string, string>();
 const faviconCache = new Map<string, string>();

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PanelHeader } from "@/components/SidePanel";
 import type { ProxyEntry } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
+import { hostInScope } from "@/lib/scope";
 import { cn } from "@/lib/utils";
 import { useCatcher } from "@/stores/catcher";
 import { useFindings } from "@/stores/findings";
@@ -26,18 +27,6 @@ function dissect(entry: ProxyEntry): { host: string; segments: string[] } {
   } catch {
     return { host: entry.host || "—", segments: entry.url.split("/").filter(Boolean) };
   }
-}
-
-function hostInScope(host: string, scope: string[]): boolean {
-  const h = host.replace(/:\d+$/, "").toLowerCase();
-  return scope.some((pattern) => {
-    const base = pattern.toLowerCase();
-    if (base.startsWith("*.")) {
-      const b = base.slice(2);
-      return h === b || h.endsWith("." + b);
-    }
-    return h === base;
-  });
 }
 
 interface TreeNode {
@@ -330,7 +319,7 @@ function ScopeBar() {
               add();
             }
           }}
-          placeholder={t("example.com or *.example.com")}
+          placeholder={t("example.com (subdomains included)")}
           spellCheck={false}
           className="min-w-0 flex-1 bg-transparent py-1 text-[12px] text-fg outline-none placeholder:text-fg-faint"
         />
