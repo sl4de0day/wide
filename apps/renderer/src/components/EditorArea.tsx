@@ -1,4 +1,16 @@
-import { ChevronDown, Eraser, Eye, Play, X } from "lucide-react";
+import {
+  ChevronDown,
+  Columns2,
+  Columns3,
+  Eraser,
+  Eye,
+  Grid2x2,
+  Play,
+  Rows2,
+  Rows3,
+  Square,
+  X,
+} from "lucide-react";
 import { MediaView } from "./MediaView";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -6,19 +18,24 @@ import { createPortal } from "react-dom";
 import { useT } from "@/lib/i18n";
 import { bridge } from "@/lib/bridge";
 import { commentLanguageFor } from "@/lib/comments";
-import { loadDockSize, saveDockSize } from "@/lib/dockSize";
 import { runCommand } from "@/lib/runnable";
 import { requestCloseAll, requestCloseOthers, requestCloseRight, requestCloseTab } from "@/lib/tabClose";
 import { cn } from "@/lib/utils";
+import {
+  countLeaves,
+  detectPreset,
+  type GridPreset,
+  type LayoutNode,
+  type LayoutSplitNode,
+} from "@/lib/editorLayout";
 import {
   AI_CHAT_PATH,
   DIFF_PATH,
   EXTENSION_PATH,
   isDirty,
   MD_PREVIEW_PATH,
-  useActiveTab,
   useEditor,
-  type FileTab,
+  usePaneTab,
   type Tab,
 } from "@/stores/editor";
 import { useExtensions } from "@/stores/extensions";
@@ -39,6 +56,38 @@ const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((m) => ({ de
 const DiffView = lazy(() => import("@/panels/DiffView").then((m) => ({ default: m.DiffView })));
 const ExtensionView = lazy(() => import("./ExtensionView").then((m) => ({ default: m.ExtensionView })));
 const SssfView = lazy(() => import("./SssfView").then((m) => ({ default: m.SssfView })));
+
+function RunButton({ tab, root, run }: { tab: Tab; root: string | null; run: (path: string, command: string) => Promise<void> }) {
+  const t = useT();
+  const [command, setCommand] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    runCommand(tab.path, root).then((cmd) => {
+      if (active) setCommand(cmd);
+    });
+    return () => {
+      active = false;
+    };
+  }, [tab.path, root]);
+
+  if (!command) return null;
+
+  return (
+    <button
+      type="button"
+      title={command}
+      aria-label={t("Run {name}", { name: tab.name })}
+      onClick={(e) => {
+        e.stopPropagation();
+        void run(tab.path, command);
+      }}
+      className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-status-ok"
+    >
+      <Play className="size-3" strokeWidth={2} fill="currentColor" />
+    </button>
+  );
+}
 
 function TabOverflowMenu({ tabs, activePath, onPick }: { tabs: Tab[]; activePath: string | null; onPick: (path: string) => void }) {
   const t = useT();
@@ -181,23 +230,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
               <Eye className="size-3" strokeWidth={1.75} />
             </button>
           )}
-          {(() => {
-
-            if (tab.kind !== "file") return null;
-            const command = runCommand(tab.path, root);
-            if (!command) return null;
-            return (
-              <button
-                type="button"
-                title={command}
-                aria-label={t("Run {name}", { name: tab.name })}
-                onClick={(e) => { e.stopPropagation(); void run(tab.path, command); }}
-                className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-status-ok"
-              >
-                <Play className="size-3" strokeWidth={2} fill="currentColor" />
-              </button>
-            );
-          })()}
+          {tab.kind === "file" && <RunButton tab={tab} root={root} run={run} />}
           <button
             type="button"
             title={t("Close")}
@@ -212,7 +245,10 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
         </div>
       ))}
       </div>
-      {tabs.length > 1 && <TabOverflowMenu tabs={tabs} activePath={activePath} onPick={setActive} />}
+      <div className="flex items-stretch shrink-0">
+        {tabs.length > 1 && <TabOverflowMenu tabs={tabs} activePath={activePath} onPick={setActive} />}
+        <LayoutPickerMenu />
+      </div>
     </div>
     {tabMenu && createPortal(
       <>
@@ -234,138 +270,374 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
   );
 }
 
-const SPLIT_KEY = "wide.split.ratio";
+function LayoutPickerMenu() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const layout = useEditor((state) => state.layout);
+  const setGridPreset = useEditor((state) => state.setGridPreset);
+  const currentPreset = detectPreset(layout);
 
-function SplitEditors({ left, right }: { left: FileTab; right: FileTab }) {
+  const presets: Array<{ id: GridPreset; label: string; icon: typeof Square }> = [
+    { id: "1x1", label: t("Single (1x1)"), icon: Square },
+    { id: "1x2", label: t("Two Columns (1x2)"), icon: Columns2 },
+    { id: "2x1", label: t("Two Rows (2x1)"), icon: Rows2 },
+    { id: "2x2", label: t("2x2 Grid"), icon: Grid2x2 },
+    { id: "1x3", label: t("Three Columns (1x3)"), icon: Columns3 },
+    { id: "3x1", label: t("Three Rows (3x1)"), icon: Rows3 },
+  ];
+
+  const CurrentIcon =
+    currentPreset === "1x2"
+      ? Columns2
+      : currentPreset === "2x1"
+      ? Rows2
+      : currentPreset === "2x2"
+      ? Grid2x2
+      : currentPreset === "1x3"
+      ? Columns3
+      : currentPreset === "3x1"
+      ? Rows3
+      : Square;
+
+  return (
+    <div className="relative flex shrink-0 items-stretch border-l border-line">
+      <button
+        type="button"
+        title={t("Editor grid layout")}
+        aria-label={t("Editor grid layout")}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center px-2 text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+      >
+        <CurrentIcon className="size-3.5" strokeWidth={1.75} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[300]" onClick={() => setOpen(false)} />
+          <div className="wide-pop-up absolute right-0 top-full z-[301] mt-0.5 min-w-48 rounded-md border border-line bg-panel p-1 shadow-lg">
+            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
+              {t("Grid Layout")}
+            </div>
+            {presets.map((preset) => {
+              const Icon = preset.icon;
+              const isSelected = currentPreset === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    setGridPreset(preset.id);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12px] transition-colors duration-100",
+                    isSelected
+                      ? "bg-selected text-fg-bright font-medium"
+                      : "text-fg-dim hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
+                  <span className="min-w-0 flex-1 truncate">{preset.label}</span>
+                  {isSelected && <span className="text-status-ok text-[11px] font-bold">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PaneFileSwitcher({
+  paneId,
+  currentPath,
+}: {
+  paneId: string;
+  currentPath: string | null;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const tabs = useEditor((state) => state.tabs);
+  const setPaneActivePath = useEditor((state) => state.setPaneActivePath);
+
+  if (tabs.length <= 1) return null;
+
+  return (
+    <div className="relative flex items-center">
+      <button
+        type="button"
+        title={t("Switch file in this pane")}
+        aria-label={t("Switch file in this pane")}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="rounded-sm p-0.5 text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+      >
+        <ChevronDown className="size-3" strokeWidth={2} />
+      </button>
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-[300]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+            }}
+          />
+          <div
+            className="wide-pop-up absolute left-0 top-full z-[301] mt-1 max-h-64 w-56 overflow-auto rounded-md border border-line bg-panel p-1 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {tabs.map((tab) => (
+              <button
+                key={tab.path}
+                type="button"
+                onClick={() => {
+                  setPaneActivePath(paneId, tab.path);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-[11px] transition-colors duration-100",
+                  tab.path === currentPath
+                    ? "bg-selected text-fg-bright font-medium"
+                    : "text-fg-dim hover:bg-hover hover:text-fg",
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  {tab.kind === "file" ? tab.name : t(tab.name)}
+                </span>
+                {isDirty(tab) && <span className="shrink-0 text-[14px] leading-none">•</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TabContentRenderer({ tab, paneId }: { tab: Tab | null; paneId: string }) {
+  const t = useT();
+
+  if (!tab) {
+    return (
+      <div className="wide-enter-fade flex h-full flex-col items-center justify-center p-4 text-center">
+        <p className="text-[12px] italic text-fg-dim">{t("Open a file to start editing.")}</p>
+      </div>
+    );
+  }
+
+  if (tab.kind === "file") {
+    return (
+      <Suspense fallback={null}>
+        <CodeEditor key={`${paneId}:${tab.path}`} tab={tab} />
+      </Suspense>
+    );
+  }
+  if (tab.kind === "settings") return <SettingsView />;
+  if (tab.kind === "extension") return <ExtensionView id={tab.path.slice(EXTENSION_PATH.length)} />;
+  if (tab.kind === "ai-chat") return <AiChatView key={tab.path} id={tab.path.slice(AI_CHAT_PATH.length)} />;
+  if (tab.kind === "http") return <HttpResponse />;
+  if (tab.kind === "policy") return <SssfView />;
+  if (tab.kind === "browser") return <BrowserView />;
+  if (tab.kind === "catcher") return <CatcherView />;
+  if (tab.kind === "pitcher") return <PitcherView />;
+  if (tab.kind === "cyberchef") return <CyberChefView />;
+  if (tab.kind === "markdown-preview") return <MarkdownPreview sourcePath={tab.path.slice(MD_PREVIEW_PATH.length)} />;
+  if (tab.kind === "media") return <MediaView key={tab.path} tab={tab} />;
+  if (tab.kind === "diff") {
+    const suffix = tab.path.slice(DIFF_PATH.length);
+    const slash = suffix.indexOf("/");
+    return (
+      <DiffView
+        key={tab.path}
+        relPath={suffix.slice(slash + 1)}
+        staged={suffix.slice(0, slash) === "staged"}
+      />
+    );
+  }
+  return null;
+}
+
+function PaneContainer({ paneId, isOnlyPane }: { paneId: string; isOnlyPane: boolean }) {
+  const t = useT();
+  const tab = usePaneTab(paneId);
+  const activePaneId = useEditor((state) => state.activePaneId);
+  const setActivePane = useEditor((state) => state.setActivePane);
+  const splitPane = useEditor((state) => state.splitPane);
+  const closePane = useEditor((state) => state.closePane);
+
+  const isActive = activePaneId === paneId;
+
+  return (
+    <div
+      onClick={() => setActivePane(paneId)}
+      className={cn(
+        "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas transition-colors duration-100",
+        !isOnlyPane && isActive && "ring-1 ring-inset ring-accent/30",
+      )}
+    >
+      {!isOnlyPane && (
+        <div
+          className={cn(
+            "flex shrink-0 items-center justify-between gap-2 border-b px-2 py-1 transition-colors duration-100 select-none",
+            isActive
+              ? "border-line bg-panel text-fg-bright font-medium"
+              : "border-line/60 bg-chrome/60 text-fg-dim hover:text-fg",
+          )}
+          style={{ height: "28px" }}
+        >
+          <div className="flex min-w-0 items-center gap-1.5 flex-1">
+            <span className="min-w-0 truncate text-[11px]">
+              {tab ? (tab.kind === "file" ? tab.name : t(tab.name)) : t("Empty")}
+            </span>
+            {isDirty(tab) && <span className="shrink-0 text-[14px] leading-none text-status-warning">•</span>}
+            <PaneFileSwitcher paneId={paneId} currentPath={tab?.path ?? null} />
+          </div>
+
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              title={t("Split Right")}
+              aria-label={t("Split Right")}
+              onClick={(e) => {
+                e.stopPropagation();
+                splitPane(paneId, "vertical");
+              }}
+              className="rounded-sm p-1 text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+            >
+              <Columns2 className="size-3" strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              title={t("Split Down")}
+              aria-label={t("Split Down")}
+              onClick={(e) => {
+                e.stopPropagation();
+                splitPane(paneId, "horizontal");
+              }}
+              className="rounded-sm p-1 text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+            >
+              <Rows2 className="size-3" strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              title={t("Close Pane")}
+              aria-label={t("Close Pane")}
+              onClick={(e) => {
+                e.stopPropagation();
+                closePane(paneId);
+              }}
+              className="rounded-sm p-1 text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+            >
+              <X className="size-3" strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <Suspense fallback={null}>
+          <TabContentRenderer tab={tab} paneId={paneId} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
+function SplitNodeView({ node }: { node: LayoutSplitNode }) {
   const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [ratio, setRatio] = useState(() => Math.min(0.85, Math.max(0.15, loadDockSize(SPLIT_KEY, 50) / 100)));
+  const setSplitRatio = useEditor((state) => state.setSplitRatio);
 
-  useEffect(() => {
-    saveDockSize(SPLIT_KEY, ratio * 100);
-  }, [ratio]);
+  const direction = node.direction;
+  const isVertical = direction === "vertical";
 
-  const onPointerMove = useCallback((event: PointerEvent) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect || rect.width === 0) return;
-    setRatio(Math.min(0.85, Math.max(0.15, (event.clientX - rect.left) / rect.width)));
-  }, []);
+  const onPointerMove = useCallback(
+    (event: PointerEvent) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+      const newRatio = isVertical
+        ? (event.clientX - rect.left) / rect.width
+        : (event.clientY - rect.top) / rect.height;
+      setSplitRatio(node.id, newRatio);
+    },
+    [isVertical, node.id, setSplitRatio],
+  );
 
   useEffect(() => {
     if (!dragging) return;
     const stop = () => setDragging(false);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", stop);
-    const previous = document.body.style.cursor;
-    document.body.style.cursor = "col-resize";
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = isVertical ? "col-resize" : "row-resize";
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", stop);
-      document.body.style.cursor = previous;
+      document.body.style.cursor = prevCursor;
     };
-  }, [dragging, onPointerMove]);
+  }, [dragging, isVertical, onPointerMove]);
 
-  const header = "flex shrink-0 items-center gap-2 border-b border-line px-2 py-1";
   return (
-    <div ref={containerRef} className="flex h-full min-h-0">
-      <div className="flex min-w-0 shrink-0 flex-col" style={{ width: `${ratio * 100}%` }}>
-        <div className={header}>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-fg-dim">{left.name}</span>
-        </div>
-        <div className="min-h-0 flex-1">
-          <Suspense fallback={null}>
-            <CodeEditor key={left.path} tab={left} />
-          </Suspense>
-        </div>
+    <div
+      ref={containerRef}
+      className={cn(
+        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden",
+        isVertical ? "flex-row" : "flex-col",
+      )}
+    >
+      <div
+        className="min-h-0 min-w-0 flex shrink-0"
+        style={{
+          [isVertical ? "width" : "height"]: `${node.ratio * 100}%`,
+        }}
+      >
+        <LayoutRenderer node={node.children[0]} isOnlyPane={false} />
       </div>
+
       <div
         role="separator"
-        aria-orientation="vertical"
+        aria-orientation={isVertical ? "vertical" : "horizontal"}
         aria-label={t("Resize split")}
         onPointerDown={() => setDragging(true)}
-        onDoubleClick={() => setRatio(0.5)}
-        className="w-px shrink-0 cursor-col-resize bg-line transition-colors duration-100 hover:bg-line-strong"
+        onDoubleClick={() => setSplitRatio(node.id, 0.5)}
+        className={cn(
+          "shrink-0 bg-line transition-colors duration-100 hover:bg-accent active:bg-accent",
+          isVertical
+            ? "w-1 cursor-col-resize hover:w-1"
+            : "h-1 cursor-row-resize hover:h-1",
+        )}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className={header}>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-fg-dim">{right.name}</span>
-          <button
-            type="button"
-            onClick={() => useEditor.getState().closeSplit()}
-            title={t("Close split")}
-            aria-label={t("Close split")}
-            className="rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-          >
-            <X className="size-3.5" strokeWidth={2} />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1">
-          <Suspense fallback={null}>
-            <CodeEditor key={`split:${right.path}`} tab={right} />
-          </Suspense>
-        </div>
+
+      <div className="min-h-0 min-w-0 flex flex-1">
+        <LayoutRenderer node={node.children[1]} isOnlyPane={false} />
       </div>
     </div>
   );
 }
 
+function LayoutRenderer({ node, isOnlyPane }: { node: LayoutNode; isOnlyPane: boolean }) {
+  if (node.type === "leaf") {
+    return <PaneContainer paneId={node.paneId} isOnlyPane={isOnlyPane} />;
+  }
+  return <SplitNodeView node={node} />;
+}
+
 export function EditorArea({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
-  const tab = useActiveTab();
-  const splitPath = useEditor((state) => state.splitPath);
-  const splitTab = useEditor((state) => state.tabs.find((item) => item.path === splitPath));
-  const splitFile = splitTab && splitTab.kind === "file" ? splitTab : null;
-  const t = useT();
+  const layout = useEditor((state) => state.layout);
+  const paneCount = countLeaves(layout);
+  const isOnlyPane = paneCount === 1;
 
   return (
-
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
       <ReferencesOverlay />
       <EditorTabs onOpenPanel={onOpenPanel} />
-      <div className="min-h-0 flex-1">
-        <Suspense fallback={null}>
-        {!tab ? (
-          <div className="wide-enter-fade flex h-full items-center justify-center">
-            <p className="text-[12px] italic text-fg-dim">{t("Open a file to start editing.")}</p>
-          </div>
-        ) : tab.kind === "file" && splitFile ? (
-
-          <SplitEditors left={tab} right={splitFile} />
-        ) : tab.kind === "file" ? (
-          <Suspense fallback={null}>
-            <CodeEditor key={tab.path} tab={tab} />
-          </Suspense>
-        ) : tab.kind === "settings" ? (
-          <SettingsView />
-        ) : tab.kind === "extension" ? (
-          <ExtensionView id={tab.path.slice(EXTENSION_PATH.length)} />
-        ) : tab.kind === "ai-chat" ? (
-
-          <AiChatView key={tab.path} id={tab.path.slice(AI_CHAT_PATH.length)} />
-        ) : tab.kind === "http" ? (
-          <HttpResponse />
-        ) : tab.kind === "policy" ? (
-          <SssfView />
-        ) : tab.kind === "browser" ? (
-          <BrowserView />
-        ) : tab.kind === "catcher" ? (
-          <CatcherView />
-        ) : tab.kind === "pitcher" ? (
-          <PitcherView />
-        ) : tab.kind === "cyberchef" ? (
-          <CyberChefView />
-        ) : tab.kind === "markdown-preview" ? (
-          <MarkdownPreview sourcePath={tab.path.slice(MD_PREVIEW_PATH.length)} />
-        ) : tab.kind === "media" ? (
-          <MediaView key={tab.path} tab={tab} />
-        ) : tab.kind === "diff" ? (
-          (() => {
-            const suffix = tab.path.slice(DIFF_PATH.length);
-            const slash = suffix.indexOf("/");
-            return <DiffView key={tab.path} relPath={suffix.slice(slash + 1)} staged={suffix.slice(0, slash) === "staged"} />;
-          })()
-        ) : null}
-        </Suspense>
+      <div className="min-h-0 min-w-0 flex-1 flex">
+        <LayoutRenderer node={layout} isOnlyPane={isOnlyPane} />
       </div>
     </div>
   );

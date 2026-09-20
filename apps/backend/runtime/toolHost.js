@@ -108,7 +108,6 @@ function serialisable(value) {
 async function load() {
   try {
     const module = await import(
-      /* @vite-ignore */
       node_url.pathToFileURL(entry).href
     );
     const exported = module.default ?? module.commands ?? module;

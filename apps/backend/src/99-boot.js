@@ -30,6 +30,20 @@ let backendFailing = false;
 function reportFatal(kind, error) {
   const detail = String((error && error.stack) || (error && error.message) || error);
   console.warn(`[backend] ${kind}:`, detail);
+
+  try {
+    const fs = require('node:fs');
+    const node_path = require('node:path');
+    const crashPath = node_path.join(electron.app.getPath('userData'), 'pending_crash.json');
+    fs.writeFileSync(crashPath, JSON.stringify({
+      kind,
+      detail,
+      os: process.platform,
+      version: electron.app.getVersion(),
+      timestamp: Date.now()
+    }), 'utf8');
+  } catch (e) {}
+
   if (backendFailing) return;
   backendFailing = true;
   try {

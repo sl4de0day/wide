@@ -4,6 +4,22 @@ import { t } from "@/lib/i18n";
 import { bridge } from "@/lib/bridge";
 import { basename, normalisePath } from "@/lib/utils";
 import { useDiagnostics } from "./diagnostics";
+import {
+  buildPresetLayout,
+  closePaneInTree,
+  countLeaves,
+  createInitialLayout,
+  generatePaneId,
+  getLeafIds,
+  setSplitRatioInTree,
+  splitPaneInTree,
+  type EditorPane,
+  type GridPreset,
+  type LayoutNode,
+  type SplitDirection,
+} from "@/lib/editorLayout";
+
+export type { EditorPane, GridPreset, LayoutNode, SplitDirection };
 
 export const SETTINGS_PATH = "wide://settings";
 export const HTTP_PATH = "wide://response";
@@ -107,6 +123,17 @@ interface EditorState {
   activePath: string | null;
 
   splitPath: string | null;
+  layout: LayoutNode;
+  activePaneId: string;
+  panes: Record<string, EditorPane>;
+  splitPane(paneId: string, direction: SplitDirection, path?: string): void;
+  closePane(paneId: string): void;
+  setActivePane(paneId: string): void;
+  setGridPreset(preset: GridPreset): void;
+  setPaneActivePath(paneId: string, path: string): void;
+  setSplitRatio(splitId: string, ratio: number): void;
+  focusNextPane(): void;
+  focusPrevPane(): void;
   toggleSplit(): void;
   closeSplit(): void;
 
@@ -118,6 +145,7 @@ interface EditorState {
   closedFiles: FileTab[];
 
   openFile(path: string): Promise<boolean>;
+  openFileToSide(path: string): Promise<boolean>;
   openSettings(): void;
   openHttpResponse(): void;
   openPolicy(): void;
@@ -198,27 +226,209 @@ export function repointPath(path: string, oldPath: string, newPath: string): str
   return path;
 }
 
+function activatePanePath(
+  panes: Record<string, EditorPane>,
+  paneId: string,
+  path: string,
+): Record<string, EditorPane> {
+  const current = panes[paneId] ?? { id: paneId, activePath: path };
+  return { ...panes, [paneId]: { ...current, activePath: path } };
+}
+
+const INITIAL_PANE_ID = "primary";
+
 export const useEditor = create<EditorState>((set, get) => ({
   tabs: [],
   activePath: null,
   splitPath: null,
+  layout: createInitialLayout(INITIAL_PANE_ID),
+  activePaneId: INITIAL_PANE_ID,
+  panes: { [INITIAL_PANE_ID]: { id: INITIAL_PANE_ID, activePath: null } },
   lastFilePath: null,
   cursor: { line: 1, column: 1 },
   pendingReveal: null,
   pendingReplace: null,
   closedFiles: [],
 
-  toggleSplit: () => {
-    const { splitPath, lastFilePath } = get();
-    if (splitPath) set({ splitPath: null });
-    else if (lastFilePath) set({ splitPath: lastFilePath });
+  splitPane: (paneId, direction, path) => {
+    const state = get();
+    const currentPane = state.panes[paneId];
+    if (!currentPane) return;
+
+    const newPaneId = generatePaneId();
+    let targetPath = path ?? null;
+    if (!targetPath) {
+      const otherTab = state.tabs.find((t) => t.path !== currentPane.activePath);
+      targetPath = otherTab ? otherTab.path : currentPane.activePath;
+    }
+
+    const newPanes: Record<string, EditorPane> = {
+      ...state.panes,
+      [newPaneId]: { id: newPaneId, activePath: targetPath },
+    };
+    const newLayout = splitPaneInTree(state.layout, paneId, direction, newPaneId, 0.5);
+    const leaves = getLeafIds(newLayout);
+    const splitPath = leaves.length === 2 ? newPanes[leaves[1]]?.activePath ?? null : null;
+
+    set({
+      layout: newLayout,
+      panes: newPanes,
+      activePaneId: newPaneId,
+      activePath: targetPath,
+      splitPath,
+    });
   },
-  closeSplit: () => set({ splitPath: null }),
+
+  closePane: (paneId) => {
+    const state = get();
+    const leaves = getLeafIds(state.layout);
+    if (leaves.length <= 1) return;
+
+    const newLayout = closePaneInTree(state.layout, paneId);
+    const newLeaves = getLeafIds(newLayout);
+    const newPanes = { ...state.panes };
+    delete newPanes[paneId];
+
+    let nextActiveId = state.activePaneId;
+    if (state.activePaneId === paneId) {
+      nextActiveId = newLeaves[0] ?? INITIAL_PANE_ID;
+    }
+    const nextActivePath = newPanes[nextActiveId]?.activePath ?? null;
+    const splitPath = newLeaves.length === 2 ? newPanes[newLeaves[1]]?.activePath ?? null : null;
+
+    set({
+      layout: newLayout,
+      panes: newPanes,
+      activePaneId: nextActiveId,
+      activePath: nextActivePath,
+      splitPath,
+    });
+  },
+
+  setActivePane: (paneId) => {
+    const pane = get().panes[paneId];
+    if (!pane) return;
+    set({
+      activePaneId: paneId,
+      activePath: pane.activePath ?? get().activePath,
+    });
+  },
+
+  setGridPreset: (preset) => {
+    const state = get();
+    const openPaths = state.tabs.map((t) => t.path);
+
+    if (preset === "1x1") {
+      const primaryId = state.activePaneId;
+      const primaryPane = state.panes[primaryId] ?? { id: primaryId, activePath: state.activePath };
+      set({
+        layout: createInitialLayout(primaryId),
+        panes: { [primaryId]: primaryPane },
+        activePaneId: primaryId,
+        splitPath: null,
+      });
+      return;
+    }
+
+    const count = preset === "2x2" ? 4 : preset === "1x3" || preset === "3x1" ? 3 : 2;
+    const existingLeaves = getLeafIds(state.layout);
+    const paneIds: string[] = [];
+
+    for (let i = 0; i < count; i++) {
+      paneIds.push(existingLeaves[i] || generatePaneId());
+    }
+
+    const newPanes: Record<string, EditorPane> = {};
+    for (let i = 0; i < count; i++) {
+      const pid = paneIds[i];
+      let assignedPath: string | null = null;
+      if (i === 0) {
+        assignedPath = state.activePath ?? openPaths[0] ?? null;
+      } else if (openPaths[i]) {
+        assignedPath = openPaths[i];
+      } else {
+        assignedPath = openPaths[0] ?? state.activePath;
+      }
+      newPanes[pid] = { id: pid, activePath: assignedPath };
+    }
+
+    const newLayout = buildPresetLayout(preset, paneIds);
+    const activePaneId = paneIds[0];
+    const activePath = newPanes[activePaneId]?.activePath ?? null;
+    const splitPath = paneIds.length === 2 ? newPanes[paneIds[1]]?.activePath ?? null : null;
+
+    set({
+      layout: newLayout,
+      panes: newPanes,
+      activePaneId,
+      activePath,
+      splitPath,
+    });
+  },
+
+  setPaneActivePath: (paneId, path) => {
+    const state = get();
+    const current = state.panes[paneId] ?? { id: paneId, activePath: path };
+    const newPanes = {
+      ...state.panes,
+      [paneId]: { ...current, activePath: path },
+    };
+    const isFile = state.tabs.find((t) => t.path === path)?.kind === "file";
+    set({
+      panes: newPanes,
+      activePaneId: paneId,
+      activePath: path,
+      lastFilePath: isFile ? path : state.lastFilePath,
+    });
+  },
+
+  setSplitRatio: (splitId, ratio) => {
+    set((state) => ({
+      layout: setSplitRatioInTree(state.layout, splitId, ratio),
+    }));
+  },
+
+  focusNextPane: () => {
+    const leaves = getLeafIds(get().layout);
+    if (leaves.length <= 1) return;
+    const idx = leaves.indexOf(get().activePaneId);
+    const next = leaves[(idx + 1) % leaves.length];
+    get().setActivePane(next);
+  },
+
+  focusPrevPane: () => {
+    const leaves = getLeafIds(get().layout);
+    if (leaves.length <= 1) return;
+    const idx = leaves.indexOf(get().activePaneId);
+    const prev = leaves[(idx - 1 + leaves.length) % leaves.length];
+    get().setActivePane(prev);
+  },
+
+  toggleSplit: () => {
+    const count = countLeaves(get().layout);
+    if (count > 1) {
+      get().setGridPreset("1x1");
+    } else {
+      get().splitPane(get().activePaneId, "vertical");
+    }
+  },
+
+  closeSplit: () => {
+    const count = countLeaves(get().layout);
+    if (count > 1) {
+      get().closePane(get().activePaneId);
+    }
+  },
 
   openFile: async (path) => {
     const existing = get().tabs.find((tab) => tab.path === path);
     if (existing) {
-      set({ activePath: path, lastFilePath: path });
+      const activeId = get().activePaneId;
+      set((state) => ({
+        activePath: path,
+        lastFilePath: path,
+        panes: activatePanePath(state.panes, activeId, path),
+      }));
       return true;
     }
     if (path.startsWith(REMOTE_PATH)) {
@@ -247,7 +457,13 @@ export const useEditor = create<EditorState>((set, get) => ({
         tooLarge: Boolean(reply.tooLarge),
         size: reply.size ?? content.length,
       };
-      set((state) => ({ tabs: [...state.tabs, tab], activePath: path, lastFilePath: path }));
+      const activeId = get().activePaneId;
+      set((state) => ({
+        tabs: [...state.tabs, tab],
+        activePath: path,
+        lastFilePath: path,
+        panes: activatePanePath(state.panes, activeId, path),
+      }));
       return true;
     }
     const media = mediaTypeFor(path);
@@ -263,7 +479,13 @@ export const useEditor = create<EditorState>((set, get) => ({
             mediaKind: media.kind,
             size: binary.size ?? 0,
           };
-          set((state) => ({ tabs: [...state.tabs, tab], activePath: path, lastFilePath: path }));
+          const activeId = get().activePaneId;
+          set((state) => ({
+            tabs: [...state.tabs, tab],
+            activePath: path,
+            lastFilePath: path,
+            panes: activatePanePath(state.panes, activeId, path),
+          }));
           return true;
         }
       } catch {
@@ -281,7 +503,13 @@ export const useEditor = create<EditorState>((set, get) => ({
         tooLarge: file.tooLarge,
         size: file.size,
       };
-      set((state) => ({ tabs: [...state.tabs, tab], activePath: path, lastFilePath: path }));
+      const activeId = get().activePaneId;
+      set((state) => ({
+        tabs: [...state.tabs, tab],
+        activePath: path,
+        lastFilePath: path,
+        panes: activatePanePath(state.panes, activeId, path),
+      }));
       return true;
     } catch (error) {
       console.error(`Could not open file: ${path}`, error);
@@ -289,100 +517,134 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
+  openFileToSide: async (path: string) => {
+    const ok = await get().openFile(path);
+    if (!ok) return false;
+    const state = get();
+    const leafIds = getLeafIds(state.layout);
+    if (leafIds.length <= 1) {
+      get().splitPane(state.activePaneId, "horizontal", path);
+    } else {
+      const otherPaneId = leafIds.find((id) => id !== state.activePaneId) ?? leafIds[0];
+      const panes = activatePanePath(state.panes, otherPaneId, path);
+      const splitPath = leafIds.length === 2 ? panes[leafIds[1]]?.activePath ?? null : null;
+      set({ activePaneId: otherPaneId, activePath: path, splitPath, panes });
+    }
+    return true;
+  },
+
   openSettings: () =>
     set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, SETTINGS_PATH);
       if (state.tabs.some((tab) => tab.path === SETTINGS_PATH)) {
-        return { activePath: SETTINGS_PATH };
+        return { activePath: SETTINGS_PATH, panes };
       }
       return {
         tabs: [...state.tabs, { kind: "settings", path: SETTINGS_PATH, name: "Settings" }],
         activePath: SETTINGS_PATH,
+        panes,
       };
     }),
 
   openPolicy: () =>
     set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, POLICY_PATH);
       if (state.tabs.some((tab) => tab.path === POLICY_PATH)) {
-        return { activePath: POLICY_PATH };
+        return { activePath: POLICY_PATH, panes };
       }
       return {
         tabs: [...state.tabs, { kind: "policy", path: POLICY_PATH, name: "Security" }],
         activePath: POLICY_PATH,
+        panes,
       };
     }),
 
   openBrowser: () =>
     set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, BROWSER_PATH);
       if (state.tabs.some((tab) => tab.path === BROWSER_PATH)) {
-        return { activePath: BROWSER_PATH };
+        return { activePath: BROWSER_PATH, panes };
       }
       return {
         tabs: [...state.tabs, { kind: "browser", path: BROWSER_PATH, name: "Browser" }],
         activePath: BROWSER_PATH,
+        panes,
       };
     }),
 
   openCatcher: () =>
     set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, CATCHER_PATH);
       if (state.tabs.some((tab) => tab.path === CATCHER_PATH)) {
-        return { activePath: CATCHER_PATH };
+        return { activePath: CATCHER_PATH, panes };
       }
       return {
         tabs: [...state.tabs, { kind: "catcher", path: CATCHER_PATH, name: "Catcher" }],
         activePath: CATCHER_PATH,
+        panes,
       };
     }),
 
   openPitcher: () =>
     set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, PITCHER_PATH);
       if (state.tabs.some((tab) => tab.path === PITCHER_PATH)) {
-        return { activePath: PITCHER_PATH };
+        return { activePath: PITCHER_PATH, panes };
       }
       return {
         tabs: [...state.tabs, { kind: "pitcher", path: PITCHER_PATH, name: "Pitcher" }],
         activePath: PITCHER_PATH,
+        panes,
       };
     }),
 
   openCyberchef: () =>
     set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, CYBERCHEF_PATH);
       if (state.tabs.some((tab) => tab.path === CYBERCHEF_PATH)) {
-        return { activePath: CYBERCHEF_PATH };
+        return { activePath: CYBERCHEF_PATH, panes };
       }
       return {
         tabs: [...state.tabs, { kind: "cyberchef", path: CYBERCHEF_PATH, name: "CyberChef" }],
         activePath: CYBERCHEF_PATH,
+        panes,
       };
     }),
 
   openMarkdownPreview: (sourcePath, name) =>
     set((state) => {
       const path = `${MD_PREVIEW_PATH}${sourcePath}`;
-      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path };
+      const panes = activatePanePath(state.panes, state.activePaneId, path);
+      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path, panes };
       return {
         tabs: [...state.tabs, { kind: "markdown-preview", path, name: `◹ ${name}` }],
         activePath: path,
+        panes,
       };
     }),
 
   openHttpResponse: () =>
     set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, HTTP_PATH);
       if (state.tabs.some((tab) => tab.path === HTTP_PATH)) {
-        return { activePath: HTTP_PATH };
+        return { activePath: HTTP_PATH, panes };
       }
       return {
         tabs: [...state.tabs, { kind: "http", path: HTTP_PATH, name: "Response" }],
         activePath: HTTP_PATH,
+        panes,
       };
     }),
 
   openExtension: (id, name) =>
     set((state) => {
       const path = `${EXTENSION_PATH}${id}`;
-      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path };
+      const panes = activatePanePath(state.panes, state.activePaneId, path);
+      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path, panes };
       return {
         tabs: [...state.tabs, { kind: "extension", path, name }],
         activePath: path,
+        panes,
       };
     }),
 
@@ -390,18 +652,20 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((state) => {
       const path = `${DIFF_PATH}${staged ? "staged" : "work"}/${relPath}`;
       const name = `${staged ? "◇ " : "◆ "}${basename(relPath)}`;
-      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path };
-      return { tabs: [...state.tabs, { kind: "diff", path, name }], activePath: path };
+      const panes = activatePanePath(state.panes, state.activePaneId, path);
+      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path, panes };
+      return { tabs: [...state.tabs, { kind: "diff", path, name }], activePath: path, panes };
     }),
 
   openAiChat: (id, name) =>
     set((state) => {
       const path = `${AI_CHAT_PATH}${id}`;
-
-      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path };
+      const panes = activatePanePath(state.panes, state.activePaneId, path);
+      if (state.tabs.some((tab) => tab.path === path)) return { activePath: path, panes };
       return {
         tabs: [...state.tabs, { kind: "ai-chat", path, name }],
         activePath: path,
+        panes,
       };
     }),
 
@@ -437,10 +701,20 @@ export const useEditor = create<EditorState>((set, get) => ({
             null
           : state.lastFilePath;
 
+      const replacement = neighbour?.path ?? tabs[0]?.path ?? null;
+      const panes: Record<string, EditorPane> = {};
+      for (const [pid, pane] of Object.entries(state.panes)) {
+        if (pane.activePath === path) {
+          panes[pid] = { ...pane, activePath: replacement };
+        } else {
+          panes[pid] = pane;
+        }
+      }
+
       const splitPath = state.splitPath === path ? null : state.splitPath;
 
-      if (state.activePath !== path) return { tabs, lastFilePath, splitPath, closedFiles };
-      return { tabs, activePath: neighbour?.path ?? null, lastFilePath, splitPath, closedFiles };
+      if (state.activePath !== path) return { tabs, lastFilePath, splitPath, closedFiles, panes };
+      return { tabs, activePath: neighbour?.path ?? null, lastFilePath, splitPath, closedFiles, panes };
     });
   },
 
@@ -450,12 +724,17 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!keptTab) return state;
       for (const tab of state.tabs) if (tab.path !== keepPath) cleanupClosedTab(tab.path);
       const removedFiles = state.tabs.filter((tab): tab is FileTab => tab.kind === "file" && tab.path !== keepPath);
+      const panes: Record<string, EditorPane> = {};
+      for (const [pid, pane] of Object.entries(state.panes)) {
+        panes[pid] = { ...pane, activePath: keepPath };
+      }
       return {
         tabs: [keptTab],
         activePath: keepPath,
         lastFilePath: keptTab.kind === "file" ? keepPath : null,
         splitPath: state.splitPath === keepPath ? state.splitPath : null,
         closedFiles: [...state.closedFiles, ...removedFiles].slice(-15),
+        panes,
       };
     }),
 
@@ -468,6 +747,14 @@ export const useEditor = create<EditorState>((set, get) => ({
       for (const tab of removedTabs) cleanupClosedTab(tab.path);
       const removedFiles = removedTabs.filter((tab): tab is FileTab => tab.kind === "file");
       const keptPaths = new Set(kept.map((tab) => tab.path));
+      const panes: Record<string, EditorPane> = {};
+      for (const [pid, pane] of Object.entries(state.panes)) {
+        if (pane.activePath && !keptPaths.has(pane.activePath)) {
+          panes[pid] = { ...pane, activePath: fromPath };
+        } else {
+          panes[pid] = pane;
+        }
+      }
       return {
         tabs: kept,
         activePath: keptPaths.has(state.activePath ?? "") ? state.activePath : fromPath,
@@ -476,29 +763,35 @@ export const useEditor = create<EditorState>((set, get) => ({
           : [...kept].reverse().find((tab) => tab.kind === "file")?.path ?? null,
         splitPath: keptPaths.has(state.splitPath ?? "") ? state.splitPath : null,
         closedFiles: [...state.closedFiles, ...removedFiles].slice(-15),
+        panes,
       };
     }),
 
   setActive: (path) =>
     set((state) => ({
       activePath: path,
+      panes: activatePanePath(state.panes, state.activePaneId, path),
       lastFilePath:
         state.tabs.find((tab) => tab.path === path)?.kind === "file" ? path : state.lastFilePath,
     })),
 
   closeAll: () => {
     useDiagnostics.getState().reset();
-    set((state) => {
-      const removedFiles = state.tabs.filter((tab): tab is FileTab => tab.kind === "file");
-      return {
-        tabs: [],
-        activePath: null,
-        lastFilePath: null,
-        pendingReveal: null,
-        pendingReplace: null,
-        closedFiles: [...state.closedFiles, ...removedFiles].slice(-15),
-      };
-    });
+    for (const tab of get().tabs) cleanupClosedTab(tab.path);
+    const removedFiles = get().tabs.filter((tab): tab is FileTab => tab.kind === "file");
+    const primaryId = get().activePaneId;
+    set((state) => ({
+      tabs: [],
+      activePath: null,
+      splitPath: null,
+      lastFilePath: null,
+      pendingReveal: null,
+      pendingReplace: null,
+      layout: createInitialLayout(primaryId),
+      activePaneId: primaryId,
+      panes: { [primaryId]: { id: primaryId, activePath: null } },
+      closedFiles: [...state.closedFiles, ...removedFiles].slice(-15),
+    }));
   },
 
   reopenClosed: () => {
@@ -704,3 +997,10 @@ export const isDirty = (tab: Tab | null | undefined): boolean =>
 
 export const useActiveTab = (): Tab | null =>
   useEditor((state) => state.tabs.find((tab) => tab.path === state.activePath) ?? null);
+
+export const usePaneTab = (paneId: string): Tab | null =>
+  useEditor((state) => {
+    const pane = state.panes[paneId];
+    if (!pane?.activePath) return null;
+    return state.tabs.find((tab) => tab.path === pane.activePath) ?? null;
+  });

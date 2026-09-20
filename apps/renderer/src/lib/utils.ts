@@ -46,6 +46,17 @@ export function extname(path: string): string {
   return cut <= 0 ? "" : name.slice(cut + 1).toLowerCase();
 }
 
+export function getRelativePath(root: string | null, fullPath: string): string {
+  if (!root) return basename(fullPath);
+  const normRoot = normalisePath(root).replace(/\/+$/, "");
+  const normPath = normalisePath(fullPath);
+  if (normPath === normRoot) return "";
+  if (normPath.startsWith(normRoot + "/")) {
+    return normPath.slice(normRoot.length + 1);
+  }
+  return basename(fullPath);
+}
+
 const isBoundary = (char: string): boolean =>
   char === "/" || char === "\\" || char === "-" || char === "_" || char === "." || char === " ";
 

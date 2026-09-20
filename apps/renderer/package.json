@@ -1,6 +1,6 @@
 {
   "name": "@wide/renderer",
-  "version": "1.17926",
+  "version": "1.220926",
   "private": true,
   "type": "module",
   "scripts": {

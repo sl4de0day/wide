@@ -89,15 +89,7 @@ const manifest = (id) => `${JSON.stringify(
   2
 )}
 `;
-const starter = (id) => `/**
- * ${title(id)}
- *
- * Every command is one function on the default export, keyed by the id it was
- * given in tool.json. It runs in its own process; \`ctx\` is the only way back
- * to the editor, and it can only reach what tool.json declared.
- */
-
-export default {
+const starter = (id) => `export default {
   async run(ctx) {
     if (!ctx.active) {
       await ctx.ui.notify('Open a file first.')

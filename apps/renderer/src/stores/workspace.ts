@@ -8,7 +8,7 @@ import {
   type Workflow,
   type WorkflowFolder,
 } from "@/lib/bridge";
-import { basename, dirname } from "@/lib/utils";
+import { basename, dirname, extname, normalisePath } from "@/lib/utils";
 import { toast } from "./toast";
 import { useEditor } from "./editor";
 
@@ -63,10 +63,16 @@ interface WorkspaceState {
   commitDraft(name: string): Promise<string | null>;
 
   remove(entry: DirEntry): Promise<void>;
+  batchDelete(paths: string[]): Promise<void>;
   reveal(entry: DirEntry): void;
   createDirect(parentPath: string, name: string, kind: "file" | "folder"): Promise<string | null>;
   renameDirect(path: string, name: string): Promise<string | null>;
+  duplicate(entryOrPath: DirEntry | string): Promise<string | null>;
+  duplicateBatch(entriesOrPaths: (DirEntry | string)[]): Promise<string[]>;
+  copy(sourcePath: string, targetDir: string): Promise<string | null>;
+  copyBatch(sourcePaths: string[], targetDir: string): Promise<string[]>;
   move(sourcePath: string, targetDir: string): Promise<void>;
+  moveBatch(sourcePaths: string[], targetDir: string): Promise<string[]>;
 }
 
 const inFlight = new Set<string>();
@@ -401,6 +407,127 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     useEditor.getState().relocate(sourcePath, result.path);
     set({ error: null });
     await Promise.all([get().loadDir(dirname(sourcePath)), get().loadDir(targetDir)]);
+  },
+
+  duplicate: async (entryOrPath) => {
+    const targetPath = typeof entryOrPath === "string" ? entryOrPath : entryOrPath.path;
+    let res = await bridge.duplicate(targetPath);
+    if ((!res || res.error || !res.path) && (!res?.path)) {
+      try {
+        const parent = dirname(targetPath);
+        const ext = extname(targetPath);
+        const base = basename(targetPath);
+        const rawBase = ext ? base.slice(0, -(ext.length + 1)) : base;
+        const dotExt = ext ? `.${ext}` : "";
+        let candidateName = `${rawBase} copy${dotExt}`;
+        const existing = get().children[parent] ?? [];
+        let counter = 2;
+        while (existing.some((e) => e.name === candidateName)) {
+          candidateName = `${rawBase} copy ${counter}${dotExt}`;
+          counter++;
+        }
+        const fileData = await bridge.readFile(targetPath);
+        if (!fileData.error) {
+          const sep = parent.includes("\\") ? "\\" : "/";
+          const newPath = `${parent}${sep}${candidateName}`;
+          const writeRes = await bridge.writeFile(newPath, fileData.content);
+          if (!writeRes.error) {
+            res = { path: newPath };
+          }
+        }
+      } catch {
+      }
+    }
+
+    if (res?.error || !res?.path) {
+      const msg = t("Could not duplicate: {msg}", { msg: res?.error ?? "Unknown error" });
+      set({ error: msg });
+      toast.error(msg);
+      return null;
+    }
+    await get().loadDir(dirname(targetPath));
+    return res.path;
+  },
+
+  duplicateBatch: async (entriesOrPaths) => {
+    const results: string[] = [];
+    const parentDirs = new Set<string>();
+    for (const item of entriesOrPaths) {
+      const path = typeof item === "string" ? item : item.path;
+      parentDirs.add(dirname(path));
+      const res = await bridge.duplicate(path);
+      if (res?.path) results.push(res.path);
+    }
+    await Promise.all(Array.from(parentDirs).map((d) => get().loadDir(d)));
+    return results;
+  },
+
+  copy: async (sourcePath, targetDir) => {
+    const res = await bridge.copy(sourcePath, targetDir);
+    if (res?.error) {
+      const msg = t("Could not copy: {msg}", { msg: res.error });
+      set({ error: msg });
+      toast.error(msg);
+      return null;
+    }
+    await get().loadDir(targetDir);
+    return res?.path ?? null;
+  },
+
+  copyBatch: async (sourcePaths, targetDir) => {
+    const results: string[] = [];
+    for (const src of sourcePaths) {
+      const res = await bridge.copy(src, targetDir);
+      if (res?.path) results.push(res.path);
+    }
+    await get().loadDir(targetDir);
+    return results;
+  },
+
+  moveBatch: async (sourcePaths, targetDir) => {
+    const results: string[] = [];
+    const parents = new Set<string>([targetDir]);
+    for (const src of sourcePaths) {
+      parents.add(dirname(src));
+      const res = await bridge.move(src, targetDir);
+      if (res?.path && res.path !== src) {
+        useEditor.getState().relocate(src, res.path);
+        results.push(res.path);
+      }
+    }
+    await Promise.all(Array.from(parents).map((p) => get().loadDir(p)));
+    return results;
+  },
+
+  batchDelete: async (paths) => {
+    if (paths.length === 0) return;
+    const sorted = [...paths].sort((a, b) => a.length - b.length);
+    const topTargets: string[] = [];
+    for (const p of sorted) {
+      const normP = normalisePath(p);
+      const hasParent = topTargets.some((top) => {
+        const normTop = normalisePath(top);
+        return normP.startsWith(normTop + "/") || normP.startsWith(normTop + "\\");
+      });
+      if (!hasParent) topTargets.push(p);
+    }
+
+    const ed = useEditor.getState();
+    const parents = new Set<string>();
+    for (const target of topTargets) {
+      parents.add(dirname(target));
+      const res = await bridge.trash(target);
+      if (res?.error) {
+        toast.error(t("Could not delete: {msg}", { msg: res.error }));
+      } else {
+        for (const tab of ed.tabs) {
+          if (tab.path === target || tab.path.startsWith(target + "/") || tab.path.startsWith(target + "\\")) {
+            ed.closeTab(tab.path);
+          }
+        }
+      }
+    }
+    await Promise.all(Array.from(parents).map((p) => get().loadDir(p)));
   },
 }));
 

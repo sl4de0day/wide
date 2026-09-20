@@ -57,8 +57,12 @@ jobs:
             echo "$GITHUB_REF_NAME is already published; leaving its assets untouched."
             exit 0
           fi
+          NOTES_ARG="--generate-notes"
+          if [ -f RELEASE_NOTES.md ]; then
+            NOTES_ARG="--notes-file RELEASE_NOTES.md"
+          fi
           gh release create "$GITHUB_REF_NAME" \
             release/Wide-Setup-*.exe \
             release/SHA256SUMS \
             --title "Wide ${GITHUB_REF_NAME#v}" \
-            --generate-notes
+            $NOTES_ARG

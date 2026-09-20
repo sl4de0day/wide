@@ -114,6 +114,31 @@ bool g_devtoolsHasBounds = false;
 bool g_devtoolsCreating = false;
 std::wstring g_devtoolsPendingUrl;
 
+enum class FocusedHost { Main, Browser, DevTools };
+FocusedHost g_focusedHost = FocusedHost::Main;
+
+void RestoreActiveFocus() {
+  HWND focused = GetFocus();
+  if (g_devtoolsVisible && g_devtoolsController &&
+      (g_focusedHost == FocusedHost::DevTools || focused == g_devtoolsHost ||
+       (g_devtoolsHost && IsChild(g_devtoolsHost, focused)))) {
+    g_devtoolsController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+    return;
+  }
+  if (g_browserVisible &&
+      (g_focusedHost == FocusedHost::Browser || focused == g_browserHost ||
+       (g_browserHost && IsChild(g_browserHost, focused)))) {
+    auto it = g_tabs.find(g_activeTab);
+    if (it != g_tabs.end() && it->second.controller) {
+      it->second.controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+      return;
+    }
+  }
+  if (g_controller) {
+    g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+  }
+}
+
 void DestroySplash();
 
 std::vector<wil::com_ptr<ICoreWebView2DevToolsProtocolEventReceiver>> g_cdpReceivers;
@@ -555,13 +580,19 @@ void RetryPendingBrowserTabs(HWND hwnd) {
 }
 
 LRESULT CALLBACK BrowserHostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+  if (m == WM_MOUSEACTIVATE) {
+    g_focusedHost = (h == g_devtoolsHost) ? FocusedHost::DevTools : FocusedHost::Browser;
+    return MA_ACTIVATE;
+  }
   if (m == WM_SETFOCUS) {
     if (h == g_devtoolsHost && g_devtoolsController) {
+      g_focusedHost = FocusedHost::DevTools;
       g_devtoolsController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
       return 0;
     }
     auto it = g_tabs.find(g_activeTab);
     if (it != g_tabs.end() && it->second.controller) {
+      g_focusedHost = FocusedHost::Browser;
       it->second.controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
       return 0;
     }
@@ -669,6 +700,15 @@ void EnsureBrowserTab(HWND hwnd, const std::wstring& tabId, std::function<void()
                 COREWEBVIEW2_COLOR bg = {255, 255, 255, 255};
                 c2->put_DefaultBackgroundColor(bg);
               }
+              EventRegistrationToken tabFocusToken;
+              tab.controller->add_GotFocus(
+                  Callback<ICoreWebView2FocusChangedEventHandler>(
+                      [](ICoreWebView2Controller*, IUnknown*) -> HRESULT {
+                        g_focusedHost = FocusedHost::Browser;
+                        return S_OK;
+                      })
+                      .Get(),
+                  &tabFocusToken);
               tab.controller->put_IsVisible(FALSE);
               BrowserWireEvents(tabId);
               BrowserConfigure(tabId);
@@ -881,6 +921,15 @@ void DevtoolsOpen(HWND hwnd, const std::wstring& url) {
             if (g_devtoolsController) { controller->Close(); return S_OK; }
             g_devtoolsController = controller;
             g_devtoolsController->get_CoreWebView2(&g_devtoolsView);
+            EventRegistrationToken dtFocusToken;
+            g_devtoolsController->add_GotFocus(
+                Callback<ICoreWebView2FocusChangedEventHandler>(
+                    [](ICoreWebView2Controller*, IUnknown*) -> HRESULT {
+                      g_focusedHost = FocusedHost::DevTools;
+                      return S_OK;
+                    })
+                    .Get(),
+                &dtFocusToken);
             ApplyDevtoolsPlacement();
             const std::wstring target = g_devtoolsPendingUrl;
             g_devtoolsPendingUrl.clear();
@@ -1511,8 +1560,29 @@ void InitWebView(HWND hwnd) {
                         controller2->put_DefaultBackgroundColor(bg);
                       }
                       g_controller->put_IsVisible(TRUE);
+                      g_controller->put_ZoomFactor(1.0);
+                      EventRegistrationToken zoomToken;
+                      g_controller->add_ZoomFactorChanged(
+                          Callback<ICoreWebView2ZoomFactorChangedEventHandler>(
+                              [](ICoreWebView2Controller* c, IUnknown*) -> HRESULT {
+                                if (c) c->put_ZoomFactor(1.0);
+                                return S_OK;
+                              })
+                              .Get(),
+                          &zoomToken);
                       ResizeWebViewToClient(hwnd);
                       ConfigureWebView(hwnd);
+                      g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+
+                      EventRegistrationToken gotFocusToken;
+                      g_controller->add_GotFocus(
+                          Callback<ICoreWebView2FocusChangedEventHandler>(
+                              [](ICoreWebView2Controller*, IUnknown*) -> HRESULT {
+                                g_focusedHost = FocusedHost::Main;
+                                return S_OK;
+                              })
+                              .Get(),
+                          &gotFocusToken);
 
                       std::wstring remoteCmd = BuildRemoteCommand();
                       g_currentlyRemote = !remoteCmd.empty();
@@ -1745,6 +1815,21 @@ void ApplyRemoteChange(HWND hwnd) {
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
   switch (msg) {
+    case WM_MOUSEACTIVATE: {
+      g_focusedHost = FocusedHost::Main;
+      return MA_ACTIVATE;
+    }
+    case WM_SETFOCUS: {
+      RestoreActiveFocus();
+      return 0;
+    }
+    case WM_ACTIVATE: {
+      LRESULT res = DefWindowProc(hwnd, msg, wparam, lparam);
+      if (LOWORD(wparam) != WA_INACTIVE && !HIWORD(wparam)) {
+        RestoreActiveFocus();
+      }
+      return res;
+    }
     case WM_APP_SIDECAR: {
       if (wparam == 1) {
         OnSidecarExit(hwnd);

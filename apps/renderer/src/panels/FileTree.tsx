@@ -1,46 +1,59 @@
 import {
   ChevronDown,
   ChevronRight,
+  ClipboardPaste,
+  Columns2,
   Copy,
+  CopyPlus,
   File,
+  FileCode,
   FilePlus,
+  FileText,
   Folder,
   FolderOpen,
   FolderPlus,
   FolderX,
+  GitCompare,
   Pencil,
   RotateCw,
+  Scissors,
+  Terminal,
   Trash2,
+  type LucideIcon,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { DirEntry } from "@/lib/bridge";
+import { bridge, type DirEntry } from "@/lib/bridge";
 import { fileMark } from "@/lib/fileIcons";
 import { folderColour } from "@/lib/folderIcons";
 import { extensionById, languageExtensionFor } from "@/lib/marketplace";
 import { useT } from "@/lib/i18n";
-import { cn, copyText, dirname } from "@/lib/utils";
+import { cn, copyText, dirname, getRelativePath } from "@/lib/utils";
 import { PanelHeader, panelButtonClass } from "@/components/SidePanel";
 import { confirm } from "@/stores/confirm";
 import { useEditor } from "@/stores/editor";
 import { useExtensions } from "@/stores/extensions";
 import { useWorkspace } from "@/stores/workspace";
+import { useComparer } from "@/stores/comparer";
+import { toast } from "@/stores/toast";
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
 
 interface VisibleRow {
-
   entry?: DirEntry;
   depth: number;
   folderHeader?: boolean;
   missing?: boolean;
   needs?: string;
-
   renaming?: boolean;
-
   draftCreate?: "file" | "folder";
+}
+
+interface TreeClipboard {
+  paths: string[];
+  mode: "copy" | "cut";
 }
 
 const FileMarkIcon = memo(function FileMarkIcon({ name }: { name: string }) {
@@ -87,9 +100,9 @@ function DraftRow({ row, top }: { row: VisibleRow; top: number }) {
     if (committed.current) return;
     committed.current = true;
     const result = await useWorkspace.getState().commitDraft(value);
-
     if (result === null && useWorkspace.getState().draft) committed.current = false;
   };
+
   const cancel = () => {
     if (committed.current) return;
     committed.current = true;
@@ -146,6 +159,8 @@ const Row = memo(function Row({
   needs,
   needsLabel,
   dropTarget,
+  isCut,
+  isCompareSelected,
   onActivate,
   onContext,
   onDragStartRow,
@@ -163,13 +178,14 @@ const Row = memo(function Row({
   needs?: string;
   needsLabel?: string;
   dropTarget: boolean;
+  isCut?: boolean;
+  isCompareSelected?: boolean;
   onActivate: (entry: DirEntry, e: React.MouseEvent) => void;
   onContext: (entry: DirEntry, x: number, y: number) => void;
   onDragStartRow: (path: string) => void;
   onDropRow: (dir: string) => void;
   onDragEnterRow: (dir: string) => void;
 }) {
-
   const dropDir = entry.isDirectory ? entry.path : dirname(entry.path);
 
   return (
@@ -189,9 +205,11 @@ const Row = memo(function Row({
       onDrop={(e) => { if (!missing) { e.preventDefault(); e.stopPropagation(); onDropRow(dropDir); } }}
       title={needsLabel ? `${needsLabel}\n${entry.path}` : entry.path}
       className={cn(
-        "absolute inset-x-0 flex items-center gap-1 rounded-sm pr-2 text-left text-[13px]",
+        "absolute inset-x-0 flex items-center gap-1 rounded-sm pr-2 text-left text-[13px] select-none",
         "transition-colors duration-100",
         active ? "bg-selected text-fg-bright hover:bg-active" : selected ? "bg-hover text-fg" : "text-fg hover:bg-hover",
+        isCut && "opacity-40",
+        isCompareSelected && "ring-1 ring-accent/60 ring-inset",
         dropTarget && "ring-1 ring-accent ring-inset",
         folderHeader && "text-[11px] uppercase tracking-wide text-fg-muted",
         missing && "cursor-default text-fg-faint line-through hover:bg-transparent",
@@ -226,23 +244,47 @@ const Row = memo(function Row({
   );
 });
 
-function MenuItem({ icon: Icon, label, onClick, danger }: { icon: typeof File; label: string; onClick: () => void; danger?: boolean }) {
+function MenuItem({
+  icon: Icon,
+  label,
+  shortcut,
+  onClick,
+  danger,
+  disabled,
+}: {
+  icon?: LucideIcon | React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  label: string;
+  shortcut?: string;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-[12px] transition-colors duration-100",
-        danger ? "text-status-error hover:bg-status-error/10" : "text-fg-dim hover:bg-hover hover:text-fg",
+        "flex w-full items-center justify-between rounded-sm px-2 py-1 text-left text-[12px] transition-colors duration-100",
+        disabled && "opacity-40 cursor-default",
+        !disabled && danger && "text-status-error hover:bg-status-error/10",
+        !disabled && !danger && "text-fg-dim hover:bg-hover hover:text-fg",
       )}
     >
-      <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
-      {label}
+      <span className="flex items-center gap-2 truncate">
+        {Icon && <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />}
+        <span className="truncate">{label}</span>
+      </span>
+      {shortcut && <span className="ml-3 shrink-0 font-mono text-[10px] text-fg-faint">{shortcut}</span>}
     </button>
   );
 }
 
-export function FileTree() {
+function MenuSeparator() {
+  return <div className="my-1 h-px bg-line" />;
+}
+
+export function FileTree({ onOpenPanel }: { onOpenPanel?: (id: string) => void } = {}) {
   const root = useWorkspace((state) => state.root);
   const folders = useWorkspace((state) => state.folders);
   const installed = useExtensions((state) => state.installed);
@@ -257,11 +299,78 @@ export function FileTree() {
   const [height, setHeight] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
+  const [lastAnchor, setLastAnchor] = useState<string | null>(null);
+  const [clipboard, setClipboard] = useState<TreeClipboard | null>(null);
+  const [comparePath, setComparePath] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ entry: DirEntry | null; x: number; y: number } | null>(null);
   const [drag, setDrag] = useState<string | null>(null);
   const [dropDir, setDropDir] = useState<string | null>(null);
 
-  const pick = useCallback((path: string) => { setSelected(path); setSelection(new Set([path])); }, []);
+  const pick = useCallback((path: string) => {
+    setSelected(path);
+    setSelection(new Set([path]));
+    setLastAnchor(path);
+  }, []);
+
+  const selectRange = useCallback((fromPath: string, toPath: string, allRows: VisibleRow[]) => {
+    const paths = allRows.filter((r) => r.entry && !r.draftCreate).map((r) => r.entry!.path);
+    const a = paths.indexOf(fromPath);
+    const b = paths.indexOf(toPath);
+    if (a !== -1 && b !== -1) {
+      const [lo, hi] = a < b ? [a, b] : [b, a];
+      setSelection(new Set(paths.slice(lo, hi + 1)));
+      setSelected(toPath);
+    }
+  }, []);
+
+  const getSelectedTargets = useCallback((): string[] => {
+    if (selection.size > 0 && selected && selection.has(selected)) {
+      return Array.from(selection);
+    }
+    if (selected) return [selected];
+    if (selection.size > 0) return Array.from(selection);
+    return [];
+  }, [selected, selection]);
+
+  const onDuplicateTargets = useCallback(async (targets: string[]) => {
+    if (targets.length === 0) return;
+    const newPaths = await useWorkspace.getState().duplicateBatch(targets);
+    if (newPaths.length > 0) {
+      setSelection(new Set(newPaths));
+      const last = newPaths[newPaths.length - 1];
+      setSelected(last);
+      setLastAnchor(last);
+    }
+  }, []);
+
+  const onCutTargets = useCallback((targets: string[]) => {
+    if (targets.length === 0) return;
+    setClipboard({ paths: targets, mode: "cut" });
+  }, []);
+
+  const onCopyTargets = useCallback((targets: string[]) => {
+    if (targets.length === 0) return;
+    setClipboard({ paths: targets, mode: "copy" });
+    void copyText(targets.join("\n"));
+  }, []);
+
+  const onPasteInto = useCallback(async (targetDir: string) => {
+    if (!clipboard || clipboard.paths.length === 0) return;
+    if (clipboard.mode === "cut") {
+      await useWorkspace.getState().moveBatch(clipboard.paths, targetDir);
+      setClipboard(null);
+    } else {
+      await useWorkspace.getState().copyBatch(clipboard.paths, targetDir);
+    }
+  }, [clipboard]);
+
+  const onCompareWithSelected = useCallback(async (targetPath: string) => {
+    if (!comparePath) return;
+    const [f1, f2] = await Promise.all([bridge.readFile(comparePath), bridge.readFile(targetPath)]);
+    useComparer.getState().setLeft(f1.content);
+    useComparer.getState().setRight(f2.content);
+    useComparer.getState().openComparer();
+  }, [comparePath]);
 
   const removeTargets = useCallback(
     async (paths: string[]) => {
@@ -274,7 +383,9 @@ export function FileTree() {
         danger: true,
       });
       if (!ok) return;
-      for (const p of paths) { const en = findEntry(children, folders, root, p); if (en) void useWorkspace.getState().remove(en); }
+      await useWorkspace.getState().batchDelete(paths);
+      setSelection(new Set());
+      setSelected(null);
     },
     [children, folders, root, t],
   );
@@ -286,11 +397,13 @@ export function FileTree() {
       setDropDir(null);
       if (!source || !dir) return;
 
-      const sources = selection.size > 1 && selection.has(source) ? [...selection] : [source];
-      for (const src of sources) {
-
-        if (dir === src || dir === dirname(src) || dir.startsWith(src + "/") || dir.startsWith(src + "\\")) continue;
-        void useWorkspace.getState().move(src, dir);
+      const sources = selection.size > 1 && selection.has(source) ? Array.from(selection) : [source];
+      const validSources = sources.filter((src) => {
+        if (dir === src || dir === dirname(src) || dir.startsWith(src + "/") || dir.startsWith(src + "\\")) return false;
+        return true;
+      });
+      if (validSources.length > 0) {
+        void useWorkspace.getState().moveBatch(validSources, dir);
       }
     },
     [drag, selection],
@@ -316,9 +429,9 @@ export function FileTree() {
 
   const openContext = useCallback((entry: DirEntry | null, x: number, y: number) => {
     if (entry) {
-
       setSelection((s) => (s.has(entry.path) ? s : new Set([entry.path])));
       setSelected(entry.path);
+      setLastAnchor(entry.path);
     }
     setMenu({ entry, x, y });
   }, []);
@@ -333,7 +446,6 @@ export function FileTree() {
     };
 
     const walk = (dir: string, depth: number) => {
-
       if (draft?.mode === "create" && draft.parentPath === dir) {
         out.push({ draftCreate: draft.kind, depth });
       }
@@ -378,20 +490,18 @@ export function FileTree() {
         return next;
       });
       setSelected(entry.path);
+      setLastAnchor(entry.path);
       return;
     }
-    if (e.shiftKey && selected) {
-      const paths = rows.filter((r) => r.entry).map((r) => r.entry!.path);
-      const a = paths.indexOf(selected);
-      const b = paths.indexOf(entry.path);
-      if (a !== -1 && b !== -1) {
-        const [lo, hi] = a < b ? [a, b] : [b, a];
-        setSelection(new Set(paths.slice(lo, hi + 1)));
-        setSelected(entry.path);
-        return;
-      }
+    if (e.shiftKey && lastAnchor) {
+      selectRange(lastAnchor, entry.path, rows);
+      return;
     }
     pick(entry.path);
+    if (e.altKey && !entry.isDirectory) {
+      void useEditor.getState().openFileToSide(entry.path);
+      return;
+    }
     if (entry.isDirectory) void useWorkspace.getState().toggleDir(entry.path);
     else void useEditor.getState().openFile(entry.path);
   };
@@ -408,13 +518,78 @@ export function FileTree() {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       const next = withEntry[at + 1] ?? withEntry[0];
-      if (next?.entry) pick(next.entry.path);
+      if (next?.entry) {
+        if (e.shiftKey && lastAnchor) {
+          selectRange(lastAnchor, next.entry.path, rows);
+        } else {
+          pick(next.entry.path);
+        }
+      }
       return;
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
       const prev = at <= 0 ? withEntry[withEntry.length - 1] : withEntry[at - 1];
-      if (prev?.entry) pick(prev.entry.path);
+      if (prev?.entry) {
+        if (e.shiftKey && lastAnchor) {
+          selectRange(lastAnchor, prev.entry.path, rows);
+        } else {
+          pick(prev.entry.path);
+        }
+      }
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === "a" || e.key === "A") {
+        e.preventDefault();
+        const allPaths = withEntry.map((r) => r.entry!.path);
+        setSelection(new Set(allPaths));
+        return;
+      }
+      if (e.key === "d" || e.key === "D") {
+        e.preventDefault();
+        const targets = getSelectedTargets();
+        void onDuplicateTargets(targets);
+        return;
+      }
+      if (e.key === "c" || e.key === "C") {
+        e.preventDefault();
+        const targets = getSelectedTargets();
+        onCopyTargets(targets);
+        return;
+      }
+      if (e.key === "x" || e.key === "X") {
+        e.preventDefault();
+        const targets = getSelectedTargets();
+        onCutTargets(targets);
+        return;
+      }
+      if (e.key === "v" || e.key === "V") {
+        e.preventDefault();
+        const entry = selected ? findEntry(children, folders, root, selected) : null;
+        const targetDir = entry ? dirFor(entry) ?? root : root;
+        if (targetDir) void onPasteInto(targetDir);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (selected) {
+          const entry = findEntry(children, folders, root, selected);
+          if (entry && !entry.isDirectory) void useEditor.getState().openFileToSide(entry.path);
+        }
+        return;
+      }
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (selection.size > 1 && selected) {
+        setSelection(new Set([selected]));
+      } else {
+        setSelection(new Set());
+        setSelected(null);
+      }
       return;
     }
 
@@ -430,18 +605,25 @@ export function FileTree() {
       e.preventDefault();
       if (entry.isDirectory && expanded.has(entry.path)) void useWorkspace.getState().toggleDir(entry.path);
       else { const parent = dirname(entry.path); if (parent) pick(parent); }
-    } else if (e.key === "F2") { e.preventDefault(); useWorkspace.getState().startRename(entry); }
-    else if (e.key === "Delete") {
+    } else if (e.key === "F2") {
       e.preventDefault();
-      const targets = selection.size > 1 && selection.has(entry.path) ? [...selection] : [entry.path];
+      useWorkspace.getState().startRename(entry);
+    } else if (e.key === "Delete") {
+      e.preventDefault();
+      const targets = getSelectedTargets();
       void removeTargets(targets);
-    }
-    else if (e.key === "Enter") {
+    } else if (e.key === "Enter") {
       e.preventDefault();
       if (entry.isDirectory) void useWorkspace.getState().toggleDir(entry.path);
       else void useEditor.getState().openFile(entry.path);
     }
   };
+
+  const menuTargets = menu?.entry
+    ? selection.size > 1 && selection.has(menu.entry.path)
+      ? Array.from(selection)
+      : [menu.entry.path]
+    : [];
 
   return (
     <div className="flex h-full flex-col">
@@ -475,7 +657,6 @@ export function FileTree() {
           onKeyDown={onKeyDown}
           onScroll={(event) => {
             setScrollTop(event.currentTarget.scrollTop);
-
             if (event.currentTarget.clientHeight !== height) setHeight(event.currentTarget.clientHeight);
           }}
           onContextMenu={(e) => { e.preventDefault(); openContext(null, e.clientX, e.clientY); }}
@@ -502,6 +683,8 @@ export function FileTree() {
                   needs={row.needs}
                   needsLabel={row.needs ? t("Install the {name} extension to read this file properly.", { name: row.needs }) : undefined}
                   dropTarget={Boolean(drag) && entry.isDirectory && dropDir === entry.path}
+                  isCut={clipboard?.mode === "cut" && clipboard.paths.includes(entry.path)}
+                  isCompareSelected={comparePath === entry.path}
                   onActivate={onActivate}
                   onContext={openContext}
                   onDragStartRow={setDrag}
@@ -516,12 +699,13 @@ export function FileTree() {
 
       {menu && createPortal(
         <>
-          {
-}
           <div className="fixed inset-0 z-[300]" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
           <div
-            className="wide-pop-up fixed z-[301] min-w-44 rounded-md border border-line bg-panel p-1 shadow-lg"
-            style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 240) }}
+            className="wide-pop-up fixed z-[301] min-w-52 rounded-md border border-line bg-panel p-1 shadow-lg text-[12px]"
+            style={{
+              left: Math.max(8, Math.min(menu.x, window.innerWidth - 230)),
+              top: Math.max(8, Math.min(menu.y, window.innerHeight - 380)),
+            }}
           >
             {menuDir && (
               <>
@@ -531,28 +715,204 @@ export function FileTree() {
             )}
             {menu.entry && (
               <>
-                <div className="my-1 h-px bg-line" />
-                <MenuItem icon={Pencil} label={t("Rename")} onClick={() => { const e = menu.entry!; setMenu(null); useWorkspace.getState().startRename(e); }} />
+                <MenuSeparator />
+                {!menu.entry.isDirectory && (
+                  <MenuItem
+                    icon={Columns2}
+                    label={t("Open to the side")}
+                    shortcut="Ctrl+Enter"
+                    onClick={() => {
+                      const p = menu.entry!.path;
+                      setMenu(null);
+                      void useEditor.getState().openFileToSide(p);
+                    }}
+                  />
+                )}
                 <MenuItem
-                  icon={Trash2}
-                  label={selection.size > 1 && menu.entry && selection.has(menu.entry.path) ? t("Delete {n} items", { n: selection.size }) : t("Delete")}
-                  danger
+                  icon={Terminal}
+                  label={t("Open in Terminal")}
+                  onClick={() => {
+                    setMenu(null);
+                    onOpenPanel?.("terminal");
+                  }}
+                />
+                <MenuSeparator />
+                <MenuItem
+                  icon={Scissors}
+                  label={t("Cut")}
+                  shortcut="Ctrl+X"
+                  onClick={() => {
+                    setMenu(null);
+                    onCutTargets(menuTargets);
+                  }}
+                />
+                <MenuItem
+                  icon={Copy}
+                  label={t("Copy")}
+                  shortcut="Ctrl+C"
+                  onClick={() => {
+                    setMenu(null);
+                    onCopyTargets(menuTargets);
+                  }}
+                />
+                <MenuItem
+                  icon={ClipboardPaste}
+                  label={t("Paste")}
+                  shortcut="Ctrl+V"
+                  disabled={!clipboard || clipboard.paths.length === 0}
+                  onClick={() => {
+                    setMenu(null);
+                    if (menuDir) void onPasteInto(menuDir);
+                  }}
+                />
+                <MenuItem
+                  icon={CopyPlus}
+                  label={menuTargets.length > 1 ? t("Duplicate {n} items", { n: menuTargets.length }) : t("Duplicate")}
+                  shortcut="Ctrl+D"
+                  onClick={() => {
+                    setMenu(null);
+                    void onDuplicateTargets(menuTargets);
+                  }}
+                />
+                <MenuSeparator />
+                <MenuItem
+                  icon={Copy}
+                  label={t("Copy path")}
+                  onClick={() => {
+                    const p = menu.entry!.path;
+                    setMenu(null);
+                    void copyText(p);
+                  }}
+                />
+                <MenuItem
+                  icon={FileCode}
+                  label={t("Copy relative path")}
+                  shortcut="Shift+Alt+C"
+                  onClick={() => {
+                    const p = menu.entry!.path;
+                    setMenu(null);
+                    void copyText(getRelativePath(root, p));
+                  }}
+                />
+                <MenuItem
+                  icon={FileText}
+                  label={t("Copy file name")}
+                  onClick={() => {
+                    const n = menu.entry!.name;
+                    setMenu(null);
+                    void copyText(n);
+                  }}
+                />
+                {!menu.entry.isDirectory && (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem
+                      icon={GitCompare}
+                      label={t("Select for compare")}
+                      onClick={() => {
+                        const p = menu.entry!.path;
+                        setMenu(null);
+                        setComparePath(p);
+                        toast.info(t("Selected for compare"));
+                      }}
+                    />
+                    {comparePath && comparePath !== menu.entry.path && (
+                      <MenuItem
+                        icon={GitCompare}
+                        label={t("Compare with selected")}
+                        onClick={() => {
+                          const p = menu.entry!.path;
+                          setMenu(null);
+                          void onCompareWithSelected(p);
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+                <MenuSeparator />
+                <MenuItem
+                  icon={FolderOpen}
+                  label={t("Reveal in File Explorer")}
                   onClick={() => {
                     const e = menu.entry!;
                     setMenu(null);
-                    const targets = selection.size > 1 && selection.has(e.path) ? [...selection] : [e.path];
-                    void removeTargets(targets);
+                    useWorkspace.getState().reveal(e);
                   }}
                 />
-                <div className="my-1 h-px bg-line" />
-                <MenuItem icon={Copy} label={t("Copy path")} onClick={() => { const e = menu.entry!; setMenu(null); void copyText(e.path); }} />
-                <MenuItem icon={Folder} label={t("Reveal in File Explorer")} onClick={() => { const e = menu.entry!; setMenu(null); useWorkspace.getState().reveal(e); }} />
+                <MenuSeparator />
+                <MenuItem
+                  icon={Pencil}
+                  label={t("Rename")}
+                  shortcut="F2"
+                  onClick={() => {
+                    const e = menu.entry!;
+                    setMenu(null);
+                    useWorkspace.getState().startRename(e);
+                  }}
+                />
+                <MenuItem
+                  icon={Trash2}
+                  label={menuTargets.length > 1 ? t("Delete {n} items", { n: menuTargets.length }) : t("Delete")}
+                  shortcut="Del"
+                  danger
+                  onClick={() => {
+                    setMenu(null);
+                    void removeTargets(menuTargets);
+                  }}
+                />
               </>
             )}
             {!menu.entry && (
               <>
-                <div className="my-1 h-px bg-line" />
-                <MenuItem icon={RotateCw} label={t("Refresh")} onClick={() => { setMenu(null); void useWorkspace.getState().refresh(); }} />
+                <MenuSeparator />
+                <MenuItem
+                  icon={ClipboardPaste}
+                  label={t("Paste")}
+                  shortcut="Ctrl+V"
+                  disabled={!clipboard || clipboard.paths.length === 0}
+                  onClick={() => {
+                    setMenu(null);
+                    if (root) void onPasteInto(root);
+                  }}
+                />
+                <MenuItem
+                  icon={Terminal}
+                  label={t("Open in Terminal")}
+                  onClick={() => {
+                    setMenu(null);
+                    onOpenPanel?.("terminal");
+                  }}
+                />
+                <MenuSeparator />
+                {root && (
+                  <>
+                    <MenuItem
+                      icon={Copy}
+                      label={t("Copy path")}
+                      onClick={() => {
+                        setMenu(null);
+                        void copyText(root);
+                      }}
+                    />
+                    <MenuItem
+                      icon={FolderOpen}
+                      label={t("Reveal in File Explorer")}
+                      onClick={() => {
+                        setMenu(null);
+                        void bridge.reveal(root);
+                      }}
+                    />
+                  </>
+                )}
+                <MenuSeparator />
+                <MenuItem
+                  icon={RotateCw}
+                  label={t("Refresh")}
+                  onClick={() => {
+                    setMenu(null);
+                    void useWorkspace.getState().refresh();
+                  }}
+                />
               </>
             )}
           </div>

@@ -100,6 +100,8 @@
     rename: function (path, name) { return invoke("fs:rename", path, name); },
     trash: function (path) { return invoke("fs:trash", path); },
     move: function (sourcePath, targetDir) { return invoke("fs:move", sourcePath, targetDir); },
+    duplicate: function (path) { return invoke("fs:duplicate", path); },
+    copy: function (sourcePath, targetDir) { return invoke("fs:copy", sourcePath, targetDir); },
     reveal: function (path) { return invoke("fs:reveal", path); },
     searchInFiles: function (root, options) { return invoke("search:inFiles", root, options); },
     listProjectFiles: function (root) { return invoke("search:files", root); },

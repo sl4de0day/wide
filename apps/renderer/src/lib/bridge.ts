@@ -753,6 +753,8 @@ export interface HostApi {
   rename(path: string, name: string): Promise<{ path?: string; error?: string }>;
   trash(path: string): Promise<{ path?: string; error?: string }>;
   move(sourcePath: string, targetDir: string): Promise<{ path?: string; error?: string }>;
+  duplicate(path: string): Promise<{ path?: string; name?: string; error?: string }>;
+  copy(sourcePath: string, targetDir: string): Promise<{ path?: string; error?: string }>;
   reveal(path: string): Promise<void>;
 
 
@@ -1335,6 +1337,8 @@ const fallback = {
   rename: async () => (warn(), { error: "No bridge" }),
   trash: async () => (warn(), { error: "No bridge" }),
   move: async () => (warn(), { error: "No bridge" }),
+  duplicate: async () => (warn(), { error: "No bridge" }),
+  copy: async () => (warn(), { error: "No bridge" }),
   reveal: async () => (warn(), undefined),
 
   searchInFiles: async () => (warn(), { files: [], total: 0, truncated: false }),

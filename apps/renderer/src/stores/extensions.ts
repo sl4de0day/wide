@@ -15,17 +15,24 @@ const LANGUAGE_FOR_DEBUGGER: Record<string, string> = {
 };
 const LANGUAGE_NAME: Record<string, string> = { python: "Python", go: "Go", ruby: "Ruby" };
 
+export type ExtensionStage = "preparing" | "installing" | "removing" | "cancelling";
+
+export interface ExtensionOperation {
+  stage: ExtensionStage;
+  startedAt: number;
+}
+
 const DEADLINE_MS = 10000;
 
-function withDeadline<T>(work: Promise<T>, onTimeout: () => T): Promise<T> {
-  return new Promise((resolve) => {
+export function withDeadline<T>(work: Promise<T>, onTimeout: () => T, deadlineMs = DEADLINE_MS): Promise<T> {
+  return new Promise((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       resolve(onTimeout());
-    }, DEADLINE_MS);
-    void work.then(
+    }, deadlineMs);
+    work.then(
       (value) => {
         if (settled) return;
         settled = true;
@@ -36,18 +43,19 @@ function withDeadline<T>(work: Promise<T>, onTimeout: () => T): Promise<T> {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        throw error;
+        reject(error);
       },
     );
   });
 }
 
-interface ExtensionsState {
+export interface ExtensionsState {
   installed: Set<string>;
 
   loading: boolean;
 
   busy: Set<string>;
+  operations: Record<string, ExtensionOperation>;
 
   servers: Record<string, ServerRecord | null>;
   error: string | null;
@@ -85,32 +93,60 @@ async function change(set: Setter, verb: "install" | "remove", id: string) {
     }
   }
 
+  const initialStage: ExtensionStage = verb === "install" ? "preparing" : "removing";
+
   set((state) => {
     const busy = new Set(state.busy);
     busy.add(id);
-    return { busy, error: null };
+    return {
+      busy,
+      operations: {
+        ...state.operations,
+        [id]: { stage: initialStage, startedAt: Date.now() },
+      },
+      error: null,
+    };
   });
 
   try {
+    if (verb === "install") {
+      await preloadGrammar(id);
 
-    const work = (async () => {
-      if (verb === "install") {
-
-        await preloadGrammar(id);
-
-        const prepared = await bridge.extensionPrepare(id);
-        if (prepared.ok) {
-
-          set((state) => ({ servers: { ...state.servers, [id]: prepared.server ?? null } }));
-        }
+      if (useExtensions.getState().operations[id]?.stage === "cancelling") {
+        return false;
       }
-      return withDeadline(
-        verb === "install" ? bridge.extensionInstall(id) : bridge.extensionRemove(id),
-        () => ({ ok: false, error: "The host did not answer.", installed: [] as string[] }),
-      );
-    })();
 
-    const reply = verb === "install" ? await atLeast(work, INSTALL_FLOOR_MS) : await work;
+      const prepared = await bridge.extensionPrepare(id);
+      if (prepared.cancelled) {
+        return false;
+      }
+
+      if (useExtensions.getState().operations[id]?.stage === "cancelling") {
+        return false;
+      }
+
+      if (prepared.ok) {
+        set((state) => ({ servers: { ...state.servers, [id]: prepared.server ?? null } }));
+      }
+
+      set((state) => ({
+        operations: {
+          ...state.operations,
+          [id]: { stage: "installing", startedAt: Date.now() },
+        },
+      }));
+    }
+
+    if (useExtensions.getState().operations[id]?.stage === "cancelling") {
+      return false;
+    }
+
+    const installWork = withDeadline(
+      verb === "install" ? bridge.extensionInstall(id) : bridge.extensionRemove(id),
+      () => ({ ok: false, error: "The host did not answer.", installed: [] as string[] }),
+    );
+
+    const reply = verb === "install" ? await atLeast(installWork, INSTALL_FLOOR_MS) : await installWork;
 
     if (reply.ok) set({ installed: new Set(reply.installed ?? []) });
     if (reply.error) set({ error: reply.error });
@@ -129,7 +165,9 @@ async function change(set: Setter, verb: "install" | "remove", id: string) {
     set((state) => {
       const busy = new Set(state.busy);
       busy.delete(id);
-      return { busy };
+      const operations = { ...state.operations };
+      delete operations[id];
+      return { busy, operations };
     });
   }
 }
@@ -138,6 +176,7 @@ export const useExtensions = create<ExtensionsState>((set) => ({
   installed: new Set<string>(),
   loading: true,
   busy: new Set<string>(),
+  operations: {},
   servers: {},
   error: null,
 
@@ -162,15 +201,35 @@ export const useExtensions = create<ExtensionsState>((set) => ({
   remove: async (id) => change(set, "remove", id),
 
   cancel: async (id) => {
-    await bridge.extensionCancelPrepare(id);
-
+    if (!id) return;
+    set((state) => {
+      if (!state.busy.has(id)) return state;
+      return {
+        operations: {
+          ...state.operations,
+          [id]: { stage: "cancelling", startedAt: Date.now() },
+        },
+      };
+    });
+    try {
+      await bridge.extensionCancelPrepare(id);
+    } catch {
+    }
   },
 
   retryServer: async (id) => {
+    if (!id) return;
     set((state) => {
       const busy = new Set(state.busy);
       busy.add(id);
-      return { busy, error: null };
+      return {
+        busy,
+        operations: {
+          ...state.operations,
+          [id]: { stage: "preparing", startedAt: Date.now() },
+        },
+        error: null,
+      };
     });
     try {
       const prepared = await bridge.extensionPrepare(id);
@@ -184,7 +243,9 @@ export const useExtensions = create<ExtensionsState>((set) => ({
       set((state) => {
         const busy = new Set(state.busy);
         busy.delete(id);
-        return { busy };
+        const operations = { ...state.operations };
+        delete operations[id];
+        return { busy, operations };
       });
     }
   },
@@ -192,3 +253,6 @@ export const useExtensions = create<ExtensionsState>((set) => ({
 
 export const useInstalled = (id: string, removable: boolean): boolean =>
   useExtensions((state) => !removable || state.installed.has(id));
+
+export const useExtensionOperation = (id: string) =>
+  useExtensions((state) => state.operations[id]);

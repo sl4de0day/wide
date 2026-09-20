@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { basename, dirname, extname, formatBytes, normalisePath } from "@/lib/utils";
+import { basename, dirname, extname, formatBytes, getRelativePath, normalisePath } from "@/lib/utils";
 import { diffCounts, lineDiff } from "@/lib/lineDiff";
 
 describe("path helpers", () => {
@@ -26,6 +26,13 @@ describe("path helpers", () => {
     expect(extname("archive.tar.gz")).toBe("gz");
     expect(extname("noext")).toBe("");
     expect(extname(".gitignore")).toBe("");
+  });
+
+  it("calculates relative path correctly", () => {
+    expect(getRelativePath("C:\\project", "C:\\project\\src\\app.ts")).toBe("src/app.ts");
+    expect(getRelativePath("/home/user/project", "/home/user/project/file.txt")).toBe("file.txt");
+    expect(getRelativePath("C:\\project", "C:\\other\\app.ts")).toBe("app.ts");
+    expect(getRelativePath(null, "C:\\project\\app.ts")).toBe("app.ts");
   });
 
   it("formats byte counts", () => {

@@ -6,13 +6,14 @@ import { useT } from "@/lib/i18n";
 import { CATALOGUE, type MarketplaceExtension } from "@/lib/marketplace";
 import { cn } from "@/lib/utils";
 import { useEditor } from "@/stores/editor";
-import { useExtensions } from "@/stores/extensions";
+import { useExtensions, type ExtensionOperation } from "@/stores/extensions";
 
 function ExtensionRow({
   extension,
   description,
   installed,
   busy,
+  operation,
   warning,
   onRetry,
   labels,
@@ -27,11 +28,22 @@ function ExtensionRow({
   description: string;
   installed: boolean;
   busy: boolean;
+  operation?: ExtensionOperation;
 
   warning: string;
 
   onRetry?: () => void;
-  labels: { install: string; remove: string; working: string; retry: string; cancel: string };
+  labels: {
+    install: string;
+    remove: string;
+    working: string;
+    retry: string;
+    cancel: string;
+    preparing: string;
+    installing: string;
+    removing: string;
+    cancelling: string;
+  };
   isLast: boolean;
   onOpen: () => void;
   onInstall: () => void;
@@ -39,16 +51,24 @@ function ExtensionRow({
 
   onCancel: () => void;
 }) {
+  const stageText =
+    operation?.stage === "preparing"
+      ? labels.preparing
+      : operation?.stage === "installing"
+        ? labels.installing
+        : operation?.stage === "removing"
+          ? labels.removing
+          : operation?.stage === "cancelling"
+            ? labels.cancelling
+            : labels.working;
+
   return (
     <div
       className={cn(
-        "group relative flex items-start gap-2.5 px-3 py-2",
+        "group relative flex items-start gap-2.5 px-3 py-2 transition-colors duration-100",
         !isLast && "border-b border-line",
       )}
     >
-      {
-
-}
       <button
         type="button"
         onClick={onOpen}
@@ -68,17 +88,21 @@ function ExtensionRow({
         <path d={extension.path} />
       </svg>
       <div className="pointer-events-none relative z-10 min-w-0 flex-1">
-        <span className={cn("block truncate text-[12px]", warning ? "text-status-error" : "text-fg")}>
-          {extension.name}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={cn("block truncate text-[12px] font-medium", warning ? "text-status-error" : "text-fg")}>
+            {extension.name}
+          </span>
+          {installed && !busy && (
+            <span className="rounded bg-panel px-1 py-0.2 text-[9px] text-fg-faint">
+              {extension.version}
+            </span>
+          )}
+        </div>
         <p className={cn("truncate pt-0.5 text-[11px]", warning ? "text-status-error/80" : "text-fg-dim")}>
           {warning || description}
         </p>
       </div>
 
-      {
-
-}
       {warning && !busy && (
         <button
           type="button"
@@ -91,29 +115,33 @@ function ExtensionRow({
           <TriangleAlert className="size-3.5" strokeWidth={2} />
         </button>
       )}
-      <button
-        type="button"
-        title={busy ? labels.cancel : undefined}
-        onClick={busy ? onCancel : installed ? onRemove : onInstall}
-        className={cn(
-          "relative z-10 shrink-0 rounded-sm border px-2 py-0.5 text-[11px] transition-colors duration-100 disabled:opacity-40",
-          installed
-            ? "border-line text-fg-dim hover:bg-hover hover:text-fg"
-            : "border-accent text-accent hover:bg-accent hover:text-bg",
-        )}
-      >
-        {busy ? (
 
-          <span className="group/spin flex items-center justify-center" aria-label={labels.cancel}>
-            <LoaderCircle className="size-3 animate-spin group-hover/spin:hidden" strokeWidth={2} />
-            <X className="hidden size-3 group-hover/spin:block" strokeWidth={2.5} />
-          </span>
-        ) : installed ? (
-          labels.remove
-        ) : (
-          labels.install
-        )}
-      </button>
+      {busy ? (
+        <button
+          type="button"
+          title={labels.cancel}
+          onClick={onCancel}
+          className="group/spin relative z-10 flex shrink-0 items-center gap-1.5 rounded-sm border border-line bg-panel px-2 py-0.5 text-[11px] text-fg-dim transition-colors duration-100 hover:border-status-error/40 hover:text-status-error"
+        >
+          <LoaderCircle className="size-3 animate-spin text-accent group-hover/spin:hidden" strokeWidth={2} />
+          <X className="hidden size-3 text-status-error group-hover/spin:block" strokeWidth={2.5} />
+          <span className="text-[11px] font-medium group-hover/spin:hidden">{stageText}</span>
+          <span className="hidden text-[11px] font-medium text-status-error group-hover/spin:inline">{labels.cancel}</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={installed ? onRemove : onInstall}
+          className={cn(
+            "relative z-10 shrink-0 rounded-sm border px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-100 disabled:opacity-40",
+            installed
+              ? "border-line text-fg-dim hover:bg-hover hover:text-fg"
+              : "border-accent text-accent hover:bg-accent hover:text-bg",
+          )}
+        >
+          {installed ? labels.remove : labels.install}
+        </button>
+      )}
     </div>
   );
 }
@@ -121,8 +149,10 @@ function ExtensionRow({
 export function ToolsPanel() {
   const t = useT();
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"all" | "installed" | "recommended">("all");
   const installedSet = useExtensions((state) => state.installed);
   const busyIds = useExtensions((state) => state.busy);
+  const operations = useExtensions((state) => state.operations);
   const servers = useExtensions((state) => state.servers);
   const failure = useExtensions((state) => state.error);
 
@@ -150,8 +180,8 @@ export function ToolsPanel() {
   const isInstalled = (extension: MarketplaceExtension) =>
     !extension.removable || installedSet.has(extension.id);
 
-  const installed = results.filter(isInstalled);
-  const available = results.filter((extension) => !isInstalled(extension));
+  const installed = useMemo(() => results.filter(isInstalled), [results, installedSet]);
+  const available = useMemo(() => results.filter((extension) => !isInstalled(extension)), [results, installedSet]);
 
   const warningFor = (extension: MarketplaceExtension): string => {
     if (!isInstalled(extension)) return "";
@@ -187,9 +217,13 @@ export function ToolsPanel() {
     working: t("Working…"),
     retry: t("Try installing the server again"),
     cancel: t("Stop"),
+    preparing: t("Preparing…"),
+    installing: t("Installing…"),
+    removing: t("Removing…"),
+    cancelling: t("Cancelling…"),
   };
 
-  const rows = (list: MarketplaceExtension[]) =>
+  const rows = (list: readonly MarketplaceExtension[]) =>
     list.map((extension, index) => (
       <ExtensionRow
         key={extension.id}
@@ -198,6 +232,7 @@ export function ToolsPanel() {
         description={t(extension.summary)}
         installed={isInstalled(extension)}
         busy={busyIds.has(extension.id)}
+        operation={operations[extension.id]}
         warning={warningFor(extension)}
         onRetry={canRetry(extension) ? () => void useExtensions.getState().retryServer(extension.id) : undefined}
         labels={labels}
@@ -218,21 +253,88 @@ export function ToolsPanel() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setQuery("");
+            }}
             placeholder={t("Search extensions in marketplace")}
             aria-label={t("Search extensions in marketplace")}
             className="min-w-0 flex-1 bg-transparent py-1.5 text-[12px] text-fg outline-none placeholder:text-fg-faint"
           />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              title={t("Clear")}
+              aria-label={t("Clear")}
+              className="rounded p-0.5 text-fg-faint transition-colors hover:bg-hover hover:text-fg"
+            >
+              <X className="size-3" strokeWidth={2} />
+            </button>
+          )}
         </div>
       </div>
 
-      {failure && (
+      <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1 text-[11px]">
         <button
           type="button"
-          onClick={() => useExtensions.setState({ error: null })}
-          className="wide-enter-fade shrink-0 border-b border-line px-3 py-1.5 text-left text-[11px] leading-snug text-rose-300"
+          onClick={() => setTab("all")}
+          className={cn(
+            "-mb-px flex items-center gap-1.5 border-b-2 px-2 py-1 font-medium transition-colors duration-100",
+            tab === "all"
+              ? "border-accent text-accent"
+              : "border-transparent text-fg-dim hover:text-fg",
+          )}
         >
-          {t(failure)}
+          {t("All")}
+          <span className="rounded bg-panel px-1 py-0.2 text-[10px] text-fg-faint">
+            {results.length}
+          </span>
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("installed")}
+          className={cn(
+            "-mb-px flex items-center gap-1.5 border-b-2 px-2 py-1 font-medium transition-colors duration-100",
+            tab === "installed"
+              ? "border-accent text-accent"
+              : "border-transparent text-fg-dim hover:text-fg",
+          )}
+        >
+          {t("Installed")}
+          <span className="rounded bg-panel px-1 py-0.2 text-[10px] text-fg-faint">
+            {installed.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("recommended")}
+          className={cn(
+            "-mb-px flex items-center gap-1.5 border-b-2 px-2 py-1 font-medium transition-colors duration-100",
+            tab === "recommended"
+              ? "border-accent text-accent"
+              : "border-transparent text-fg-dim hover:text-fg",
+          )}
+        >
+          {t("Recommended")}
+          <span className="rounded bg-panel px-1 py-0.2 text-[10px] text-fg-faint">
+            {available.length}
+          </span>
+        </button>
+      </div>
+
+      {failure && (
+        <div className="wide-enter-fade flex items-center justify-between gap-2 border-b border-line bg-rose-500/10 px-3 py-1.5 text-[11px] leading-snug text-rose-300">
+          <span className="min-w-0 flex-1 truncate">{t(failure)}</span>
+          <button
+            type="button"
+            onClick={() => useExtensions.setState({ error: null })}
+            title={t("Dismiss")}
+            aria-label={t("Dismiss")}
+            className="shrink-0 text-rose-300/80 hover:text-rose-200"
+          >
+            <X className="size-3" strokeWidth={2} />
+          </button>
+        </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-auto py-1">
@@ -240,30 +342,26 @@ export function ToolsPanel() {
           <p className="px-3 py-3 text-[12px] text-fg-faint">{t("No extension matches that.")}</p>
         )}
 
-        {
+        {tab === "all" && results.length > 0 && rows(results)}
 
-}
-        {installed.length > 0 && (
-          <>
-            <p className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-wide text-fg-faint">
-              {t("Installed")}
-            </p>
-            {rows(installed)}
-          </>
+        {tab === "installed" && (
+          installed.length > 0 ? (
+            rows(installed)
+          ) : (
+            results.length > 0 && (
+              <p className="px-3 py-3 text-[12px] text-fg-faint">{t("No extension matches that.")}</p>
+            )
+          )
         )}
 
-        {available.length > 0 && (
-          <>
-            <p
-              className={cn(
-                "px-3 pb-1 text-[10px] uppercase tracking-wide text-fg-faint",
-                installed.length > 0 ? "border-t border-line pt-2" : "pt-1",
-              )}
-            >
-              {t("Recommended")}
-            </p>
-            {rows(available)}
-          </>
+        {tab === "recommended" && (
+          available.length > 0 ? (
+            rows(available)
+          ) : (
+            results.length > 0 && (
+              <p className="px-3 py-3 text-[12px] text-fg-faint">{t("No extension matches that.")}</p>
+            )
+          )
         )}
       </div>
     </div>

@@ -1,5 +1,39 @@
 
 
+const DIRECTIVE_SUPPRESSOR_PATTERNS = [
+  /\bwide-ignore(?:-(?:file|next-line))?(?:\[[^\]]*\])?/i,
+  /\b(?:eslint|stylelint|htmlhint|jshint|jslint|standard)-(?:disable|enable|line|next-line)\b/i,
+  /\b(?:eslint|stylelint|htmlhint|jshint|jslint)\s*:/i,
+  /@ts-(?:ignore|expect-error|nocheck|check)\b/i,
+  /@flow\b/i,
+  /\b(?:prettier|biome|yapf|isort|fmt|rustfmt|clang-format)-(?:ignore|skip|off|on)\b/i,
+  /\b(?:prettier|biome|fmt|rustfmt):\s*(?:ignore|skip|off|on)\b/i,
+  /\b(?:rustfmt::skip|clippy::)/i,
+  /\b(?:noqa|nosec)\b/i,
+  /\btype:\s*ignore\b/i,
+  /\b(?:pylint|mypy|pyright|ruff|flake8|black):\s*[\w\-]+/i,
+  /\bpragma:\s*no\s*cover\b/i,
+  /(?:^|\s)go:(?:noinline|generate|build|embed|linkname|notinheap|uintptrescapes|[a-z]+)/,
+  /(?:^|\s)\+build\b/,
+  /\bCode generated .* DO NOT EDIT\./,
+  /\bNOLINT(?:NEXTLINE|BEGIN|END)?\b/i,
+  /\b(?:noinspection|NOSONAR|CHECKSTYLE|SUPPRESS)\b/i,
+  /\b(?:ReSharper|Resharper)\s+(?:disable|restore)\b/i,
+  /\bpragma\s+warning\s+(?:disable|restore)\b/i,
+  /\bSuppressMessage\b/i,
+  /\$COVERAGE-(?:OFF|ON)\$/,
+  /\brubocop:(?:disable|enable|todo)\b/i,
+  /:nodoc:/,
+  /:nocov:/,
+  /\b(?:istanbul|c8|v8|coverage):\s*ignore\b/i,
+  /\b(?:istanbul|c8|v8)\s+ignore\b/i,
+];
+
+function isDirectiveOrSuppressor(commentText) {
+  if (!commentText || typeof commentText !== "string") return false;
+  return DIRECTIVE_SUPPRESSOR_PATTERNS.some((pattern) => pattern.test(commentText));
+}
+
 const COMMENT_SYNTAX = {
   javascript: {
     line: ["//"],
@@ -17,6 +51,7 @@ const COMMENT_SYNTAX = {
       /^\s*@ts-/,
       /^\/\s*<reference\b/,
       /^\s*(eslint|prettier-ignore|istanbul|c8|v8)\b/,
+      /\bwide-ignore(?:-(?:file|next-line))?(?:\[[^\]]*\])?/i,
       /^\s*#__PURE__/,
       /^\s*(webpack|vite|@vite)\w*:/,
       /^\s*global\s/,
@@ -30,6 +65,7 @@ const COMMENT_SYNTAX = {
     keep: [
       /^\[if\b/,
       /^<!\[endif\]/,
+      /\bwide-ignore\b/i,
     ],
 
   },
@@ -40,7 +76,7 @@ const COMMENT_SYNTAX = {
       { open: '"', close: '"', escape: "\\" },
       { open: "'", close: "'", escape: "\\" },
     ],
-    keep: [/^!/],
+    keep: [/^!/, /\bwide-ignore\b/i],
   },
 
   php: {
@@ -54,7 +90,7 @@ const COMMENT_SYNTAX = {
     heredoc: "php",
 
     phpTags: true,
-    keep: [/^\[/],
+    keep: [/^\[/, /\bwide-ignore\b/i],
   },
 
   python: {
@@ -71,6 +107,7 @@ const COMMENT_SYNTAX = {
       /^\s*coding[:=]\s*[-\w.]+/,
       /^\s*type:/,
       /^\s*(noqa|nosec|pragma|pylint|mypy|flake8|ruff|isort|yapf|fmt)\b/,
+      /\bwide-ignore(?:-(?:file|next-line))?(?:\[[^\]]*\])?/i,
     ],
   },
 
@@ -83,7 +120,7 @@ const COMMENT_SYNTAX = {
       { open: '"', close: '"', escape: "\\" },
       { open: "'", close: "'", escape: "\\" },
     ],
-    keep: [/^\s*\$COVERAGE-(OFF|ON)\$/],
+    keep: [/^\s*\$COVERAGE-(OFF|ON)\$/, /\bwide-ignore\b/i],
   },
 
   java: {
@@ -94,7 +131,7 @@ const COMMENT_SYNTAX = {
       { open: '"', close: '"', escape: "\\" },
       { open: "'", close: "'", escape: "\\" },
     ],
-    keep: [/^\s*(CHECKSTYLE|SUPPRESS|NOSONAR)\b/],
+    keep: [/^\s*(CHECKSTYLE|SUPPRESS|NOSONAR)\b/, /\bwide-ignore\b/i],
   },
 
   go: {
@@ -110,6 +147,7 @@ const COMMENT_SYNTAX = {
       /^\s*\+build\b/,
       /^\s*Code generated .* DO NOT EDIT\./,
       /^\s*nolint\b/,
+      /\bwide-ignore\b/i,
     ],
 
     cgo: true,
@@ -130,6 +168,7 @@ const COMMENT_SYNTAX = {
       /^!/,
       /^\s*(frozen_string_literal|encoding|coding|warn_indent|shareable_constant_value)\s*:/,
       /^\s*(rubocop|:nodoc:|:nocov:)\b/,
+      /\bwide-ignore\b/i,
     ],
   },
 
@@ -142,7 +181,7 @@ const COMMENT_SYNTAX = {
       { open: "'", close: "'", escape: "\\" },
     ],
     rawStrings: true,
-    keep: [/^\s*(rustfmt|clippy|tarpaulin)\b/],
+    keep: [/^\s*(rustfmt|clippy|tarpaulin)\b/, /\bwide-ignore\b/i],
   },
 
   elixir: {
@@ -152,7 +191,7 @@ const COMMENT_SYNTAX = {
       { open: '"', close: '"', escape: "\\" },
       { open: "'", close: "'", escape: "\\" },
     ],
-    keep: [/^!/],
+    keep: [/^!/, /\bwide-ignore\b/i],
   },
 
   kotlin: {
@@ -164,7 +203,7 @@ const COMMENT_SYNTAX = {
       { open: '"', close: '"', escape: "\\" },
       { open: "'", close: "'", escape: "\\" },
     ],
-    keep: [/^\s*(NOSONAR|noinspection)\b/],
+    keep: [/^\s*(NOSONAR|noinspection)\b/, /\bwide-ignore\b/i],
   },
 
   sql: {
@@ -177,6 +216,7 @@ const COMMENT_SYNTAX = {
     keep: [
       /^!/,
       /^\+/,
+      /\bwide-ignore\b/i,
     ],
   },
 
@@ -186,7 +226,7 @@ const COMMENT_SYNTAX = {
       { open: '"""', close: '"""', escape: "\\" },
       { open: '"', close: '"', escape: "\\" },
     ],
-    keep: [],
+    keep: [/\bwide-ignore\b/i],
   },
 
   wasm: {
@@ -194,7 +234,7 @@ const COMMENT_SYNTAX = {
     block: [["(;", ";)"]],
     nestedBlocks: true,
     strings: [{ open: '"', close: '"', escape: "\\" }],
-    keep: [],
+    keep: [/\bwide-ignore\b/i],
   },
 
   scala: {
@@ -206,7 +246,7 @@ const COMMENT_SYNTAX = {
       { open: '"', close: '"', escape: "\\" },
       { open: "'", close: "'", escape: "\\" },
     ],
-    keep: [/^\s*\$COVERAGE-(OFF|ON)\$/],
+    keep: [/^\s*\$COVERAGE-(OFF|ON)\$/, /\bwide-ignore\b/i],
   },
 
   erlang: {
@@ -215,7 +255,7 @@ const COMMENT_SYNTAX = {
       { open: '"', close: '"', escape: "\\" },
       { open: "$", close: "", escape: "\\", charLiteral: true },
     ],
-    keep: [/^\s*-\*-.*coding[:=]/],
+    keep: [/^\s*-\*-.*coding[:=]/, /\bwide-ignore\b/i],
   },
 };
 
@@ -521,6 +561,7 @@ function stripComments(text, language) {
   const cutting = [];
   for (let index = 0; index < ranges.length; index += 1) {
     const range = ranges[index];
+    if (isDirectiveOrSuppressor(range.text)) continue;
     if (keep.some((pattern) => pattern.test(range.text))) continue;
 
     if (syntax.cgo) {

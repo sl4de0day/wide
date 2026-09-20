@@ -118,6 +118,78 @@ function registerFsHandlers() {
   electron.ipcMain.handle("fs:reveal", (_event, targetPath) => {
     electron.shell.showItemInFolder(targetPath);
   });
+  electron.ipcMain.handle("fs:duplicate", async (_event, targetPath) => {
+    try {
+      const parent = node_path.dirname(targetPath);
+      const stats = await promises.stat(targetPath);
+      const isDir = stats.isDirectory();
+      let candidateName = "";
+      let candidatePath = "";
+      if (isDir) {
+        const base = node_path.basename(targetPath);
+        candidateName = `${base} copy`;
+        candidatePath = node_path.join(parent, candidateName);
+        let counter = 2;
+        while (await exists(candidatePath)) {
+          candidateName = `${base} copy ${counter}`;
+          candidatePath = node_path.join(parent, candidateName);
+          counter++;
+        }
+      } else {
+        const ext = node_path.extname(targetPath);
+        const base = node_path.basename(targetPath, ext);
+        candidateName = `${base} copy${ext}`;
+        candidatePath = node_path.join(parent, candidateName);
+        let counter = 2;
+        while (await exists(candidatePath)) {
+          candidateName = `${base} copy ${counter}${ext}`;
+          candidatePath = node_path.join(parent, candidateName);
+          counter++;
+        }
+      }
+      await promises.cp(targetPath, candidatePath, { recursive: true });
+      return { path: candidatePath, name: candidateName };
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+  electron.ipcMain.handle("fs:copy", async (_event, sourcePath, targetDir) => {
+    try {
+      if (isInside(targetDir, sourcePath)) {
+        return { error: "A folder cannot be copied inside itself." };
+      }
+      const stats = await promises.stat(sourcePath);
+      const isDir = stats.isDirectory();
+      const baseName = node_path.basename(sourcePath);
+      let targetPath = node_path.join(targetDir, baseName);
+      if (await exists(targetPath)) {
+        let counter = 2;
+        if (isDir) {
+          let candidateName = `${baseName} copy`;
+          targetPath = node_path.join(targetDir, candidateName);
+          while (await exists(targetPath)) {
+            candidateName = `${baseName} copy ${counter}`;
+            targetPath = node_path.join(targetDir, candidateName);
+            counter++;
+          }
+        } else {
+          const ext = node_path.extname(sourcePath);
+          const rawBase = node_path.basename(sourcePath, ext);
+          let candidateName = `${rawBase} copy${ext}`;
+          targetPath = node_path.join(targetDir, candidateName);
+          while (await exists(targetPath)) {
+            candidateName = `${rawBase} copy ${counter}${ext}`;
+            targetPath = node_path.join(targetDir, candidateName);
+            counter++;
+          }
+        }
+      }
+      await promises.cp(sourcePath, targetPath, { recursive: true });
+      return { path: targetPath };
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
 }
 function registerWindowHandlers() {
   electron.ipcMain.handle("window:setTitle", (event, title2) => {

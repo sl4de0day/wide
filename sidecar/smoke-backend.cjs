@@ -71,6 +71,7 @@ const GONE = [
   }
 
   failed += await checkExtensionGate();
+  failed += await checkCommentCleanerDirectives();
   failed += await checkWorkflowRoundTrip();
   failed += await checkUpdateIntegrity();
   failed += await checkCatcherAutosave();
@@ -423,6 +424,39 @@ async function checkExtensionGate() {
 
   if (!before.includes('codeberg')) await invoke('extensions:remove', ['codeberg']);
   if (!before.includes('ai-assistant')) await invoke('extensions:remove', ['ai-assistant']);
+  return failed;
+}
+
+async function checkCommentCleanerDirectives() {
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const before = (await invoke('extensions:list', [])).result?.installed ?? [];
+  await invoke('extensions:install', ['comment-cleaner']);
+
+  const sampleJs = [
+    '// disposable standalone comment',
+    'const a = req.query.a; // wide-ignore[taint/path]',
+    'const b = req.query.b; // disposable inline comment',
+    '// wide-ignore-next-line[taint/sql]',
+    'const c = req.query.c; // eslint-disable-line no-unused-vars',
+    '// @ts-ignore',
+    'const d = 42;',
+  ].join('\n');
+
+  const stripped = (await invoke('comments:strip', [ROOT, 'sample.js', sampleJs])).result;
+  report(stripped?.ok === true, 'comment-cleaner runs on sample.js');
+  report(stripped?.text?.includes('// wide-ignore[taint/path]'), 'comment-cleaner preserves inline wide-ignore[...]');
+  report(stripped?.text?.includes('// wide-ignore-next-line[taint/sql]'), 'comment-cleaner preserves wide-ignore-next-line');
+  report(stripped?.text?.includes('// eslint-disable-line no-unused-vars'), 'comment-cleaner preserves inline eslint-disable-line');
+  report(stripped?.text?.includes('// @ts-ignore'), 'comment-cleaner preserves @ts-ignore');
+  report(!stripped?.text?.includes('disposable standalone comment'), 'comment-cleaner removes disposable standalone comments');
+  report(!stripped?.text?.includes('disposable inline comment'), 'comment-cleaner removes disposable inline comments');
+
+  if (!before.includes('comment-cleaner')) await invoke('extensions:remove', ['comment-cleaner']);
   return failed;
 }
 

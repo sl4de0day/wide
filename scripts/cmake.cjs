@@ -115,7 +115,8 @@ if (mode === 'configure') {
   process.exit(configured.status ?? 1);
 }
 
-const args = ['--build', BUILD, '--config', 'Release'];
+const extra = process.argv.slice(3);
+const args = ['--build', BUILD, '--config', 'Release', ...extra];
 
 const result = cp.spawnSync(cmake, args, { stdio: 'inherit' });
 process.exit(result.status ?? 1);

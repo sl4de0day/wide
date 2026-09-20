@@ -35,6 +35,8 @@ import { PromptHost } from "./components/PromptHost";
 import { Toasts } from "./components/Toasts";
 import { toast } from "./stores/toast";
 import { cn } from "./lib/utils";
+import { CrashReportDialog } from "./components/CrashReportDialog";
+import { useTelemetry } from "./stores/telemetry";
 import { useDiagnostics } from "./stores/diagnostics";
 import { subscribeFindingsProject, useFindings } from "./stores/findings";
 import { SETTINGS_PATH, useEditor } from "./stores/editor";
@@ -293,8 +295,37 @@ export default function App() {
         useSettings.getState().set({ fontSize: 13 });
       }
     };
+    let wheelDelta = 0;
+    let wheelTimer: ReturnType<typeof setTimeout> | null = null;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const target = event.target as Element | null;
+      const isCodeEditor = Boolean(
+        target?.closest(".cm-editor, [data-code-editor], .cm-scroller, .cm-content")
+      );
+      if (!isCodeEditor) return;
+      wheelDelta += event.deltaY;
+      if (wheelTimer) clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => {
+        wheelDelta = 0;
+      }, 200);
+      const threshold = 40;
+      if (wheelDelta <= -threshold) {
+        adjustFontSize(1);
+        wheelDelta = 0;
+      } else if (wheelDelta >= threshold) {
+        adjustFontSize(-1);
+        wheelDelta = 0;
+      }
+    };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("wheel", onWheel, true);
+      if (wheelTimer) clearTimeout(wheelTimer);
+    };
 
 
 
@@ -449,6 +480,10 @@ export default function App() {
 
   useEffect(() => {
     void useUpdate.getState().boot();
+  }, []);
+
+  useEffect(() => {
+    void useTelemetry.getState().checkPending();
   }, []);
 
   const tabsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -619,6 +654,17 @@ export default function App() {
       { id: "file.closeAll", title: "Close All Tabs", group: "File", run: () => void requestCloseAll() },
       { id: "view.settings", title: "Settings", group: "View", key: "ctrl+,", run: () => useEditor.getState().openSettings() },
       { id: "view.split", title: "Toggle split editor", group: "View", run: () => useEditor.getState().toggleSplit() },
+      { id: "view.splitRight", title: "Split Editor Right", group: "View", key: "ctrl+\\", run: () => { const ed = useEditor.getState(); ed.splitPane(ed.activePaneId, "vertical"); } },
+      { id: "view.splitDown", title: "Split Editor Down", group: "View", key: "ctrl+k ctrl+\\", run: () => { const ed = useEditor.getState(); ed.splitPane(ed.activePaneId, "horizontal"); } },
+      { id: "view.closePane", title: "Close Active Editor Pane", group: "View", run: () => { const ed = useEditor.getState(); ed.closePane(ed.activePaneId); } },
+      { id: "view.layout.single", title: "Editor Layout: Single (1x1)", group: "View", run: () => useEditor.getState().setGridPreset("1x1") },
+      { id: "view.layout.twoColumns", title: "Editor Layout: Two Columns (1x2)", group: "View", run: () => useEditor.getState().setGridPreset("1x2") },
+      { id: "view.layout.twoRows", title: "Editor Layout: Two Rows (2x1)", group: "View", run: () => useEditor.getState().setGridPreset("2x1") },
+      { id: "view.layout.grid", title: "Editor Layout: 2x2 Grid", group: "View", run: () => useEditor.getState().setGridPreset("2x2") },
+      { id: "view.layout.threeColumns", title: "Editor Layout: Three Columns (1x3)", group: "View", run: () => useEditor.getState().setGridPreset("1x3") },
+      { id: "view.layout.threeRows", title: "Editor Layout: Three Rows (3x1)", group: "View", run: () => useEditor.getState().setGridPreset("3x1") },
+      { id: "view.nextPane", title: "Focus Next Editor Pane", group: "View", key: "f6", run: () => useEditor.getState().focusNextPane() },
+      { id: "view.prevPane", title: "Focus Previous Editor Pane", group: "View", key: "shift+f6", run: () => useEditor.getState().focusPrevPane() },
       { id: "file.openFolder", title: "Open folder", group: "File", key: "ctrl+o", run: () => void useWorkspace.getState().openFolder() },
       { id: "go.file", title: "Go to File…", group: "Go", key: "ctrl+p", when: hasRoot, run: () => useQuickOpen.getState().openPalette() },
       { id: "go.symbol", title: "Go to Symbol in Project…", group: "Go", key: "ctrl+t", when: hasRoot, run: () => useSymbolSearch.getState().openSearch() },
@@ -759,6 +805,7 @@ export default function App() {
       <ConfirmHost />
       <PromptHost />
       <Toasts />
+      <CrashReportDialog />
     </div>
   );
 }

@@ -326,6 +326,8 @@ export function ExtensionView({ id }: { id: string }) {
   const extension = extensionById(id);
   const installedSet = useExtensions((state) => state.installed);
   const busy = useExtensions((state) => state.busy.has(id));
+  const operation = useExtensions((state) => state.operations[id]);
+  const failure = useExtensions((state) => state.error);
 
   const serverRecord = useExtensions((state) => state.servers[id]);
 
@@ -340,6 +342,17 @@ export function ExtensionView({ id }: { id: string }) {
   const builtIn = extension.id === "javascript" || extension.id === "typescript";
   const language = extension.kind === "language";
   const installed = installedSet.has(extension.id);
+
+  const stageText =
+    operation?.stage === "preparing"
+      ? t("Preparing…")
+      : operation?.stage === "installing"
+        ? t("Installing…")
+        : operation?.stage === "removing"
+          ? t("Removing…")
+          : operation?.stage === "cancelling"
+            ? t("Cancelling…")
+            : t("Working…");
 
   return (
     <div className="wide-enter-fade h-full overflow-auto px-6 py-5">
@@ -360,46 +373,74 @@ export function ExtensionView({ id }: { id: string }) {
             </p>
           </div>
 
+          {busy ? (
             <button
-            type="button"
-            title={busy ? t("Stop") : undefined}
-            onClick={() =>
-              void (busy
-                ? useExtensions.getState().cancel(extension.id)
-                : installed
+              type="button"
+              title={t("Stop")}
+              onClick={() => void useExtensions.getState().cancel(extension.id)}
+              className="group/spin flex shrink-0 items-center gap-1.5 rounded-sm border border-line bg-panel px-3 py-1 text-[12px] font-medium text-fg-dim transition-colors duration-100 hover:border-status-error/40 hover:text-status-error"
+            >
+              <LoaderCircle className="size-3.5 animate-spin text-accent group-hover/spin:hidden" strokeWidth={2} />
+              <X className="hidden size-3.5 text-status-error group-hover/spin:block" strokeWidth={2.5} />
+              <span className="group-hover/spin:hidden">{stageText}</span>
+              <span className="hidden text-status-error group-hover/spin:inline">{t("Stop")}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                void (installed
                   ? useExtensions.getState().remove(extension.id)
                   : useExtensions.getState().install(extension.id))
-            }
-            className={cn(
-              "min-w-[76px] shrink-0 rounded-sm border px-3 py-1 text-center text-[12px] transition-colors duration-100",
-              installed
-                ? "border-line text-fg-dim hover:bg-hover hover:text-fg"
-                : "border-accent text-accent hover:bg-accent hover:text-bg",
-            )}
-          >
-            {busy ? (
-
-              <span className="group/spin flex items-center justify-center" aria-label={t("Stop")}>
-                <LoaderCircle
-                  className="size-3.5 animate-spin group-hover/spin:hidden"
-                  strokeWidth={2}
-                />
-                <X className="hidden size-3.5 group-hover/spin:block" strokeWidth={2.5} />
-              </span>
-            ) : installed ? (
-              t("Remove")
-            ) : (
-              t("Install")
-            )}
-          </button>
+              }
+              className={cn(
+                "min-w-[76px] shrink-0 rounded-sm border px-3 py-1 text-center text-[12px] font-medium transition-colors duration-100",
+                installed
+                  ? "border-line text-fg-dim hover:bg-hover hover:text-fg"
+                  : "border-accent text-accent hover:bg-accent hover:text-bg",
+              )}
+            >
+              {installed ? t("Remove") : t("Install")}
+            </button>
+          )}
         </div>
 
-        {
+        {busy && (
+          <div className="wide-enter-fade mt-4 flex flex-col gap-1.5 rounded-md border border-accent/30 bg-accent/5 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-[12px] font-medium text-accent">
+                <LoaderCircle className="size-3.5 animate-spin" strokeWidth={2} />
+                <span>{stageText}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void useExtensions.getState().cancel(extension.id)}
+                className="rounded border border-line bg-panel px-2 py-0.5 text-[11px] text-fg-dim transition-colors hover:border-status-error/40 hover:text-status-error"
+              >
+                {t("Stop")}
+              </button>
+            </div>
+            <div className="h-1 w-full overflow-hidden rounded-full bg-line">
+              <div className="h-full w-2/3 animate-pulse rounded-full bg-accent transition-all duration-300" />
+            </div>
+          </div>
+        )}
 
-}
-        {
+        {failure && (
+          <div className="wide-enter-fade mt-4 flex items-center justify-between gap-2 rounded-md border border-rose-500/20 bg-rose-500/10 p-3 text-[12px] text-rose-300">
+            <span>{t(failure)}</span>
+            <button
+              type="button"
+              onClick={() => useExtensions.setState({ error: null })}
+              title={t("Dismiss")}
+              aria-label={t("Dismiss")}
+              className="rounded p-1 text-rose-300/80 hover:bg-rose-500/20 hover:text-rose-200"
+            >
+              <X className="size-3.5" strokeWidth={2} />
+            </button>
+          </div>
+        )}
 
-}
         <div className="flex flex-col gap-3 pt-6">
           {t(extension.description)
             .split("\n\n")

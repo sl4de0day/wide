@@ -32,7 +32,10 @@ if (Test-Path $out) {
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 Write-Host "== host exe + node.exe =="
-Copy-Item $hostExe (Join-Path $out "wide.exe")
+$destExe = Join-Path $out "wide.exe"
+Copy-Item $hostExe $destExe
+(Get-Item $destExe).CreationTime = Get-Date
+(Get-Item $destExe).LastWriteTime = Get-Date
 $node = (Get-Command node -ErrorAction Stop).Source
 Copy-Item $node (Join-Path $out "node.exe")
 

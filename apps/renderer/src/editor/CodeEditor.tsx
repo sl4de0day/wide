@@ -323,5 +323,5 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
     );
   }
 
-  return <div ref={holder} className="h-full" />;
+  return <div ref={holder} data-code-editor="true" className="h-full" />;
 }
