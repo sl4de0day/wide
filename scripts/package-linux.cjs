@@ -64,9 +64,11 @@ for (const [src, dest] of copyTargets) {
 }
 
 // Runtime package.json oluştur
+const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const version = rootPkg.version || '1.3291026';
 const pkg = {
   name: 'wide',
-  version: '1.220926',
+  version,
   description: 'Wide IDE Linux Runtime',
   main: 'scripts/host-linux.cjs',
   private: true,
@@ -116,7 +118,6 @@ fs.copyFileSync(path.join(ROOT, 'wide.desktop'), path.join(OUT_DIR, 'wide.deskto
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(OUT_DIR, 'wide.png'));
 
 console.log('== [4/5] Taşınabilir Arşivler Üretiliyor ==');
-const version = '1.220926';
 const tarGzName = `wide-${version}-linux-x64.tar.gz`;
 const tarGzPath = path.join(DIST, tarGzName);
 try {
