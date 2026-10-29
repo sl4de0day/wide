@@ -55,6 +55,7 @@ import { signatureHelp } from "./features/signatureHelp";
 import { stickyScroll } from "./features/stickyScroll";
 import { typescriptSupport } from "./features/typescript";
 import { tagEditing } from "./features/tags";
+import { jwtHover } from "./features/jwtHover";
 import { languageFor } from "./languages";
 import { codeHighlight, editorTheme } from "./theme";
 import { useExtensions } from "@/stores/extensions";
@@ -123,6 +124,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
         ghostText(tab.path),
         eslintSupport(extname(tab.path), tab.path, useWorkspace.getState().root),
         inspections(extname(tab.path), tab.path),
+        jwtHover(),
         lspSupport(tab.path, useWorkspace.getState().root),
         httpRunner(extname(tab.path), (request) => {
 
