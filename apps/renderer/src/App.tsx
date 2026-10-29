@@ -12,6 +12,8 @@ import { SymbolSearchOverlay } from "./components/SymbolSearchOverlay";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay";
 import { CommandPalette } from "./components/CommandPalette";
 import { DecoderOverlay } from "./components/DecoderOverlay";
+import { RecentProjectsOverlay } from "./components/RecentProjectsOverlay";
+import { useRecentProjects } from "./stores/recentProjects";
 import { TransformModal } from "./components/TransformModal";
 import { useTransformModal } from "./stores/transform";
 import { transformSelection } from "./lib/transformSelection";
@@ -274,6 +276,9 @@ export default function App() {
       } else if (event.shiftKey && key === "f") {
         event.preventDefault();
         openPanel("search");
+      } else if (key === "r" && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        useRecentProjects.getState().open();
       } else if (key === "t" && !event.shiftKey && !event.altKey) {
 
         event.preventDefault();
@@ -673,6 +678,7 @@ export default function App() {
       { id: "view.nextPane", title: "Focus Next Editor Pane", group: "View", key: "f6", run: () => useEditor.getState().focusNextPane() },
       { id: "view.prevPane", title: "Focus Previous Editor Pane", group: "View", key: "shift+f6", run: () => useEditor.getState().focusPrevPane() },
       { id: "file.openFolder", title: "Open folder", group: "File", key: "ctrl+o", run: () => void useWorkspace.getState().openFolder() },
+      { id: "file.openRecent", title: "Open Recent Project…", group: "File", key: "ctrl+r", run: () => useRecentProjects.getState().open() },
       { id: "go.file", title: "Go to File…", group: "Go", key: "ctrl+p", when: hasRoot, run: () => useQuickOpen.getState().openPalette() },
       { id: "go.symbol", title: "Go to Symbol in Project…", group: "Go", key: "ctrl+t", when: hasRoot, run: () => useSymbolSearch.getState().openSearch() },
       { id: "tool.decoder", title: "Decoder / JWT", group: "Tools", run: () => useDecoder.getState().openDecoder() },
@@ -817,6 +823,7 @@ export default function App() {
       <CommandPalette />
       <DecoderOverlay />
       <TransformModal />
+      <RecentProjectsOverlay />
       <ComparerOverlay />
       <MacrosOverlay />
       <AiEditsOverlay />
