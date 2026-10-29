@@ -12,6 +12,10 @@ import { SymbolSearchOverlay } from "./components/SymbolSearchOverlay";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay";
 import { CommandPalette } from "./components/CommandPalette";
 import { DecoderOverlay } from "./components/DecoderOverlay";
+import { TransformModal } from "./components/TransformModal";
+import { useTransformModal } from "./stores/transform";
+import { transformSelection } from "./lib/transformSelection";
+import { base64Decode, base64Encode, hexDecode, hexEncode, htmlDecode, htmlEncode, md5Hex, urlDecode, urlEncode } from "./lib/codec";
 import { useDecoder } from "./stores/decoder";
 import { ComparerOverlay } from "./components/ComparerOverlay";
 import { useComparer } from "./stores/comparer";
@@ -249,6 +253,9 @@ export default function App() {
       } else if (key === "," && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         useEditor.getState().openSettings();
+      } else if (key === "e" && event.altKey) {
+        event.preventDefault();
+        useTransformModal.getState().openModal();
       } else if (key === "tab") {
 
         const { tabs, activePath, setActive } = useEditor.getState();
@@ -669,6 +676,16 @@ export default function App() {
       { id: "go.file", title: "Go to File…", group: "Go", key: "ctrl+p", when: hasRoot, run: () => useQuickOpen.getState().openPalette() },
       { id: "go.symbol", title: "Go to Symbol in Project…", group: "Go", key: "ctrl+t", when: hasRoot, run: () => useSymbolSearch.getState().openSearch() },
       { id: "tool.decoder", title: "Decoder / JWT", group: "Tools", run: () => useDecoder.getState().openDecoder() },
+      { id: "tool.transform", title: "Transform Selection…", group: "Tools", key: "ctrl+alt+e", run: () => useTransformModal.getState().openModal() },
+      { id: "tool.transform.urle", title: "Transform: URL Encode Selection", group: "Tools", run: () => transformSelection(urlEncode) },
+      { id: "tool.transform.urld", title: "Transform: URL Decode Selection", group: "Tools", run: () => transformSelection(urlDecode) },
+      { id: "tool.transform.b64e", title: "Transform: Base64 Encode Selection", group: "Tools", run: () => transformSelection(base64Encode) },
+      { id: "tool.transform.b64d", title: "Transform: Base64 Decode Selection", group: "Tools", run: () => transformSelection(base64Decode) },
+      { id: "tool.transform.hexe", title: "Transform: Hex Encode Selection", group: "Tools", run: () => transformSelection(hexEncode) },
+      { id: "tool.transform.hexd", title: "Transform: Hex Decode Selection", group: "Tools", run: () => transformSelection(hexDecode) },
+      { id: "tool.transform.htmle", title: "Transform: HTML Entity Encode", group: "Tools", run: () => transformSelection(htmlEncode) },
+      { id: "tool.transform.htmld", title: "Transform: HTML Entity Decode", group: "Tools", run: () => transformSelection(htmlDecode) },
+      { id: "tool.transform.md5", title: "Transform: MD5 Hash Selection", group: "Tools", run: () => transformSelection(md5Hex) },
       { id: "tool.comparer", title: "Comparer", group: "Tools", run: () => useComparer.getState().openComparer() },
       { id: "catcher.intruder", title: "Catcher: Intruder", group: "Catcher", run: () => useCatcher.getState().show("intruder") },
       { id: "tool.macros", title: "Session macros", group: "Tools", run: () => useMacros.getState().openMacros() },
@@ -799,6 +816,7 @@ export default function App() {
       <QuickOpenOverlay />
       <CommandPalette />
       <DecoderOverlay />
+      <TransformModal />
       <ComparerOverlay />
       <MacrosOverlay />
       <AiEditsOverlay />
