@@ -234,14 +234,19 @@ export default function App() {
       const modifier = event.ctrlKey || event.metaKey;
       if (!modifier) return;
       const key = event.key.toLowerCase();
-      if (key === "s") {
+      if (key === "s" && event.altKey) {
+        event.preventDefault();
+        const next = !useSettings.getState().streamerMode;
+        useSettings.getState().set({ streamerMode: next });
+        if (next) toast.success("Streamer mode enabled: secrets & API keys masked");
+        else toast.info("Streamer mode disabled");
+      } else if (key === "s" && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         void saveActive();
       } else if (key === "o") {
         event.preventDefault();
         void openFolder();
       } else if (key === "w" && !event.shiftKey && !event.altKey) {
-
 
         const active = useEditor.getState().activePath;
         if (active) {
@@ -258,12 +263,6 @@ export default function App() {
       } else if (key === "e" && event.altKey) {
         event.preventDefault();
         useTransformModal.getState().openModal();
-      } else if (key === "s" && event.altKey) {
-        event.preventDefault();
-        const next = !useSettings.getState().streamerMode;
-        useSettings.getState().set({ streamerMode: next });
-        if (next) toast.success("Streamer mode enabled: secrets & API keys masked");
-        else toast.info("Streamer mode disabled");
       } else if (key === "tab") {
 
         const { tabs, activePath, setActive } = useEditor.getState();
@@ -337,10 +336,10 @@ export default function App() {
         wheelDelta = 0;
       }
     };
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("wheel", onWheel, { passive: false, capture: true });
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("wheel", onWheel, true);
       if (wheelTimer) clearTimeout(wheelTimer);
     };
