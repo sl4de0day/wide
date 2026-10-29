@@ -21,7 +21,6 @@ const tabs = new Map();
 let activeTabId = null;
 let pendingOpenPath = null;
 
-// Komut satırı argümanlarından açılacak dosya/klasör yolunu tespit et
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (args.length > 0 && fs.existsSync(args[0])) {
   pendingOpenPath = path.resolve(args[0]);
@@ -58,15 +57,11 @@ function replyToRenderer(replyId, result, error) {
   }
 }
 
-// ==========================================
-// Browser Tab Yöneticisi (Pentest Browser)
-// ==========================================
 let browserSession = null;
 function getBrowserSession() {
   if (browserSession) return browserSession;
   browserSession = session.fromPartition('persist:wide-browser');
 
-  // Pentest tarayıcısının Catcher proxy HTTPS/TLS sertifikalarını sorunsuz kabul etmesi
   browserSession.setCertificateVerifyProc((_request, callback) => {
     callback(0); // 0 = SSL sertifikasını kabul et / güven
   });
@@ -85,7 +80,7 @@ function getOrCreateTab(tabId) {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      webSecurity: false, // Pentest tarayıcısı için esnek
+      webSecurity: false,
     },
   });
 
@@ -193,9 +188,6 @@ function closeBrowserTab(tabId) {
   }
 }
 
-// ==========================================
-// Sidecar Başlatma ve Yönetimi
-// ==========================================
 function startSidecar() {
   const sidecarScript = path.join(ROOT, 'sidecar', 'sidecar.cjs');
   const env = { ...process.env };
@@ -203,7 +195,6 @@ function startSidecar() {
     env.XDG_CONFIG_HOME = path.join(os.homedir(), '.config');
   }
 
-  // Node yolunu garantiye al
   const nodeBin = path.join(os.homedir(), '.cargo', 'bin', 'node');
   const nodeExec = fs.existsSync(nodeBin) ? nodeBin : process.execPath;
 
@@ -236,7 +227,6 @@ function startSidecar() {
 }
 
 async function handleSidecarMessage(msg) {
-  // 1. Host request (sidecar -> host)
   if (msg.t === 'host') {
     const id = msg.id;
     const method = msg.method;
@@ -362,7 +352,6 @@ async function handleSidecarMessage(msg) {
     return;
   }
 
-  // 2. Reply ve Event (sidecar -> renderer)
   if (msg.type === 'reply' || msg.type === 'event') {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('host-message', msg);
@@ -370,9 +359,6 @@ async function handleSidecarMessage(msg) {
   }
 }
 
-// ==========================================
-// Renderer Mesajlarını İşleme (IPC)
-// ==========================================
 ipcMain.on('webview-message', async (_event, msg) => {
   if (!msg || typeof msg !== 'object') return;
 
@@ -381,7 +367,6 @@ ipcMain.on('webview-message', async (_event, msg) => {
     const replyId = msg.replyId;
     const args = msg.args || [];
 
-    // Host seviyesinde karşılanması gereken özel browser invoke metodları
     if (channel === 'browser:navigate') {
       const [url, tabId] = args;
       const tab = getOrCreateTab(tabId);
@@ -428,7 +413,6 @@ ipcMain.on('webview-message', async (_event, msg) => {
       return;
     }
 
-    // Diğer tüm standart çağrılar sidecar'a yönlendirilir
     sendToSidecar({
       t: 'invoke',
       id: replyId,
@@ -479,9 +463,6 @@ ipcMain.on('webview-message', async (_event, msg) => {
   }
 });
 
-// ==========================================
-// Uygulama Başlatma
-// ==========================================
 app.whenReady().then(() => {
   startSidecar();
 

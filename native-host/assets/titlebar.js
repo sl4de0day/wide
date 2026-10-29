@@ -82,7 +82,6 @@
     bar.appendChild(btnClose);
     document.body.appendChild(bar);
 
-    // Pencere maksimize durumuna göre simgeyi güncelle
     function updateMaxIcon() {
       var isMax = (window.outerWidth >= screen.availWidth && window.outerHeight >= screen.availHeight);
       btnMax.innerHTML = isMax ? SVG_RESTORE : SVG_MAX;

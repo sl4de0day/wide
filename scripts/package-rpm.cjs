@@ -23,11 +23,9 @@ for (const sub of ['BUILD', 'RPMS', 'SOURCES', 'SPECS', 'SRPMS', 'rpmdb']) {
   fs.mkdirSync(path.join(RPM_ROOT, sub), { recursive: true });
 }
 
-// Kaynakları kopyala
 fs.copyFileSync(path.join(ROOT, 'wide.desktop'), path.join(RPM_ROOT, 'wide.desktop'));
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(RPM_ROOT, 'logo.png'));
 
-// SPEC dosyasını oluştur
 const specContent = `%define _build_id_links none
 %define _dbpath %{_topdir}/rpmdb
 
@@ -74,7 +72,6 @@ cp ${RPM_ROOT}/logo.png %{buildroot}/usr/share/icons/hicolor/512x512/apps/wide.p
 const specFile = path.join(RPM_ROOT, 'SPECS', 'wide.spec');
 fs.writeFileSync(specFile, specContent.replace(/\r\n/g, '\n'), 'utf8');
 
-// rpmbuild komutu
 const rpmbin = fs.existsSync('/tmp/rpm-root/usr/bin/rpmbuild')
   ? '/tmp/rpm-root/usr/bin/rpmbuild'
   : 'rpmbuild';
@@ -91,7 +88,6 @@ try {
     env,
   });
 
-  // Üretilen RPM'i dist/ klasörüne taşı
   const rpmsDir = path.join(RPM_ROOT, 'RPMS', 'x86_64');
   if (fs.existsSync(rpmsDir)) {
     const files = fs.readdirSync(rpmsDir).filter((f) => f.endsWith('.rpm'));

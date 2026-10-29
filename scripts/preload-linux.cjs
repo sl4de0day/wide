@@ -4,7 +4,6 @@ const { ipcRenderer } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// 1. window.chrome.webview köprüsünü oluştur
 const listeners = new Set();
 ipcRenderer.on('host-message', (_event, msg) => {
   for (const fn of listeners) {
@@ -29,7 +28,6 @@ window.chrome.webview = {
   }
 };
 
-// 2. native-host/assets içindeki shim ve scriptleri yükle
 const assetsDir = path.resolve(__dirname, '..', 'native-host', 'assets');
 function runAsset(filename) {
   try {

@@ -57,7 +57,6 @@ export function jwtHover(): Extension {
               const dom = document.createElement("div");
               dom.className = "cm-jwt-tooltip";
 
-              // Header bar
               const head = document.createElement("div");
               head.className = "cm-jwt-head";
 
@@ -75,7 +74,6 @@ export function jwtHover(): Extension {
               algPill.textContent = `alg: ${alg}`;
               head.appendChild(algPill);
 
-              // Expiry check
               const exp = decoded.payload.exp;
               if (typeof exp === "number") {
                 const nowSec = Math.floor(Date.now() / 1000);
@@ -91,7 +89,6 @@ export function jwtHover(): Extension {
 
               dom.appendChild(head);
 
-              // Body content
               const body = document.createElement("div");
               body.className = "cm-jwt-body";
 
@@ -107,7 +104,6 @@ export function jwtHover(): Extension {
 
               dom.appendChild(body);
 
-              // Footer actions
               const footer = document.createElement("div");
               footer.className = "cm-jwt-footer";
 

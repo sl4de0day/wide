@@ -345,7 +345,6 @@ async function refreshPath() {
     return true;
   }
 
-  // Linux: ensure user-space binary directories are in process.env.PATH
   const home = electron.app.getPath("home");
   const candidates = [
     node_path.join(home, ".local", "bin"),
@@ -981,7 +980,6 @@ async function bootstrapManager(manager, track = null) {
       : { ok: false, toolchain: bootstrap.label, detail: run.detail ?? "" };
   }
 
-  // Linux package managers and user-space bootstrappers
   if (manager === "rustup") {
     const curl = await commandExists("curl");
     const sh = await commandExists("sh");

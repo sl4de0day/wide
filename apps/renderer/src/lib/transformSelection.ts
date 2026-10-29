@@ -40,7 +40,6 @@ export function getSelectedTextAndHandler(): {
   text: string;
   apply: (transformed: string) => void;
 } | null {
-  // 1. Check active CodeMirror editor
   const view = getActiveEditorView();
   if (view) {
     const sel = view.state.selection.main;
@@ -59,7 +58,6 @@ export function getSelectedTextAndHandler(): {
     }
   }
 
-  // 2. Check active input / textarea
   const el = document.activeElement;
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     const start = el.selectionStart;

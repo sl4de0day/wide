@@ -4,23 +4,14 @@ import { useSettings } from "@/stores/settings";
 
 const maskMark = Decoration.mark({ class: "cm-streamer-mask" });
 
-// Patterns for sensitive data
 const PATTERNS = [
-  // Key = Value assignments in .env, JSON, YAML, code
   /(?:API[_-]?KEY|SECRET|PASSWORD|PASSWD|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET)\s*[:=]\s*(['"][^'"\r\n]{4,}['"]|[^\s\r\n"']{4,})/gi,
-  // Bearer tokens
   /Bearer\s+([A-Za-z0-9-_.+/=]{16,})/gi,
-  // AWS Access Key
   /\b(AKIA[0-9A-Z]{16})\b/g,
-  // GitHub Personal Access Token
   /\b(gh[pousr]_[A-Za-z0-9_]{30,})\b/g,
-  // Stripe Live Key
   /\b(sk_live_[0-9a-zA-Z]{20,})\b/g,
-  // Google API Key
   /\b(AIza[0-9A-Za-z-_]{35})\b/g,
-  // Slack Tokens
   /\b(xox[baprs]-[0-9A-Za-z-_]{16,})\b/g,
-  // Standard JWT
   /\b(eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b/g,
 ];
 
@@ -40,7 +31,6 @@ function buildMaskDecorations(view: EditorView): DecorationSet {
       pattern.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(text)) !== null) {
-        // If there's a capture group (e.g. the value in key=value), mask that group
         const targetText = match[1] ?? match[0];
         const offsetInMatch = match[1] ? match[0].indexOf(match[1]) : 0;
         const start = from + match.index + offsetInMatch;
@@ -53,7 +43,6 @@ function buildMaskDecorations(view: EditorView): DecorationSet {
     }
   }
 
-  // Sort and deduplicate / merge ranges
   ranges.sort((a, b) => a.from - b.from);
   let lastEnd = -1;
   for (const r of ranges) {

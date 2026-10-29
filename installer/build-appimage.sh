@@ -17,10 +17,8 @@ fi
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR"
 
-# Copy package contents into AppDir
 cp -r "$TARGET_BUNDLE/"* "$APPDIR/"
 
-# AppRun script
 cat > "$APPDIR/AppRun" << 'EOF'
 #!/bin/sh
 SELF=$(readlink -f "$0")
@@ -30,7 +28,6 @@ exec "${HERE}/wide-launcher.sh" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 
-# Desktop entry & Icon
 if [ -f "$DIR/wide.desktop" ]; then
   cp "$DIR/wide.desktop" "$APPDIR/wide.desktop"
 fi
@@ -42,7 +39,6 @@ fi
 
 echo "[appimage] AppDir created successfully."
 
-# If appimagetool is available or can be downloaded, bundle it
 APPIMAGETOOL="$(which appimagetool 2>/dev/null || true)"
 if [ -z "$APPIMAGETOOL" ] && [ -x "/tmp/appimagetool-extracted/AppRun" ]; then
   APPIMAGETOOL="/tmp/appimagetool-extracted/AppRun"

@@ -23,7 +23,6 @@ const STAGE = path.join(DIST, '.deb-staging');
 fs.rmSync(STAGE, { recursive: true, force: true });
 fs.mkdirSync(STAGE, { recursive: true });
 
-// 1. Data dosya yapısını kur
 const DATA_DIR = path.join(STAGE, 'data');
 const OPT_WIDE = path.join(DATA_DIR, 'opt', 'wide');
 const USR_BIN = path.join(DATA_DIR, 'usr', 'bin');
@@ -35,18 +34,14 @@ fs.mkdirSync(USR_BIN, { recursive: true });
 fs.mkdirSync(APPS_DIR, { recursive: true });
 fs.mkdirSync(PIXMAPS, { recursive: true });
 
-// Dosyaları kopyala
 cp.execSync(`cp -r "${SOURCE_DIR}/"* "${OPT_WIDE}/"`);
 fs.chmodSync(path.join(OPT_WIDE, 'wide'), 0o755);
 fs.chmodSync(path.join(OPT_WIDE, 'wide-launcher.sh'), 0o755);
 
-// Symlink /usr/bin/wide
 fs.symlinkSync('/opt/wide/wide-launcher.sh', path.join(USR_BIN, 'wide'));
 
-// Desktop dosyası
 fs.copyFileSync(path.join(ROOT, 'wide.desktop'), path.join(APPS_DIR, 'wide.desktop'));
 
-// Logo ve hicolor ikonları
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(PIXMAPS, 'wide.png'));
 const SIZES = [16, 24, 32, 48, 64, 128, 256, 512];
 const HOME = process.env.HOME || '/home/sl4de';
@@ -59,11 +54,9 @@ for (const s of SIZES) {
   }
 }
 
-// 2. Control yapısını kur
 const CONTROL_DIR = path.join(STAGE, 'control');
 fs.mkdirSync(CONTROL_DIR, { recursive: true });
 
-// Boyut hesapla (KB)
 let totalBytes = 0;
 function walkSize(p) {
   const st = fs.lstatSync(p);
@@ -92,7 +85,6 @@ Description: Security-first IDE for the web stack
 
 fs.writeFileSync(path.join(CONTROL_DIR, 'control'), controlContent.replace(/\r\n/g, '\n'), 'utf8');
 
-// md5sums üret
 const md5s = [];
 function walkMd5(p, base) {
   const st = fs.lstatSync(p);
@@ -107,7 +99,6 @@ function walkMd5(p, base) {
 walkMd5(DATA_DIR, DATA_DIR);
 fs.writeFileSync(path.join(CONTROL_DIR, 'md5sums'), md5s.join('\n') + '\n', 'utf8');
 
-// 3. Arşivleri paketle
 const controlTarGz = path.join(STAGE, 'control.tar.gz');
 const dataTarXz = path.join(STAGE, 'data.tar.xz');
 const debianBinary = path.join(STAGE, 'debian-binary');
@@ -117,11 +108,9 @@ fs.writeFileSync(debianBinary, '2.0\n', 'utf8');
 cp.execSync(`tar --numeric-owner --owner=0 --group=0 -czf "${controlTarGz}" -C "${CONTROL_DIR}" .`);
 cp.execSync(`tar --numeric-owner --owner=0 --group=0 -cJf "${dataTarXz}" -C "${DATA_DIR}" .`);
 
-// 4. ar ile .deb birleştir (sıralama çok önemlidir: debian-binary, control.tar.gz, data.tar.xz)
 fs.rmSync(DEB_OUT, { force: true });
 cp.execSync(`ar -rcs "${DEB_OUT}" "${debianBinary}" "${controlTarGz}" "${dataTarXz}"`);
 
-// Temizlik
 fs.rmSync(STAGE, { recursive: true, force: true });
 
 console.log(`✓ [deb] Başarıyla üretildi: ${DEB_OUT} (${(fs.statSync(DEB_OUT).size / (1024 * 1024)).toFixed(1)} MB)`);

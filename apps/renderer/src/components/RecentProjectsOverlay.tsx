@@ -69,7 +69,7 @@ export function RecentProjectsOverlay() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    const total = filtered.length + 1; // +1 for "Open other folder..."
+    const total = filtered.length + 1;
     if (e.key === "Escape") {
       e.preventDefault();
       close();
@@ -100,7 +100,6 @@ export function RecentProjectsOverlay() {
         className="wide-enter-fade relative z-10 flex w-full max-w-xl flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl"
         onKeyDown={handleKeyDown}
       >
-        {/* Header with Search */}
         <div className="flex items-center gap-2 border-b border-line px-3 py-2.5 bg-canvas">
           <History className="size-4 text-accent shrink-0" />
           <input
@@ -120,7 +119,6 @@ export function RecentProjectsOverlay() {
           </button>
         </div>
 
-        {/* Project List */}
         <div ref={listRef} className="max-h-80 overflow-y-auto py-1">
           {loading ? (
             <div className="px-4 py-8 text-center text-xs text-fg-faint">
@@ -180,7 +178,6 @@ export function RecentProjectsOverlay() {
             })
           )}
 
-          {/* Option: Open other folder */}
           <div
             onClick={() => void handleOpenOther()}
             onMouseEnter={() => setSelectedIndex(filtered.length)}
@@ -200,7 +197,6 @@ export function RecentProjectsOverlay() {
           </div>
         </div>
 
-        {/* Footer info */}
         <div className="flex items-center justify-between border-t border-line bg-chrome px-3 py-1.5 text-[10px] text-fg-faint">
           <span>{filtered.length} recent project(s)</span>
           <span>Esc to close · ↑↓ to navigate · Enter to open</span>

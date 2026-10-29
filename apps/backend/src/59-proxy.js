@@ -1560,7 +1560,6 @@ function registerProxyHandlers() {
       }
 
       if (process.platform === "linux") {
-        // 1. Kullanıcı NSS veritabanına ekle (Chromium, Chrome, Brave, Edge vb.)
         try {
           await ensureNssDb();
           await runLinuxCommand("certutil", [
@@ -1576,7 +1575,6 @@ function registerProxyHandlers() {
           ]);
         } catch {}
 
-        // 2. Firefox kullanıcı profillerine ekle
         try {
           const ffDir = node_path.join(node_os.homedir(), ".mozilla", "firefox");
           const entries = await promises.readdir(ffDir, { withFileTypes: true }).catch(() => []);
@@ -1598,7 +1596,6 @@ function registerProxyHandlers() {
           }
         } catch {}
 
-        // 3. Sistem trust anchor (p11-kit)
         try {
           await runLinuxCommand("trust", ["anchor", "--store", PROXY_CA_CERT()]);
         } catch {}
@@ -1627,12 +1624,10 @@ function registerProxyHandlers() {
       }
 
       if (process.platform === "linux") {
-        // 1. NSS veritabanından kaldır
         try {
           await runLinuxCommand("certutil", ["-d", `sql:${NSS_DB_DIR()}`, "-D", "-n", "Wide CA"]);
         } catch {}
 
-        // 2. Firefox profillerinden kaldır
         try {
           const ffDir = node_path.join(node_os.homedir(), ".mozilla", "firefox");
           const entries = await promises.readdir(ffDir, { withFileTypes: true }).catch(() => []);
@@ -1644,7 +1639,6 @@ function registerProxyHandlers() {
           }
         } catch {}
 
-        // 3. trust anchor'dan kaldır
         try {
           await runLinuxCommand("trust", ["anchor", "--remove", PROXY_CA_CERT()]);
         } catch {}

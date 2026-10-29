@@ -1,4 +1,3 @@
-# Maintainer: sl4de <sl4de0day@github>
 pkgname=wide-ide
 pkgver=1.3291026
 pkgrel=1
@@ -37,19 +36,15 @@ build() {
 package() {
   local _dist="$startdir/../dist/wide-linux-x64"
   
-  # /opt/wide içine uygulama dosyalarını kur
   install -dm755 "$pkgdir/opt/wide"
   cp -r "$_dist/"* "$pkgdir/opt/wide/"
   chmod +x "$pkgdir/opt/wide/wide" "$pkgdir/opt/wide/wide-launcher.sh"
 
-  # /usr/bin/wide sembolik bağı
   install -dm755 "$pkgdir/usr/bin"
   ln -sf "/opt/wide/wide-launcher.sh" "$pkgdir/usr/bin/wide"
 
-  # Desktop Entry
   install -Dm644 "$startdir/../wide.desktop" "$pkgdir/usr/share/applications/wide.desktop"
 
-  # Çoklu çözünürlüklü ikonlar
   for s in 16 24 32 48 64 128 256 512; do
     if [ -f "$HOME/.local/share/icons/hicolor/${s}x${s}/apps/wide.png" ]; then
       install -Dm644 "$HOME/.local/share/icons/hicolor/${s}x${s}/apps/wide.png" \
@@ -57,7 +52,6 @@ package() {
     fi
   done
 
-  # Pixmaps fallback ikonu
   install -Dm644 "$startdir/../assets/logo.png" "$pkgdir/usr/share/pixmaps/wide.png"
 }
 

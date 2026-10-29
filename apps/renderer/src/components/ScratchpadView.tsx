@@ -24,7 +24,6 @@ function loadNotes(): ScratchNote[] {
       return [{ id: "default", title: "Note 1", content: legacy }];
     }
   } catch {
-    // fallback
   }
   return [{ id: "default", title: "Note 1", content: "" }];
 }
@@ -36,7 +35,6 @@ function saveNotes(notes: ScratchNote[]): void {
       localStorage.setItem(LEGACY_STORAGE_KEY, notes[0].content);
     }
   } catch {
-    // ignore
   }
 }
 
@@ -147,9 +145,7 @@ export function ScratchpadView() {
 
   return (
     <div className="flex h-full w-full flex-col bg-canvas select-text">
-      {/* Top Toolbar */}
       <div className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 py-1 text-xs select-none">
-        {/* Note Tabs */}
         <div className="flex items-center gap-1 overflow-x-auto py-0.5">
           {notes.map((note) => {
             const isActive = note.id === (activeNote?.id ?? "default");
@@ -210,7 +206,6 @@ export function ScratchpadView() {
           </button>
         </div>
 
-        {/* Action Controls */}
         <div className="flex items-center gap-2 text-fg-dim">
           <span className="text-[11px] font-mono text-fg-faint">
             {lineCount} lines · {charCount} chars
@@ -256,7 +251,6 @@ export function ScratchpadView() {
         </div>
       </div>
 
-      {/* Editor Area */}
       <div className="relative min-h-0 flex-1 p-2">
         <textarea
           value={activeNote?.content ?? ""}

@@ -93,7 +93,6 @@ export function TransformModal() {
         className="wide-enter-fade relative z-10 flex w-full max-w-lg flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl"
         onKeyDown={handleKeyDown}
       >
-        {/* Header */}
         <div className="flex items-center gap-2 border-b border-line px-3 py-2 bg-chrome">
           <Binary className="size-4 text-accent" />
           <span className="text-xs font-semibold text-fg">Transform Selection</span>
@@ -114,7 +113,6 @@ export function TransformModal() {
           </button>
         </div>
 
-        {/* Search */}
         <div className="flex items-center gap-2 border-b border-line px-3 py-2 bg-canvas">
           <Search className="size-3.5 text-fg-faint" />
           <input
@@ -127,7 +125,6 @@ export function TransformModal() {
           />
         </div>
 
-        {/* Results List */}
         <div className="max-h-72 overflow-y-auto py-1">
           {items.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-fg-faint">
@@ -163,7 +160,6 @@ export function TransformModal() {
           )}
         </div>
 
-        {/* Footer info */}
         <div className="flex items-center justify-between border-t border-line bg-chrome px-3 py-1.5 text-[10px] text-fg-faint">
           <span>{items.length} formats available</span>
           <span>Esc to cancel · ↑↓ navigate · ↵ replace</span>

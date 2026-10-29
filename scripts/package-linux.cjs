@@ -22,7 +22,6 @@ if (!fs.existsSync(mainOut) || !fs.existsSync(rendererOut)) {
   cp.execSync('npm run build:linux', { cwd: ROOT, stdio: 'inherit' });
 }
 
-// dist/wide-linux-x64 temizle ve oluştur
 if (fs.existsSync(OUT_DIR)) {
   fs.rmSync(OUT_DIR, { recursive: true, force: true });
 }
@@ -31,7 +30,6 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 console.log('== [2/5] Electron Çalışma Zamanı Kopyalanıyor ==');
 fs.cpSync(ELECTRON_DIST, OUT_DIR, { recursive: true });
 
-// "electron" çalıştırılabilir dosyasını "wide" olarak yeniden adlandır
 const origBinary = path.join(OUT_DIR, 'electron');
 const wideBinary = path.join(OUT_DIR, 'wide');
 if (fs.existsSync(origBinary)) {
@@ -43,7 +41,6 @@ console.log('== [3/5] Uygulama Dosyaları ve Bağımlılıklar Paketleniyor ==')
 const APP_DIR = path.join(OUT_DIR, 'resources', 'app');
 fs.mkdirSync(APP_DIR, { recursive: true });
 
-// Proje dosyalarını app klasörüne kopyala
 const copyTargets = [
   ['scripts', 'scripts'],
   ['out', 'out'],
@@ -63,7 +60,6 @@ for (const [src, dest] of copyTargets) {
   }
 }
 
-// Runtime package.json oluştur
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const version = rootPkg.version || '1.3291026';
 const pkg = {
@@ -75,7 +71,6 @@ const pkg = {
 };
 fs.writeFileSync(path.join(APP_DIR, 'package.json'), JSON.stringify(pkg, null, 2), 'utf8');
 
-// Production node_modules kopyala
 const PROD_MODULES = [
   '@grpc',
   '@lydell',
@@ -97,7 +92,6 @@ for (const mod of PROD_MODULES) {
   }
 }
 
-// Başlatıcı wrapper script oluştur
 const launcherContent = `#!/usr/bin/env bash
 set -e
 DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
@@ -113,7 +107,6 @@ const launcherPath = path.join(OUT_DIR, 'wide-launcher.sh');
 fs.writeFileSync(launcherPath, launcherContent, 'utf8');
 fs.chmodSync(launcherPath, 0o755);
 
-// Kök klasöre desktop ve logo kopyala
 fs.copyFileSync(path.join(ROOT, 'wide.desktop'), path.join(OUT_DIR, 'wide.desktop'));
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(OUT_DIR, 'wide.png'));
 
@@ -133,7 +126,6 @@ try {
   cp.execSync(`tar -cf - -C "${DIST}" wide-linux-x64 | zstd -T0 -19 -f -o "${tarZstPath}"`, { stdio: 'inherit' });
   console.log(`✓ Yüksek sıkıştırmalı Zstandard paketi hazırlandı: ${tarZstName}`);
 } catch (e) {
-  // zstd opsiyonel
 }
 
 console.log('== [5/5] Tamamlandı! ==');
