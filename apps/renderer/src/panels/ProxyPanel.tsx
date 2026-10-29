@@ -1,4 +1,4 @@
-import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
+import { ArrowUpRight, Braces, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -7,7 +7,7 @@ import { fromHar, toHar } from "@/lib/har";
 import { toast } from "@/stores/toast";
 import { exportCatcherSession, importCatcherSession } from "@/lib/catcherSession";
 import { csrfPocFromRequest } from "@/lib/poc/generate";
-import { curlFromParts } from "@/lib/pitcher/codegen";
+import { CopySnippetMenu } from "@/components/CopySnippetMenu";
 import { useWorkspace } from "@/stores/workspace";
 import { useT } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
@@ -216,18 +216,13 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
         )}
         {}
         {!entry.websocket && (
-          <button
-            type="button"
-            onClick={async () => {
-              const ok = await copyText(curlFromParts(entry.method, entry.url, entry.reqHeaders, entry.reqBody));
-              if (ok) toast.success(t("Copied as cURL."));
-            }}
-            title={t("Copy as cURL")}
-            aria-label={t("Copy as cURL")}
-            className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-          >
-            <Copy className="size-3.5" strokeWidth={2} />
-          </button>
+          <CopySnippetMenu
+            method={entry.method}
+            url={entry.url}
+            headers={entry.reqHeaders}
+            body={entry.reqBody}
+            className="shrink-0"
+          />
         )}
         {}
         {!entry.websocket && (

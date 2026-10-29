@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { parseCurl } from "@/lib/curl";
+import { CopySnippetMenu } from "@/components/CopySnippetMenu";
 import { hasHeader, parseHttpMessage, serializeHttpMessage, setHeader } from "@/lib/httpMessage";
 import { csrfPocFromRequest } from "@/lib/poc/generate";
 import { goToRouteInCode } from "@/lib/trafficBridge";
@@ -64,6 +65,7 @@ export function RepeaterView({ id }: { id: string }) {
   const [viewing, setViewing] = useState<number | null>(null);
 
   const looksLikeCurl = useMemo(() => /^\s*curl\s/i.test(text), [text]);
+  const parsedReq = useMemo(() => parseHttpMessage(text), [text]);
 
   const importCurl = () => {
     const parsed = parseCurl(text);
@@ -174,6 +176,15 @@ export function RepeaterView({ id }: { id: string }) {
           <button type="button" onClick={goToRoute} title={t("Go to the route in the code")} className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
             <FileCode2 className="size-3" strokeWidth={1.75} />
           </button>
+          {parsedReq && (
+            <CopySnippetMenu
+              method={parsedReq.method}
+              url={parsedReq.url}
+              headers={parsedReq.headers}
+              body={parsedReq.body}
+              className="shrink-0"
+            />
+          )}
           <button
             type="button"
             onClick={() => void send()}

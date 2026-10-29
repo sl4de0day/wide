@@ -95,6 +95,14 @@ export function curlFromParts(method: string, url: string, headers: [string, str
   return toCurl({ method: (method || "GET").toUpperCase(), url, headers: headers.filter(([k]) => k), body: body || null });
 }
 
+export function fetchFromParts(method: string, url: string, headers: [string, string][], body: string): string {
+  return toFetch({ method: (method || "GET").toUpperCase(), url, headers: headers.filter(([k]) => k), body: body || null });
+}
+
+export function pythonFromParts(method: string, url: string, headers: [string, string][], body: string): string {
+  return toPython({ method: (method || "GET").toUpperCase(), url, headers: headers.filter(([k]) => k), body: body || null });
+}
+
 function toFetch(e: Effective): string {
   const headers = e.headers.length ? `\n  headers: ${JSON.stringify(Object.fromEntries(e.headers), null, 2).replace(/\n/g, "\n  ")},` : "";
   const body = e.body ? `\n  body: ${dq(e.body)},` : "";

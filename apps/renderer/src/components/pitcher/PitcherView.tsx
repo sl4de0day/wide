@@ -19,6 +19,8 @@ import { usePitcherEnv } from "@/stores/pitcherEnv";
 import { usePitcherHistory } from "@/stores/pitcherHistory";
 
 import { CodeGenDialog } from "./CodeGenDialog";
+import { CopySnippetMenu } from "@/components/CopySnippetMenu";
+import { materialize } from "@/lib/pitcher/codegen";
 import { CookieManager } from "./CookieManager";
 import { EnvManager } from "./EnvManager";
 import { GraphqlSchema } from "./GraphqlSchema";
@@ -230,8 +232,9 @@ function ParamTable({ rows, onChange, keyPlaceholder }: { rows: Param[]; onChang
 
 type BuilderTab = "params" | "headers" | "body" | "auth" | "scripts";
 
-function RequestPane({ req, run, onSend, onCode, onSendTo }: { req: PitcherRequest; run: RunState | undefined; onSend: () => void; onCode: () => void; onSendTo: (tool: "repeater" | "intruder" | "scanner") => void }) {
+function RequestPane({ req, run, onSend, onCode, onSendTo, vars }: { req: PitcherRequest; run: RunState | undefined; onSend: () => void; onCode: () => void; onSendTo: (tool: "repeater" | "intruder" | "scanner") => void; vars: Record<string, string> }) {
   const t = useT();
+  const eff = useMemo(() => materialize(req, vars), [req, vars]);
   const [tab, setTab] = useState<BuilderTab>("params");
   const update = (patch: Partial<PitcherRequest>) => usePitcher.getState().updateRequest(req.id, patch);
   const sending = run?.sending ?? false;
@@ -276,6 +279,13 @@ function RequestPane({ req, run, onSend, onCode, onSendTo }: { req: PitcherReque
           <input type="checkbox" checked={req.insecure} onChange={(e) => update({ insecure: e.target.checked })} />
           <ShieldOff className="size-3" strokeWidth={1.75} />
         </label>
+        <CopySnippetMenu
+          method={eff.method}
+          url={eff.url}
+          headers={eff.headers}
+          body={eff.body ?? ""}
+          className="shrink-0"
+        />
         <button type="button" onClick={onCode} title={t("Generate code")} className="flex shrink-0 items-center rounded-sm border border-line px-2 py-1 text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
           <Code2 className="size-3.5" strokeWidth={1.75} />
         </button>
@@ -710,6 +720,7 @@ export function PitcherView() {
               ) : (
                 <RequestPane
                   req={active}
+                  vars={varsFor(active)}
                   run={responses[active.id]}
                   onSend={() => void send(active)}
                   onCode={() => setCodeReq(active)}
