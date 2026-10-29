@@ -38,6 +38,7 @@ export interface Settings {
 
   aiGhostText: boolean;
 
+  streamerMode: boolean;
   securityLint: boolean;
 
   updateManifestUrl: string;
@@ -59,6 +60,7 @@ export const DEFAULTS: Settings = {
   formatOnSave: false,
   focusLayer: false,
   aiGhostText: false,
+  streamerMode: false,
   securityLint: true,
   updateManifestUrl: "",
   terminalShell: "default",

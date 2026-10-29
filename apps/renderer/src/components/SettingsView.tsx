@@ -380,6 +380,12 @@ export function SettingsView() {
 
         <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Security")}</h2>
         <Row
+          label="Streamer / presentation mode"
+          hint="Masks API keys, tokens, passwords and secrets in the editor (Ctrl+Alt+S)."
+        >
+          <Toggle value={settings.streamerMode} onChange={(next) => settings.set({ streamerMode: next })} />
+        </Row>
+        <Row
           label={t("Real-time security analysis")}
           hint={t("Flags likely vulnerabilities as you type — XSS sinks, injection, weak crypto, secrets — with a fix on hover.")}
         >

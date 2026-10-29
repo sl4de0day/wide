@@ -258,6 +258,12 @@ export default function App() {
       } else if (key === "e" && event.altKey) {
         event.preventDefault();
         useTransformModal.getState().openModal();
+      } else if (key === "s" && event.altKey) {
+        event.preventDefault();
+        const next = !useSettings.getState().streamerMode;
+        useSettings.getState().set({ streamerMode: next });
+        if (next) toast.success("Streamer mode enabled: secrets & API keys masked");
+        else toast.info("Streamer mode disabled");
       } else if (key === "tab") {
 
         const { tabs, activePath, setActive } = useEditor.getState();
@@ -712,6 +718,18 @@ export default function App() {
       { id: "ai.copyConversation", title: "Copy the conversation", group: "AI", when: () => has("ai-assistant"), run: () => void copyConversation() },
       { id: "ai.exportConversation", title: "Export the conversation to Markdown", group: "AI", when: () => has("ai-assistant"), run: () => void exportConversation() },
       { id: "security.toggle", title: "Toggle: Real-time security analysis", group: "Security", run: () => useSettings.getState().set({ securityLint: !useSettings.getState().securityLint }) },
+      {
+        id: "view.streamerMode",
+        title: "Toggle Streamer Mode (Mask Secrets)",
+        group: "View",
+        key: "ctrl+alt+s",
+        run: () => {
+          const next = !useSettings.getState().streamerMode;
+          useSettings.getState().set({ streamerMode: next });
+          if (next) toast.success("Streamer mode enabled: secrets & API keys masked");
+          else toast.info("Streamer mode disabled");
+        },
+      },
       { id: "security.toFindings", title: "Add this file's security issues to Findings", group: "Security", run: () => { if (addSecurityFindingsForActiveFile() > 0) openPanel("findings"); } },
       { id: "security.projectScan", title: "Scan project for cross-file vulnerabilities", group: "Security", when: hasRoot, run: () => { void useProjectScan.getState().run(); openPanel("problems"); } },
       { id: "view.catcher", title: "Catcher", group: "View", run: () => useEditor.getState().openCatcher() },

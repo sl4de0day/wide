@@ -1,4 +1,4 @@
-import { CircleAlert, Radio, Server, ShieldAlert, TriangleAlert } from "lucide-react";
+import { CircleAlert, EyeOff, Radio, Server, ShieldAlert, TriangleAlert } from "lucide-react";
 
 import { languageLabel } from "@/editor/languages";
 import { useT } from "@/lib/i18n";
@@ -10,6 +10,7 @@ import { useProxy } from "@/stores/proxy";
 import { useRemote } from "@/stores/remote";
 import { useSettings } from "@/stores/settings";
 import { useWorkspace } from "@/stores/workspace";
+import { toast } from "@/stores/toast";
 
 function ProxyChip({ onOpenPanel }: { onOpenPanel: (id: string) => void }) {
   const running = useProxy((state) => state.running);
@@ -61,6 +62,27 @@ function ProxyChip({ onOpenPanel }: { onOpenPanel: (id: string) => void }) {
             ? `Intercept: ${heldCount ? `(${heldCount})` : "On"}`
             : `Proxy: ${port || 8080}`}
       </span>
+    </button>
+  );
+}
+
+function StreamerChip() {
+  const streamerMode = useSettings((state) => state.streamerMode);
+
+  if (!streamerMode) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        useSettings.getState().set({ streamerMode: false });
+        toast.info("Streamer mode disabled");
+      }}
+      title="Streamer Mode is ON (Secrets & keys are masked). Click to disable."
+      className="flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30 transition-colors"
+    >
+      <EyeOff className="size-3" strokeWidth={2} />
+      <span>Streamer Mode</span>
     </button>
   );
 }
@@ -196,6 +218,7 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
 
       <div className="flex-1" />
 
+      <StreamerChip />
       <ProxyChip onOpenPanel={onOpenPanel} />
       <RemoteChip />
 
