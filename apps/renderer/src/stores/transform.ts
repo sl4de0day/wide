@@ -38,3 +38,4 @@ export const useTransformModal = create<TransformModalState>((set, get) => ({
     get().closeModal();
   },
 }));
+

@@ -96,3 +96,4 @@ export function transformSelection(transform: (text: string) => string): boolean
     return false;
   }
 }
+

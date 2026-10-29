@@ -29,17 +29,33 @@ import { fileMark } from "@/lib/fileIcons";
 import { folderColour } from "@/lib/folderIcons";
 import { extensionById, languageExtensionFor } from "@/lib/marketplace";
 import { useT } from "@/lib/i18n";
-import { cn, copyText, dirname, getRelativePath } from "@/lib/utils";
+import { cn, copyText, dirname, getRelativePath, normalisePath } from "@/lib/utils";
 import { PanelHeader, panelButtonClass } from "@/components/SidePanel";
 import { confirm } from "@/stores/confirm";
 import { useEditor } from "@/stores/editor";
 import { useExtensions } from "@/stores/extensions";
 import { useWorkspace } from "@/stores/workspace";
 import { useComparer } from "@/stores/comparer";
+import { useFindings, type Severity } from "@/stores/findings";
+import { useDiagnostics } from "@/stores/diagnostics";
 import { toast } from "@/stores/toast";
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
+
+export interface SecurityBadgeInfo {
+  count: number;
+  maxSeverity: Severity;
+  tooltip: string;
+}
+
+const SEVERITY_WEIGHT: Record<Severity, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+  info: 0,
+};
 
 interface VisibleRow {
   entry?: DirEntry;
@@ -158,6 +174,7 @@ const Row = memo(function Row({
   missing,
   needs,
   needsLabel,
+  badge,
   dropTarget,
   isCut,
   isCompareSelected,
@@ -177,6 +194,7 @@ const Row = memo(function Row({
   missing?: boolean;
   needs?: string;
   needsLabel?: string;
+  badge?: SecurityBadgeInfo;
   dropTarget: boolean;
   isCut?: boolean;
   isCompareSelected?: boolean;
@@ -239,7 +257,24 @@ const Row = memo(function Row({
           </span>
         </>
       )}
-      <span className="truncate">{entry.name}</span>
+      <span className="truncate flex-1">{entry.name}</span>
+      {badge && (
+        <span
+          title={badge.tooltip}
+          className={cn(
+            "ml-auto shrink-0 flex items-center justify-center font-mono text-[9px] font-bold px-1.5 py-0.2 rounded-full leading-none",
+            badge.maxSeverity === "critical"
+              ? "bg-red-500/20 text-red-400 border border-red-500/40"
+              : badge.maxSeverity === "high"
+              ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
+              : badge.maxSeverity === "medium"
+              ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+              : "bg-blue-500/20 text-blue-300 border border-blue-500/40",
+          )}
+        >
+          {badge.count}
+        </span>
+      )}
     </button>
   );
 });
@@ -293,6 +328,80 @@ export function FileTree({ onOpenPanel }: { onOpenPanel?: (id: string) => void }
   const draft = useWorkspace((state) => state.draft);
   const activePath = useEditor((state) => state.activePath);
   const t = useT();
+
+  const findings = useFindings((state) => state.findings);
+  const bySource = useDiagnostics((state) => state.bySource);
+
+  const badgesByPath = useMemo(() => {
+    const map = new Map<string, { count: number; maxWeight: number; severities: Record<string, number> }>();
+
+    const recordIssue = (filePath: string, severity: Severity) => {
+      if (!filePath) return;
+      const norm = normalisePath(filePath);
+      const cur = map.get(norm) ?? { count: 0, maxWeight: -1, severities: {} };
+      cur.count += 1;
+      const weight = SEVERITY_WEIGHT[severity] ?? 0;
+      if (weight > cur.maxWeight) cur.maxWeight = weight;
+      cur.severities[severity] = (cur.severities[severity] ?? 0) + 1;
+      map.set(norm, cur);
+    };
+
+    for (const f of findings) {
+      if (f.status === "fixed" || f.status === "false-positive") continue;
+      const cleanLoc = (f.location || "").split(":")[0].trim();
+      if (!cleanLoc || cleanLoc.startsWith("http://") || cleanLoc.startsWith("https://")) continue;
+      recordIssue(cleanLoc, f.severity || "medium");
+    }
+
+    for (const [file, sources] of Object.entries(bySource)) {
+      const securityDiags = [...(sources.security ?? []), ...(sources.inspection ?? [])];
+      for (const diag of securityDiags) {
+        const sev: Severity = diag.severity === "error" ? "high" : "medium";
+        recordIssue(file, sev);
+      }
+    }
+
+    const result = new Map<string, SecurityBadgeInfo>();
+    const weightToSev: Severity[] = ["info", "low", "medium", "high", "critical"];
+
+    for (const [pathKey, data] of map.entries()) {
+      const maxSev = weightToSev[data.maxWeight] ?? "medium";
+      const parts: string[] = [];
+      if (data.severities.critical) parts.push(`${data.severities.critical} critical`);
+      if (data.severities.high) parts.push(`${data.severities.high} high`);
+      if (data.severities.medium) parts.push(`${data.severities.medium} medium`);
+      if (data.severities.low) parts.push(`${data.severities.low} low`);
+      if (data.severities.info) parts.push(`${data.severities.info} info`);
+      const tooltip = `${data.count} security issue${data.count === 1 ? "" : "s"} (${parts.join(", ")})`;
+
+      result.set(pathKey, {
+        count: data.count,
+        maxSeverity: maxSev,
+        tooltip,
+      });
+    }
+
+    return result;
+  }, [findings, bySource]);
+
+  const getBadge = useCallback(
+    (entryPath: string, isDirectory: boolean): SecurityBadgeInfo | undefined => {
+      const norm = normalisePath(entryPath);
+      const exact = badgesByPath.get(norm);
+      if (exact) return exact;
+
+      for (const [key, badge] of badgesByPath.entries()) {
+        if (!isDirectory && (norm.endsWith("/" + key) || key.endsWith("/" + norm))) {
+          return badge;
+        }
+        if (isDirectory && (key.startsWith(norm + "/") || norm.endsWith("/" + key))) {
+          return badge;
+        }
+      }
+      return undefined;
+    },
+    [badgesByPath],
+  );
 
   const viewport = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -682,6 +791,7 @@ export function FileTree({ onOpenPanel }: { onOpenPanel?: (id: string) => void }
                   missing={row.missing}
                   needs={row.needs}
                   needsLabel={row.needs ? t("Install the {name} extension to read this file properly.", { name: row.needs }) : undefined}
+                  badge={getBadge(entry.path, Boolean(entry.isDirectory))}
                   dropTarget={Boolean(drag) && entry.isDirectory && dropDir === entry.path}
                   isCut={clipboard?.mode === "cut" && clipboard.paths.includes(entry.path)}
                   isCompareSelected={comparePath === entry.path}

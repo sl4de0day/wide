@@ -28,3 +28,4 @@ export const useRecentProjects = create<RecentProjectsState>((set) => ({
   close: () => set({ isOpen: false }),
   setProjects: (projects) => set({ projects }),
 }));
+
