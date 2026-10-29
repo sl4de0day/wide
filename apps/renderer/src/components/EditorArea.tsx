@@ -52,6 +52,7 @@ const CatcherView = lazy(() => import("./CatcherView").then((m) => ({ default: m
 const PitcherView = lazy(() => import("./pitcher/PitcherView").then((m) => ({ default: m.PitcherView })));
 const BrowserView = lazy(() => import("./BrowserView").then((m) => ({ default: m.BrowserView })));
 const CyberChefView = lazy(() => import("./CyberChefView").then((m) => ({ default: m.CyberChefView })));
+const ScratchpadView = lazy(() => import("./ScratchpadView").then((m) => ({ default: m.ScratchpadView })));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((m) => ({ default: m.MarkdownPreview })));
 const DiffView = lazy(() => import("@/panels/DiffView").then((m) => ({ default: m.DiffView })));
 const ExtensionView = lazy(() => import("./ExtensionView").then((m) => ({ default: m.ExtensionView })));
@@ -445,6 +446,7 @@ function TabContentRenderer({ tab, paneId }: { tab: Tab | null; paneId: string }
   if (tab.kind === "catcher") return <CatcherView />;
   if (tab.kind === "pitcher") return <PitcherView />;
   if (tab.kind === "cyberchef") return <CyberChefView />;
+  if (tab.kind === "scratchpad") return <ScratchpadView />;
   if (tab.kind === "markdown-preview") return <MarkdownPreview sourcePath={tab.path.slice(MD_PREVIEW_PATH.length)} />;
   if (tab.kind === "media") return <MediaView key={tab.path} tab={tab} />;
   if (tab.kind === "diff") {

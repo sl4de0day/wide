@@ -15,6 +15,7 @@ import {
   Send,
   Server,
   Settings,
+  StickyNote,
   Terminal,
   TestTube2,
 } from "lucide-react";
@@ -28,7 +29,7 @@ import { ProblemsPanel } from "@/panels/ProblemsPanel";
 import { SearchPanel } from "@/panels/SearchPanel";
 import { StructurePanel } from "@/panels/StructurePanel";
 import { ToolsPanel } from "@/panels/ToolsPanel";
-import { BROWSER_PATH, CATCHER_PATH, CYBERCHEF_PATH, PITCHER_PATH, SETTINGS_PATH, useEditor } from "@/stores/editor";
+import { BROWSER_PATH, CATCHER_PATH, CYBERCHEF_PATH, PITCHER_PATH, SCRATCHPAD_PATH, SETTINGS_PATH, useEditor } from "@/stores/editor";
 import { useExtensions } from "@/stores/extensions";
 
 const BuildPanel = lazy(() => import("@/panels/BuildPanel").then((m) => ({ default: m.BuildPanel })));
@@ -168,6 +169,13 @@ const BROWSER_BUTTON: ToolButton = {
   label: "Browser",
   icon: Globe,
   open: () => useEditor.getState().openBrowser(),
+};
+
+const SCRATCHPAD_BUTTON: ToolButton = {
+  id: "scratchpad",
+  label: "Scratchpad",
+  icon: StickyNote,
+  open: () => useEditor.getState().openScratchpad(),
 };
 
 
@@ -377,6 +385,7 @@ export function ActivityBar({
       <ToolBarButton tool={CATCHER_BUTTON} active={activePath === CATCHER_PATH} />
       <ToolBarButton tool={PITCHER_BUTTON} active={activePath === PITCHER_PATH} />
       <ToolBarButton tool={BROWSER_BUTTON} active={activePath === BROWSER_PATH} />
+      <ToolBarButton tool={SCRATCHPAD_BUTTON} active={activePath === SCRATCHPAD_PATH} />
       <div className="flex-1" />
       {bottom.map((panel) => (
         <ActivityButton key={panel.id} panel={panel} active={isActive(panel.id)} onSelect={onSelect} />

@@ -1,4 +1,4 @@
-import { CircleAlert, Server, ShieldAlert, TriangleAlert } from "lucide-react";
+import { CircleAlert, Radio, Server, ShieldAlert, TriangleAlert } from "lucide-react";
 
 import { languageLabel } from "@/editor/languages";
 import { useT } from "@/lib/i18n";
@@ -6,9 +6,64 @@ import { cn, normalisePath } from "@/lib/utils";
 import { useDiagnostics } from "@/stores/diagnostics";
 import { useActiveTab, useEditor } from "@/stores/editor";
 import { useProjectScan } from "@/stores/projectScan";
+import { useProxy } from "@/stores/proxy";
 import { useRemote } from "@/stores/remote";
 import { useSettings } from "@/stores/settings";
 import { useWorkspace } from "@/stores/workspace";
+
+function ProxyChip({ onOpenPanel }: { onOpenPanel: (id: string) => void }) {
+  const running = useProxy((state) => state.running);
+  const port = useProxy((state) => state.port);
+  const intercepting = useProxy((state) => state.intercepting);
+  const heldCount = useProxy((state) => state.held.length + state.heldResponses.length);
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.shiftKey) {
+      onOpenPanel("proxy");
+      return;
+    }
+    if (!running) {
+      void useProxy.getState().start();
+    } else {
+      void useProxy.getState().setIntercept(!intercepting);
+    }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    onOpenPanel("proxy");
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
+      title={
+        !running
+          ? "Catcher Proxy: Stopped (Click to start · Shift-click for Proxy Panel)"
+          : intercepting
+            ? `Catcher Proxy: Intercepting on port ${port} (Click to pass through · Shift-click for Panel)`
+            : `Catcher Proxy: Listening on port ${port} (Click to intercept · Shift-click for Panel)`
+      }
+      className={cn(
+        "flex shrink-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-[11px] font-medium transition-colors duration-100",
+        !running && "text-fg-faint hover:text-fg-dim hover:bg-hover",
+        running && !intercepting && "text-emerald-400 hover:bg-emerald-500/10",
+        running && intercepting && "bg-amber-500/15 text-amber-400 animate-pulse hover:bg-amber-500/25",
+      )}
+    >
+      <Radio className="size-3" strokeWidth={2.5} />
+      <span>
+        {!running
+          ? "Proxy: Off"
+          : intercepting
+            ? `Intercept: ${heldCount ? `(${heldCount})` : "On"}`
+            : `Proxy: ${port || 8080}`}
+      </span>
+    </button>
+  );
+}
 
 function RemoteChip() {
   const t = useT();
@@ -141,6 +196,7 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
 
       <div className="flex-1" />
 
+      <ProxyChip onOpenPanel={onOpenPanel} />
       <RemoteChip />
 
       {file && (

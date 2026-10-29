@@ -24,6 +24,7 @@ export interface Settings {
   language: Language;
 
   theme: ThemeId;
+  followSystemTheme: boolean;
   fontSize: number;
   tabSize: number;
   useTabs: boolean;
@@ -48,6 +49,7 @@ export interface Settings {
 export const DEFAULTS: Settings = {
   language: "en",
   theme: "default",
+  followSystemTheme: false,
   fontSize: 13,
   tabSize: 2,
   useTabs: false,
@@ -155,9 +157,22 @@ export const useSettings = create<SettingsState>((set, get) => ({
 }));
 
 export function applyTheme(): void {
-  const { theme } = useSettings.getState();
-  if (theme === BASE_THEME) delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = theme;
+  const { theme, followSystemTheme } = useSettings.getState();
+  let activeTheme = theme;
+  if (followSystemTheme && typeof window !== "undefined") {
+    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    activeTheme = isDark ? (theme || "default") : BASE_THEME;
+  }
+  if (activeTheme === BASE_THEME) delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = activeTheme;
+}
+
+if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (useSettings.getState().followSystemTheme) {
+      applyTheme();
+    }
+  });
 }
 
 export function applySyntaxPalette(): void {

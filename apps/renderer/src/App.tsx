@@ -191,7 +191,7 @@ export default function App() {
 
   const hasFileTab = useEditor((state) =>
     state.tabs.some(
-      (tab) => tab.kind === "file" || tab.kind === "catcher" || tab.kind === "pitcher" || tab.kind === "browser",
+      (tab) => tab.kind === "file" || tab.kind === "catcher" || tab.kind === "pitcher" || tab.kind === "browser" || tab.kind === "scratchpad",
     ),
   );
   const closeTab = useEditor((state) => state.closeTab);
@@ -694,6 +694,7 @@ export default function App() {
       { id: "view.catcher", title: "Catcher", group: "View", run: () => useEditor.getState().openCatcher() },
       { id: "view.pitcher", title: "Pitcher", group: "View", run: () => useEditor.getState().openPitcher() },
       { id: "view.browser", title: "Browser", group: "View", run: () => useEditor.getState().openBrowser() },
+      { id: "view.scratchpad", title: "Scratchpad", group: "View", key: "ctrl+alt+n", run: () => useEditor.getState().openScratchpad() },
       { id: "catcher.proxy", title: "Catcher: Proxy", group: "Catcher", run: () => useCatcher.getState().show("proxy") },
       { id: "catcher.target", title: "Catcher: Target (Site Map)", group: "Catcher", run: () => useCatcher.getState().show("target") },
       { id: "catcher.repeater", title: "Catcher: Repeater", group: "Catcher", run: () => useCatcher.getState().show("repeater") },

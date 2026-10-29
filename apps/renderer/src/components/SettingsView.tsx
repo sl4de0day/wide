@@ -307,6 +307,14 @@ export function SettingsView() {
             onChange={(next) => settings.set({ theme: next })}
           />
         </div>
+        <Row label="Follow system theme" hint="Automatically adapt when OS switches dark/light mode.">
+          <input
+            type="checkbox"
+            checked={settings.followSystemTheme}
+            onChange={(e) => settings.set({ followSystemTheme: e.target.checked })}
+            className="size-4 rounded accent-accent"
+          />
+        </Row>
 
         <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Keyboard Shortcuts")}</h2>
         <ShortcutsSection />

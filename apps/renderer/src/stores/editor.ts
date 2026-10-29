@@ -34,6 +34,8 @@ export const PITCHER_PATH = "wide://pitcher";
 
 export const CYBERCHEF_PATH = "wide://cyberchef";
 
+export const SCRATCHPAD_PATH = "wide://scratchpad";
+
 export const MD_PREVIEW_PATH = "wide://mdpreview/";
 
 export const REMOTE_PATH = "wide://remote/";
@@ -75,7 +77,7 @@ export interface FileTab {
 }
 
 export interface VirtualTab {
-  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview";
+  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview" | "scratchpad";
   path: string;
   name: string;
 }
@@ -156,6 +158,8 @@ interface EditorState {
   openPitcher(): void;
 
   openCyberchef(): void;
+
+  openScratchpad(): void;
 
   openMarkdownPreview(sourcePath: string, name: string): void;
   openExtension(id: string, name: string): void;
@@ -607,6 +611,19 @@ export const useEditor = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, { kind: "cyberchef", path: CYBERCHEF_PATH, name: "CyberChef" }],
         activePath: CYBERCHEF_PATH,
+        panes,
+      };
+    }),
+
+  openScratchpad: () =>
+    set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, SCRATCHPAD_PATH);
+      if (state.tabs.some((tab) => tab.path === SCRATCHPAD_PATH)) {
+        return { activePath: SCRATCHPAD_PATH, panes };
+      }
+      return {
+        tabs: [...state.tabs, { kind: "scratchpad", path: SCRATCHPAD_PATH, name: "Scratchpad" }],
+        activePath: SCRATCHPAD_PATH,
         panes,
       };
     }),
