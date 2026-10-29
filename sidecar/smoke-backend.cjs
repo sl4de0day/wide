@@ -4,8 +4,11 @@ const cp = require('node:child_process');
 const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 
+const os = require('node:os');
+const testConfigDir = process.env.XDG_CONFIG_HOME || path.join(os.tmpdir(), `wide-smoke-${process.pid}`);
 const child = cp.spawn(process.execPath, [path.join(__dirname, 'sidecar.cjs')], {
   stdio: ['pipe', 'pipe', 'inherit'],
+  env: { ...process.env, XDG_CONFIG_HOME: testConfigDir },
 });
 let buf = '';
 const replies = new Map();

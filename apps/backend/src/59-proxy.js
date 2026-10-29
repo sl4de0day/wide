@@ -1058,12 +1058,57 @@ async function caThumbprint() {
   return digest.digest().toHex().toUpperCase();
 }
 
+const NSS_DB_DIR = () => node_path.join(node_os.homedir(), ".pki", "nssdb");
+
+function runLinuxCommand(cmd, args, options = {}) {
+  return new Promise((resolve) => {
+    try {
+      const child = node_child_process.spawn(cmd, args, { timeout: 15000, ...options });
+      let stdout = "";
+      let stderr = "";
+      if (child.stdout) child.stdout.on("data", (d) => { stdout += d; });
+      if (child.stderr) child.stderr.on("data", (d) => { stderr += d; });
+      child.on("error", (err) => resolve({ ok: false, out: String((err && err.message) || err) }));
+      child.on("close", (code) => resolve({ ok: code === 0, out: `${stdout}\n${stderr}` }));
+      if (child.stdin) {
+        try { child.stdin.end(); } catch {}
+      }
+    } catch (e) {
+      resolve({ ok: false, out: String((e && e.message) || e) });
+    }
+  });
+}
+
+async function ensureNssDb() {
+  const dir = NSS_DB_DIR();
+  await promises.mkdir(dir, { recursive: true });
+  const cert9 = node_path.join(dir, "cert9.db");
+  try {
+    await promises.access(cert9);
+  } catch {
+    await runLinuxCommand("certutil", ["-d", `sql:${dir}`, "-N", "--empty-password"]);
+  }
+}
+
 async function caIsTrusted() {
-  if (process.platform !== "win32") return false;
-  const thumbprint = await caThumbprint();
-  const result = await runCertutil(["-user", "-store", "Root", thumbprint]);
-  if (!result.ok) return false;
-  return result.out.replace(/[^0-9a-fA-F]/g, "").toUpperCase().includes(thumbprint);
+  if (process.platform === "win32") {
+    const thumbprint = await caThumbprint();
+    const result = await runCertutil(["-user", "-store", "Root", thumbprint]);
+    if (!result.ok) return false;
+    return result.out.replace(/[^0-9a-fA-F]/g, "").toUpperCase().includes(thumbprint);
+  }
+  if (process.platform === "linux") {
+    try {
+      const nssCheck = await runLinuxCommand("certutil", ["-d", `sql:${NSS_DB_DIR()}`, "-L", "-n", "Wide CA"]);
+      if (nssCheck.ok) return true;
+    } catch {}
+    try {
+      const trustCheck = await runLinuxCommand("trust", ["list"]);
+      if (trustCheck.ok && /label:\s*Wide CA/i.test(trustCheck.out)) return true;
+    } catch {}
+    return false;
+  }
+  return false;
 }
 
 function certutilMessage(out) {
@@ -1489,7 +1534,7 @@ function registerProxyHandlers() {
     try {
       return {
         ok: true,
-        supported: process.platform === "win32",
+        supported: process.platform === "win32" || process.platform === "linux",
         thumbprint: await caThumbprint(),
         trusted: await caIsTrusted(),
       };
@@ -1501,15 +1546,65 @@ function registerProxyHandlers() {
   electron.ipcMain.handle("proxy:caTrust", async () => {
     const gate = await requireInstalled("proxy");
     if (gate) return gate;
-    if (process.platform !== "win32") {
-      return { ok: false, error: "Installing the CA automatically is only supported on Windows." };
+    if (process.platform !== "win32" && process.platform !== "linux") {
+      return { ok: false, error: "Installing the CA automatically is only supported on Windows and Linux." };
     }
     try {
       await loadOrMakeCa();
-      const result = await runCertutil(["-user", "-addstore", "Root", PROXY_CA_CERT()]);
       tlsErrorReported.clear();
-      if (!result.ok) return { ok: false, error: certutilMessage(result.out) };
-      return { ok: true, trusted: await caIsTrusted() };
+
+      if (process.platform === "win32") {
+        const result = await runCertutil(["-user", "-addstore", "Root", PROXY_CA_CERT()]);
+        if (!result.ok) return { ok: false, error: certutilMessage(result.out) };
+        return { ok: true, trusted: await caIsTrusted() };
+      }
+
+      if (process.platform === "linux") {
+        // 1. Kullanıcı NSS veritabanına ekle (Chromium, Chrome, Brave, Edge vb.)
+        try {
+          await ensureNssDb();
+          await runLinuxCommand("certutil", [
+            "-d",
+            `sql:${NSS_DB_DIR()}`,
+            "-A",
+            "-t",
+            "C,,",
+            "-n",
+            "Wide CA",
+            "-i",
+            PROXY_CA_CERT(),
+          ]);
+        } catch {}
+
+        // 2. Firefox kullanıcı profillerine ekle
+        try {
+          const ffDir = node_path.join(node_os.homedir(), ".mozilla", "firefox");
+          const entries = await promises.readdir(ffDir, { withFileTypes: true }).catch(() => []);
+          for (const ent of entries) {
+            if (ent.isDirectory() && (ent.name.includes(".default") || ent.name.includes(".release"))) {
+              const pDir = node_path.join(ffDir, ent.name);
+              await runLinuxCommand("certutil", [
+                "-d",
+                `sql:${pDir}`,
+                "-A",
+                "-t",
+                "C,,",
+                "-n",
+                "Wide CA",
+                "-i",
+                PROXY_CA_CERT(),
+              ]);
+            }
+          }
+        } catch {}
+
+        // 3. Sistem trust anchor (p11-kit)
+        try {
+          await runLinuxCommand("trust", ["anchor", "--store", PROXY_CA_CERT()]);
+        } catch {}
+
+        return { ok: true, trusted: await caIsTrusted() };
+      }
     } catch (error) {
       return { ok: false, error: String((error && error.message) || error) };
     }
@@ -1518,15 +1613,44 @@ function registerProxyHandlers() {
   electron.ipcMain.handle("proxy:caUntrust", async () => {
     const gate = await requireInstalled("proxy");
     if (gate) return gate;
-    if (process.platform !== "win32") {
-      return { ok: false, error: "Removing the CA automatically is only supported on Windows." };
+    if (process.platform !== "win32" && process.platform !== "linux") {
+      return { ok: false, error: "Removing the CA automatically is only supported on Windows and Linux." };
     }
     try {
-      const thumbprint = await caThumbprint();
-      const result = await runCertutil(["-user", "-delstore", "Root", thumbprint]);
       tlsErrorReported.clear();
-      if (!result.ok) return { ok: false, error: certutilMessage(result.out) };
-      return { ok: true, trusted: await caIsTrusted() };
+
+      if (process.platform === "win32") {
+        const thumbprint = await caThumbprint();
+        const result = await runCertutil(["-user", "-delstore", "Root", thumbprint]);
+        if (!result.ok) return { ok: false, error: certutilMessage(result.out) };
+        return { ok: true, trusted: await caIsTrusted() };
+      }
+
+      if (process.platform === "linux") {
+        // 1. NSS veritabanından kaldır
+        try {
+          await runLinuxCommand("certutil", ["-d", `sql:${NSS_DB_DIR()}`, "-D", "-n", "Wide CA"]);
+        } catch {}
+
+        // 2. Firefox profillerinden kaldır
+        try {
+          const ffDir = node_path.join(node_os.homedir(), ".mozilla", "firefox");
+          const entries = await promises.readdir(ffDir, { withFileTypes: true }).catch(() => []);
+          for (const ent of entries) {
+            if (ent.isDirectory() && (ent.name.includes(".default") || ent.name.includes(".release"))) {
+              const pDir = node_path.join(ffDir, ent.name);
+              await runLinuxCommand("certutil", ["-d", `sql:${pDir}`, "-D", "-n", "Wide CA"]);
+            }
+          }
+        } catch {}
+
+        // 3. trust anchor'dan kaldır
+        try {
+          await runLinuxCommand("trust", ["anchor", "--remove", PROXY_CA_CERT()]);
+        } catch {}
+
+        return { ok: true, trusted: await caIsTrusted() };
+      }
     } catch (error) {
       return { ok: false, error: String((error && error.message) || error) };
     }

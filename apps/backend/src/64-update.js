@@ -4,6 +4,37 @@ const WIDE_ASSET_RE = /Wide-Setup-.*\.exe$/i;
 const WIDE_SUMS_RE = /^SHA256SUMS(\.txt)?$/i;
 const WIDE_MAX_ATTEMPTS = 2;
 
+function findReleaseAsset(assets) {
+  if (!Array.isArray(assets)) return null;
+  if (process.platform === "win32") {
+    return assets.find((a) => a && typeof a.name === "string" && WIDE_ASSET_RE.test(a.name));
+  }
+  const valid = assets.filter((a) => a && typeof a.name === "string");
+  if (process.env.APPIMAGE) {
+    const ai = valid.find((a) => /\.AppImage$/i.test(a.name));
+    if (ai) return ai;
+  }
+  if (node_fs.existsSync("/etc/arch-release")) {
+    const arch = valid.find((a) => /\.pkg\.tar\.zst$/i.test(a.name));
+    if (arch) return arch;
+  }
+  const ai = valid.find((a) => /\.AppImage$/i.test(a.name));
+  if (ai) return ai;
+  const tar = valid.find((a) => /linux-x64\.tar\.(zst|gz)$/i.test(a.name));
+  if (tar) return tar;
+  return valid.find((a) => /linux|AppImage|pkg\.tar/i.test(a.name)) || null;
+}
+
+function resolveStagedPath(version, assetName) {
+  if (assetName) {
+    return node_path.join(node_os.tmpdir(), assetName);
+  }
+  const ext = process.platform === "win32" ? ".exe" : ".tar.gz";
+  const base = process.platform === "win32" ? "Wide-Setup-" : "wide-";
+  const suffix = process.platform === "win32" ? "" : "-linux-x64";
+  return node_path.join(node_os.tmpdir(), `${base}${version || "latest"}${suffix}${ext}`);
+}
+
 function compareVersions(a, b) {
   const pa = String(a || "").replace(/^v/i, "").split(".");
   const pb = String(b || "").replace(/^v/i, "").split(".");
@@ -160,7 +191,7 @@ async function checkGithubRelease() {
   const latest = String(release.tag_name || release.name || "").replace(/^v/i, "");
   if (!latest) return { ok: false, error: "The latest release has no version tag.", current: WIDE_VERSION };
   const assets = Array.isArray(release.assets) ? release.assets : [];
-  const asset = assets.find((a) => a && typeof a.name === "string" && WIDE_ASSET_RE.test(a.name));
+  const asset = findReleaseAsset(assets);
   const sums = assets.find((a) => a && typeof a.name === "string" && WIDE_SUMS_RE.test(a.name));
   const settled = await settleAttempt(latest);
   return {
@@ -221,9 +252,12 @@ function registerUpdateHandlers() {
       };
     }
 
-    const target = node_path.join(node_os.tmpdir(), `Wide-Setup-${version || "latest"}.exe`);
+    const target = resolveStagedPath(version, assetName);
     const staged = await sha256File(target);
     if (staged && staged === expected) {
+      if (process.platform !== "win32" && (target.endsWith(".AppImage") || target.endsWith(".sh"))) {
+        await promises.chmod(target, 0o755).catch(() => {});
+      }
       await clearAttempt(version);
       return { ok: true, path: target, verified: true, cached: true };
     }
@@ -247,6 +281,10 @@ function registerUpdateHandlers() {
       return { ok: false, error: "The downloaded update did not match its published checksum." };
     }
 
+    if (process.platform !== "win32" && (target.endsWith(".AppImage") || target.endsWith(".sh"))) {
+      await promises.chmod(target, 0o755).catch(() => {});
+    }
+
     await clearAttempt(version);
     broadcast("update:progress", { phase: "download", state: "done", bytes: result.size });
     return { ok: true, path: target, bytes: result.size, verified: true };
@@ -258,7 +296,7 @@ function registerUpdateHandlers() {
     const assetName = typeof info.asset === "string" ? info.asset : "";
     const sumsUrl = typeof info.sums === "string" ? info.sums : "";
 
-    const installerPath = node_path.join(node_os.tmpdir(), `Wide-Setup-${version || "latest"}.exe`);
+    const installerPath = resolveStagedPath(version, assetName);
     const expected = await expectedHashFor(sumsUrl, assetName);
     if (!expected) {
       return { ok: false, error: "The update could not be verified, so it was not installed." };
@@ -277,9 +315,9 @@ function registerUpdateHandlers() {
     await noteAttempt(version);
     broadcast("update:progress", { phase: "install", state: "start" });
     try {
-      const reply = await electron.hostRequest("app:installUpdate", { path: installerPath });
+      const reply = await electron.hostRequest("app:installUpdate", { path: installerPath, version, assetName });
       if (!reply || reply.ok !== true) {
-        return { ok: false, error: "The installer could not be started." };
+        return { ok: false, error: reply?.error || "The installer could not be started." };
       }
     } catch (error) {
       return { ok: false, error: String((error && error.message) || error) };

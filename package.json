@@ -1,7 +1,7 @@
 {
   "name": "wide",
   "version": "1.220926",
-  "description": "Wide — a security-first IDE for the web stack. Native C++ (Win32 + WebView2) host, React renderer, Node backend sidecar. Electron-free.",
+  "description": "Wide — a security-first IDE for the web stack. Native C++ (Win32 + WebView2) host on Windows, lightweight Chromium host on Linux, React renderer, Node backend sidecar.",
   "private": true,
   "workspaces": [
     "apps/renderer"
@@ -10,26 +10,39 @@
     "setup": "npm install && npm run configure",
     "configure": "node scripts/cmake.cjs configure",
     "build": "npm run build:renderer && npm run build:backend && npm run build:host",
+    "build:linux": "npm run build:renderer && npm run build:backend",
     "build:renderer": "npm --prefix apps/renderer run build",
     "build:backend": "node apps/backend/build.cjs",
     "build:host": "node scripts/cmake.cjs build",
     "package": "npm run build && powershell -ExecutionPolicy Bypass -File native-host/package.ps1",
+    "package:linux": "npm run build:linux && node scripts/package-linux.cjs",
+    "package:arch": "npm run package:linux -- --dir-only && cd installer && makepkg -f && cp -f wide-ide-*.pkg.tar.zst ../dist/",
+    "package:deb": "node scripts/package-deb.cjs",
+    "package:rpm": "node scripts/package-rpm.cjs",
+    "package:appimage": "bash installer/build-appimage.sh",
+    "package:all": "npm run package:linux && npm run package:deb && npm run package:rpm && npm run package:arch && npm run package:appimage",
     "dev:renderer": "npm --prefix apps/renderer run dev",
     "typecheck": "npm --prefix apps/renderer run typecheck",
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "npm --prefix apps/renderer run test",
     "test:smoke": "node sidecar/smoke-backend.cjs",
     "start": "node scripts/start.cjs",
+    "start:linux": "electron scripts/host-linux.cjs",
+    "dev:linux": "electron scripts/host-linux.cjs --dev",
     "scan": "node scripts/scan.cjs",
     "pitcher": "node scripts/pitcher-run.cjs",
     "catcher": "node scripts/catcher-run.cjs"
   },
   "dependencies": {
-    "@lydell/node-pty": "^1.2.0-beta.14",
-    "prettier": "^3.9.6",
-    "typescript": "^5.9.3",
-    "node-forge": "^1.3.1",
     "@grpc/grpc-js": "^1.12.5",
-    "@grpc/proto-loader": "^0.7.13"
-  }
+    "@grpc/proto-loader": "^0.7.13",
+    "@lydell/node-pty": "^1.2.0-beta.14",
+    "node-forge": "^1.3.1",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "electron": "^41.7.1"
+  },
+  "main": "scripts/host-linux.cjs"
 }

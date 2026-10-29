@@ -5,3 +5,6 @@ out/
 native-host/build/
 release/
 *.log
+installer/pkg/
+installer/src/
+installer/*.pkg.tar.*

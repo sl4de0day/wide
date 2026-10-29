@@ -83,21 +83,57 @@ const MANAGER_BOOTSTRAP = {
   python: { package: "Python.Python.3.13", label: "Python" },
   dotnet: { package: "Microsoft.DotNet.SDK.9", label: ".NET SDK" },
   rustup: { package: "Rustlang.Rustup", label: "Rust" },
-  cs: { archive: { github: "coursier/coursier", asset: /^cs-x86_64-pc-win32\.zip$/, file: "cs.zip" }, bin: ["cs-x86_64-pc-win32.exe", "cs.exe"], rename: "cs.exe", label: "Coursier" },
+  cs: {
+    archive: process.platform === "win32"
+      ? { github: "coursier/coursier", asset: /^cs-x86_64-pc-win32\.zip$/, file: "cs.zip" }
+      : { github: "coursier/coursier", asset: /^cs-x86_64-pc-linux\.gz$/, file: "cs.gz" },
+    bin: process.platform === "win32" ? ["cs-x86_64-pc-win32.exe", "cs.exe"] : ["cs-x86_64-pc-linux", "cs"],
+    rename: process.platform === "win32" ? "cs.exe" : "cs",
+    label: "Coursier"
+  },
   java: { package: "EclipseAdoptium.Temurin.21.JDK", label: "Java" },
   erl: { package: "Erlang.ErlangOTP", label: "Erlang/OTP" },
-  elixir: { archive: { github: "elixir-lang/elixir", asset: /^elixir-otp-\d+\.zip$/, file: "elixir.zip" }, bin: ["elixir.bat"], requires: "erl", label: "Elixir" },
-
-
+  elixir: {
+    archive: { github: "elixir-lang/elixir", asset: /^elixir-otp-\d+\.zip$/, file: "elixir.zip" },
+    bin: process.platform === "win32" ? ["elixir.bat"] : ["elixir"],
+    requires: "erl",
+    label: "Elixir"
+  },
   ollama: { package: "Ollama.Ollama", label: "Ollama" },
 };
 
+const PACMAN_PACKAGES = {
+  gem: "ruby",
+  go: "go",
+  npm: "nodejs npm",
+  python: "python python-pip",
+  dotnet: "dotnet-sdk",
+  rustup: "rustup",
+  java: "jdk-openjdk",
+  erl: "erlang",
+  elixir: "elixir",
+  ollama: "ollama",
+};
 
+const APT_PACKAGES = {
+  gem: "ruby-full",
+  go: "golang-go",
+  npm: "nodejs npm",
+  python: "python3 python3-pip",
+  dotnet: "dotnet-sdk-8.0",
+  rustup: "rustup",
+  java: "default-jdk",
+  erl: "erlang",
+  elixir: "elixir",
+  ollama: "ollama",
+};
 
 const PROVISIONERS = {
   python: {
     manager: "python",
-    args: ["-m", "pip", "install", "--upgrade", "python-lsp-server"],
+    args: process.platform === "win32"
+      ? ["-m", "pip", "install", "--upgrade", "python-lsp-server"]
+      : ["-m", "pip", "install", "--upgrade", "--break-system-packages", "python-lsp-server"],
     provides: "pylsp",
     hint: ["Scripts"],
   },
@@ -142,7 +178,6 @@ const PROVISIONERS = {
     npmBin: true,
   },
   scala: {
-
     manager: "cs",
     args: ["install", "metals"],
     provides: "metals",
@@ -152,23 +187,20 @@ const PROVISIONERS = {
   erlang: {
     archive: {
       github: "erlang-ls/erlang_ls",
-      asset: /^erlang_ls-windows-.*\.tar\.gz$/,
+      asset: process.platform === "win32" ? /^erlang_ls-windows-.*\.tar\.gz$/ : /^erlang_ls-linux-.*\.tar\.gz$/,
       file: "erlang_ls.tar.gz",
-      binaries: ["erlang_ls.cmd", "erlang_ls.bat", "erlang_ls"],
+      binaries: ["erlang_ls", "erlang_ls.cmd", "erlang_ls.bat"],
     },
     provides: "erlang_ls",
     needs: "erl",
   },
   java: {
     archive: {
-
       url: "https://www.eclipse.org/downloads/download.php?file=/jdtls/snapshots/jdt-language-server-latest.tar.gz&r=1",
       file: "jdtls.tar.gz",
-
-      binaries: ["jdtls.bat", "jdtls"],
+      binaries: ["jdtls", "jdtls.bat"],
     },
     provides: "jdtls",
-
     needs: "java",
   },
   elixir: {
@@ -176,9 +208,9 @@ const PROVISIONERS = {
       github: "elixir-lsp/elixir-ls",
       asset: /^elixir-ls-v.*\.zip$/,
       file: "elixir-ls.zip",
-      binaries: ["language_server.bat", "language_server.sh"],
+      binaries: process.platform === "win32" ? ["language_server.bat", "language_server.sh"] : ["language_server.sh", "language_server.bat"],
     },
-    provides: "language_server.bat",
+    provides: process.platform === "win32" ? "language_server.bat" : "language_server.sh",
     needs: "elixir",
   },
   kotlin: {
@@ -186,13 +218,11 @@ const PROVISIONERS = {
       github: "fwcd/kotlin-language-server",
       asset: /^server\.zip$/,
       file: "kotlin-ls.zip",
-      binaries: ["kotlin-language-server.bat", "kotlin-language-server"],
+      binaries: ["kotlin-language-server", "kotlin-language-server.bat"],
     },
     provides: "kotlin-language-server",
     needs: "java",
   },
-
-
   vue: {
     manager: "npm",
     args: ["install", "-g", "@vue/language-server"],
@@ -205,8 +235,6 @@ const PROVISIONERS = {
     provides: "svelteserver",
     npmBin: true,
   },
-
-
   angular: {
     manager: "npm",
     args: ["install", "-g", "@angular/language-server", "@angular/language-service", "typescript"],
@@ -215,11 +243,16 @@ const PROVISIONERS = {
   },
 };
 
-
-
 const TOOL_PROVISIONERS = {
-
-  trufflehog: { kind: "asset", archive: { github: "trufflesecurity/trufflehog", asset: /^trufflehog_.*_windows_amd64\.tar\.gz$/, file: "trufflehog.tar.gz" }, find: /^trufflehog\.exe$/i, provides: "trufflehog", binOnPath: true },
+  trufflehog: {
+    kind: "asset",
+    archive: process.platform === "win32"
+      ? { github: "trufflesecurity/trufflehog", asset: /^trufflehog_.*_windows_amd64\.tar\.gz$/, file: "trufflehog.tar.gz" }
+      : { github: "trufflesecurity/trufflehog", asset: /^trufflehog_.*_linux_amd64\.tar\.gz$/, file: "trufflehog.tar.gz" },
+    find: process.platform === "win32" ? /^trufflehog\.exe$/i : /^trufflehog$/i,
+    provides: "trufflehog",
+    binOnPath: true
+  },
   nuclei: { manager: "go", args: ["install", "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"], provides: "nuclei", goBin: true },
   ffuf: { manager: "go", args: ["install", "github.com/ffuf/ffuf/v2@latest"], provides: "ffuf", goBin: true },
   katana: { manager: "go", args: ["install", "github.com/projectdiscovery/katana/cmd/katana@latest"], provides: "katana", goBin: true },
@@ -227,30 +260,39 @@ const TOOL_PROVISIONERS = {
   dalfox: { manager: "go", args: ["install", "github.com/hahwul/dalfox/v2@latest"], provides: "dalfox", goBin: true },
   subfinder: { manager: "go", args: ["install", "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"], provides: "subfinder", goBin: true },
   interactsh: { manager: "go", args: ["install", "github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"], provides: "interactsh-client", goBin: true },
-
-
-  sqlmap: { manager: "python", args: ["-m", "pip", "install", "--upgrade", "sqlmap"], provides: "sqlmap", hint: ["Scripts"] },
-  arjun: { manager: "python", args: ["-m", "pip", "install", "--upgrade", "arjun"], provides: "arjun", hint: ["Scripts"] },
-
-
-
-
-
-  "python-debugger": { manager: "python", args: ["-m", "pip", "install", "--upgrade", "debugpy"], provides: "debugpy", hint: ["Scripts"] },
+  sqlmap: {
+    manager: "python",
+    args: process.platform === "win32"
+      ? ["-m", "pip", "install", "--upgrade", "sqlmap"]
+      : ["-m", "pip", "install", "--upgrade", "--break-system-packages", "sqlmap"],
+    provides: "sqlmap",
+    hint: ["Scripts"]
+  },
+  arjun: {
+    manager: "python",
+    args: process.platform === "win32"
+      ? ["-m", "pip", "install", "--upgrade", "arjun"]
+      : ["-m", "pip", "install", "--upgrade", "--break-system-packages", "arjun"],
+    provides: "arjun",
+    hint: ["Scripts"]
+  },
+  "python-debugger": {
+    manager: "python",
+    args: process.platform === "win32"
+      ? ["-m", "pip", "install", "--upgrade", "debugpy"]
+      : ["-m", "pip", "install", "--upgrade", "--break-system-packages", "debugpy"],
+    provides: "debugpy",
+    hint: ["Scripts"]
+  },
   "go-debugger": { manager: "go", args: ["install", "github.com/go-delve/delve/cmd/dlv@latest"], provides: "dlv", goBin: true },
   "ruby-debugger": { manager: "gem", args: ["install", "debug"], provides: "rdbg" },
-
-
   curlconverter: { manager: "npm", args: ["install", "-g", "curlconverter"], provides: "curlconverter", npmBin: true },
   retirejs: { manager: "npm", args: ["install", "-g", "retire"], provides: "retire", npmBin: true },
-
-
   secretfinder: { kind: "git", repo: "https://github.com/m4ll0k/SecretFinder", launcher: "SecretFinder.py", requirements: "requirements.txt", label: "SecretFinder.py" },
   "jwt-tool": { kind: "git", repo: "https://github.com/ticarpi/jwt_tool", launcher: "jwt_tool.py", requirements: "requirements.txt", label: "jwt_tool.py" },
   commix: { kind: "git", repo: "https://github.com/commixproject/commix", launcher: "commix.py", label: "commix.py" },
   sublist3r: { kind: "git", repo: "https://github.com/aboul3la/Sublist3r", launcher: "sublist3r.py", requirements: "requirements.txt", label: "sublist3r.py" },
   seclists: { kind: "git", repo: "https://github.com/danielmiessler/SecLists", label: "SecLists" },
-
   cyberchef: {
     kind: "asset",
     archive: { github: "gchq/CyberChef", asset: /^CyberChef.*\.zip$/i, file: "cyberchef.zip" },
@@ -270,39 +312,55 @@ const TOOL_PROVISIONERS = {
 
 
 async function refreshPath() {
-  if (process.platform !== "win32") return false;
+  if (process.platform === "win32") {
+    const read = async (root, key) => {
+      const out = await readCommand("reg", ["query", root, "/v", key]);
+      if (!out) return "";
 
-  const read = async (root, key) => {
-    const out = await readCommand("reg", ["query", root, "/v", key]);
-    if (!out) return "";
+      const line = out.split(/\r?\n/).find((row) => /\s(REG_EXPAND_SZ|REG_SZ)\s/.test(row));
+      if (!line) return "";
+      return line.split(/\s(?:REG_EXPAND_SZ|REG_SZ)\s+/)[1]?.trim() ?? "";
+    };
 
-    const line = out.split(/\r?\n/).find((row) => /\s(REG_EXPAND_SZ|REG_SZ)\s/.test(row));
-    if (!line) return "";
-    return line.split(/\s(?:REG_EXPAND_SZ|REG_SZ)\s+/)[1]?.trim() ?? "";
-  };
+    const [machine, user] = await Promise.all([
+      read("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "Path"),
+      read("HKCU\\Environment", "Path"),
+    ]);
+    if (!machine && !user) return false;
 
-  const [machine, user] = await Promise.all([
-    read("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", "Path"),
-    read("HKCU\\Environment", "Path"),
-  ]);
-  if (!machine && !user) return false;
+    const expand = (value) =>
+      value.replace(/%([^%]+)%/g, (whole, name) => process.env[name] ?? whole);
 
-
-
-  const expand = (value) =>
-    value.replace(/%([^%]+)%/g, (whole, name) => process.env[name] ?? whole);
-
-  const seen = new Set();
-  const merged = [];
-  for (const part of `${expand(machine)};${expand(user)};${process.env.PATH ?? ""}`.split(";")) {
-    const dir = part.trim().replace(/[\\/]+$/, "");
-    if (!dir) continue;
-    const key = dir.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(dir);
+    const seen = new Set();
+    const merged = [];
+    for (const part of `${expand(machine)};${expand(user)};${process.env.PATH ?? ""}`.split(";")) {
+      const dir = part.trim().replace(/[\\/]+$/, "");
+      if (!dir) continue;
+      const key = dir.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(dir);
+    }
+    process.env.PATH = merged.join(";");
+    return true;
   }
-  process.env.PATH = merged.join(";");
+
+  // Linux: ensure user-space binary directories are in process.env.PATH
+  const home = electron.app.getPath("home");
+  const candidates = [
+    node_path.join(home, ".local", "bin"),
+    node_path.join(home, ".cargo", "bin"),
+    node_path.join(home, "go", "bin"),
+    node_path.join(home, ".dotnet", "tools"),
+  ];
+  for (const dir of candidates) {
+    try {
+      await promises.access(dir);
+      prependPath(dir);
+    } catch {
+      void 0;
+    }
+  }
   return true;
 }
 
@@ -446,11 +504,16 @@ function readCommand(command, args) {
 async function extraBinDirs(spec) {
   const dirs = [];
   const home = electron.app.getPath("home");
+  if (process.platform !== "win32") {
+    dirs.push(node_path.join(home, ".local", "bin"));
+    dirs.push(node_path.join(home, ".cargo", "bin"));
+  }
   if (spec.goBin) {
     const gopath = await readCommand("go", ["env", "GOPATH"]);
     if (gopath) dirs.push(node_path.join(gopath, "bin"));
     const gobin = await readCommand("go", ["env", "GOBIN"]);
     if (gobin) dirs.push(gobin);
+    dirs.push(node_path.join(home, "go", "bin"));
   }
   if (spec.npmBin) {
     const prefix = await readCommand("npm", ["prefix", "-g"]);
@@ -653,6 +716,9 @@ async function installArchive(id, spec, track = null) {
 
   const binary = await findUnder(dir, archive.binaries);
   if (!binary) return { ok: false, detail: "The archive unpacked but the launcher was not in it." };
+  if (process.platform !== "win32") {
+    await promises.chmod(binary, 0o755).catch(() => {});
+  }
   return { ok: true, path: binary };
 }
 
@@ -781,6 +847,9 @@ async function installWebAsset(id, spec, track = null) {
   if (spec.find) {
     const found = await findFileMatching(dir, spec.find);
     if (!found) return { ok: false, detail: "The download unpacked but the expected file was not in it." };
+    if (process.platform !== "win32") {
+      await promises.chmod(found, 0o755).catch(() => {});
+    }
     return { ok: true, path: found };
   }
   return { ok: true, path: dir };
@@ -871,6 +940,9 @@ async function bootstrapArchive(manager, bootstrap, track = null) {
       void 0;
     }
   }
+  if (process.platform !== "win32") {
+    await promises.chmod(binPath, 0o755).catch(() => {});
+  }
   await rememberBinDir(node_path.dirname(binPath));
   return { ok: true, path: binPath };
 }
@@ -886,27 +958,89 @@ async function bootstrapManager(manager, track = null) {
 
   if (bootstrap.archive) return bootstrapArchive(manager, bootstrap, track);
 
-  if (!(await commandExists("winget"))) {
-    return { ok: false, detail: "winget is not on this machine." };
+  if (process.platform === "win32") {
+    if (!(await commandExists("winget"))) {
+      return { ok: false, detail: "winget is not on this machine." };
+    }
+    const run = await runManager("winget", [
+      "install",
+      "--id",
+      bootstrap.package,
+      "--exact",
+      "--silent",
+      "--accept-package-agreements",
+      "--accept-source-agreements",
+      "--disable-interactivity",
+    ], { track });
+    if (!run.ok) return run;
+
+    await refreshPath();
+    const at = await commandExists(manager);
+    return at
+      ? { ok: true, path: at }
+      : { ok: false, toolchain: bootstrap.label, detail: run.detail ?? "" };
   }
-  const run = await runManager("winget", [
-    "install",
-    "--id",
-    bootstrap.package,
-    "--exact",
-    "--silent",
-    "--accept-package-agreements",
-    "--accept-source-agreements",
-    "--disable-interactivity",
-  ], { track });
-  if (!run.ok) return run;
 
+  // Linux package managers and user-space bootstrappers
+  if (manager === "rustup") {
+    const curl = await commandExists("curl");
+    const sh = await commandExists("sh");
+    if (curl && sh) {
+      const run = await runManager("sh", ["-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"], { track });
+      if (run.ok) {
+        await refreshPath();
+        const at = await commandExists("rustup");
+        if (at) return { ok: true, path: at };
+      }
+    }
+  }
 
-  await refreshPath();
-  const at = await commandExists(manager);
-  return at
-    ? { ok: true, path: at }
-    : { ok: false, toolchain: bootstrap.label, detail: run.detail ?? "" };
+  const isArch = (await commandExists("pacman")) || node_fs.existsSync("/etc/arch-release");
+  const isDebian = (await commandExists("apt")) || node_fs.existsSync("/etc/debian_version");
+
+  const pkgName = isArch ? PACMAN_PACKAGES[manager] : isDebian ? APT_PACKAGES[manager] : null;
+
+  if (isArch && pkgName) {
+    const pkexec = await commandExists("pkexec");
+    if (pkexec) {
+      const args = ["pacman", "-S", "--noconfirm", ...pkgName.split(/\s+/)];
+      const run = await runManager("pkexec", args, { track });
+      if (run.ok) {
+        await refreshPath();
+        const at = await commandExists(manager);
+        if (at) return { ok: true, path: at };
+      }
+    }
+    return {
+      ok: false,
+      toolchain: bootstrap.label,
+      detail: `Please install ${bootstrap.label} using: sudo pacman -S ${pkgName}`,
+    };
+  }
+
+  if (isDebian && pkgName) {
+    const pkexec = await commandExists("pkexec");
+    if (pkexec) {
+      const args = ["apt", "install", "-y", ...pkgName.split(/\s+/)];
+      const run = await runManager("pkexec", args, { track });
+      if (run.ok) {
+        await refreshPath();
+        const at = await commandExists(manager);
+        if (at) return { ok: true, path: at };
+      }
+    }
+    return {
+      ok: false,
+      toolchain: bootstrap.label,
+      detail: `Please install ${bootstrap.label} using: sudo apt install -y ${pkgName}`,
+    };
+  }
+
+  return {
+    ok: false,
+    toolchain: bootstrap.label,
+    detail: `Please install ${bootstrap.label} using your Linux package manager.`,
+  };
 }
 
 function registerPrepareHandlers() {
@@ -1015,7 +1149,10 @@ async function prepareTool(id, spec, track) {
         }
       }
       const req = node_path.join(dir, spec.requirements);
-      await runManager("python", ["-m", "pip", "install", "-r", req], { track });
+      const pipArgs = process.platform === "win32"
+        ? ["-m", "pip", "install", "-r", req]
+        : ["-m", "pip", "install", "--break-system-packages", "-r", req];
+      await runManager("python", pipArgs, { track });
       if (stopped()) return cancelled;
     }
     return remember("installed", launcher);
@@ -1089,9 +1226,11 @@ async function prepareServer(id, track) {
     };
 
     if (!spec) {
-
-
-      return fail("manual", { detail: "There is no Windows build of this server to install." });
+      return fail("manual", {
+        detail: process.platform === "win32"
+          ? "There is no Windows build of this server to install."
+          : "There is no automated installer for this server on Linux.",
+      });
     }
 
 

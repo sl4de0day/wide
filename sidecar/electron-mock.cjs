@@ -310,7 +310,10 @@ function portableRoot() {
 
 function userDataDir() {
   const root = portableRoot();
-  const dir = root ? path.join(root, 'data') : path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'wide');
+  const base = process.platform === 'win32'
+    ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
+    : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'));
+  const dir = root ? path.join(root, 'data') : path.join(base, 'wide');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return dir;
 }
@@ -340,7 +343,7 @@ const app = {
   getPath(name) {
     switch (name) {
       case 'userData': return userDataDir();
-      case 'appData': return process.env.APPDATA || userDataDir();
+      case 'appData': return process.env.APPDATA || (process.platform === 'win32' ? path.join(os.homedir(), 'AppData', 'Roaming') : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config')));
       case 'temp': return os.tmpdir();
       case 'home': return os.homedir();
       case 'exe': return process.execPath;

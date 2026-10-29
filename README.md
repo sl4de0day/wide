@@ -13,7 +13,10 @@
 
 **Wide is an IDE that unifies web development and web security in a single ecosystem. It detects vulnerabilities in real time as you code, enabling secure development from line one, while providing built-in tools to execute full-scale, professional web penetration tests. Whether you are a web pentester, bug bounty hunter, or web developer, Wide is the only tool you need.**
 
-Wide is a native Windows application: a C++/WebView2 host, a React renderer, and a Node backend sidecar. No Electron.
+Wide is a high-performance cross-platform application designed for speed and minimal resource usage:
+- **Windows:** Native C++ (Win32 + WebView2) host — completely Electron-free.
+- **Linux:** Lightweight Wayland/X11 host running on a dedicated Chromium runtime, offering full Chrome DevTools Protocol (CDP) support, NSS certificate trust, and multi-distro packaging.
+- **Core Engine:** High-speed React renderer paired with a multi-threaded Node.js backend sidecar.
 
 ## Features
 
@@ -21,34 +24,74 @@ Wide is a native Windows application: a C++/WebView2 host, a React renderer, and
 - **Real-time security analysis.** An inspection engine flags likely vulnerabilities as you type — injection, XSS sinks, weak crypto, hardcoded secrets, and cross-file taint flow — each with a fix on hover.
 - **Catcher.** A built-in web-security workbench: intercepting proxy, target site map, repeater, intruder, active scanner, OAST collaborator, and sequencer.
 - **Pitcher.** A complete API client: collections and environments, Bearer / Basic / API-key / OAuth 2.0 / Digest / AWS SigV4 auth, `pm.*` scripting and tests, a collection runner, and REST, GraphQL, WebSocket, SSE, and gRPC.
-- **Pentest browser.** A built-in WebView2 browser wired into Catcher for proxying and inspection.
+- **Pentest browser.** A built-in browser wired into Catcher for proxying and inspection (WebView2 on Windows, embedded Chromium on Linux).
 - **Extensions.** Language servers and security tools installed from a built-in marketplace.
 
 ## Installation
 
+### Windows
 Download the latest `Wide-Setup-*.exe` from the [Releases](https://github.com/sl4de0day/wide/releases/latest) page and run it. Wide installs per user, so no administrator rights are required, and it updates itself automatically from GitHub Releases — you never download a new installer by hand.
 
 The [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) is required; the installer provisions it if it is missing.
 
+### Linux
+Download the package corresponding to your Linux distribution from [Releases](https://github.com/sl4de0day/wide/releases/latest):
+- **Universal (.AppImage):**
+  ```bash
+  chmod +x Wide-*-x86_64.AppImage
+  ./Wide-*-x86_64.AppImage
+  ```
+- **Ubuntu / Debian / Kali / Mint (.deb):**
+  ```bash
+  sudo apt install ./wide-ide_*_amd64.deb
+  ```
+- **Fedora / RHEL / openSUSE (.rpm):**
+  ```bash
+  sudo dnf install ./wide-ide-*.rpm
+  ```
+- **Arch Linux / Manjaro (.pkg.tar.zst):**
+  ```bash
+  sudo pacman -U ./wide-ide-*.pkg.tar.zst
+  ```
+
+Wide on Linux features automatic updates, native Wayland support, and auto-trust integration for the Catcher CA certificate across NSS, Firefox, and system trust stores.
+
 ## Building from source
 
+### Windows
 Requirements:
-
 - Windows (x64)
 - Node.js 18 or newer
 - Visual Studio 2022 with the "Desktop development with C++" workload
 - CMake 3.21 or newer
-- Internet access at configure time (the C++ host fetches the WebView2 SDK, WIL, and nlohmann/json)
 
-```
+```bash
 npm run setup
 npm run package
 ```
-
-The packaged application is written to `dist/wide`. To produce the installer, install [Inno Setup](https://jrsoftware.org/isinfo.php) and run:
-
-```
+To produce the installer, install [Inno Setup](https://jrsoftware.org/isinfo.php) and run:
+```bash
 iscc installer/wide.iss
+```
+
+### Linux
+Requirements:
+- Linux (x86_64)
+- Node.js 18 or newer
+- npm
+
+```bash
+npm install
+npm run build:linux
+
+# Produce specific package format:
+npm run package:appimage   # Generates .AppImage
+npm run package:deb        # Generates .deb
+npm run package:rpm        # Generates .rpm
+npm run package:arch       # Generates Arch Linux .pkg.tar.zst
+
+# Or produce all formats at once:
+npm run package:all
 ```
 
 ## Note
