@@ -1247,7 +1247,7 @@ function PlusMenu({
                   onClick={() => setMode("files")}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                 >
-                  <FileCode className="size-4 text-accent" strokeWidth={1.75} />
+                  <FileCode className="size-4 text-fg-dim" strokeWidth={1.75} />
                   <span>{t("Files")}</span>
                 </button>
                 <button
@@ -1255,7 +1255,7 @@ function PlusMenu({
                   onClick={() => void handlePickFolder()}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                 >
-                  <FolderOpen className="size-4 text-accent" strokeWidth={1.75} />
+                  <FolderOpen className="size-4 text-fg-dim" strokeWidth={1.75} />
                   <span>{t("Folder")}</span>
                 </button>
                 <button
@@ -1266,8 +1266,8 @@ function PlusMenu({
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                 >
-                  <AtSign className="size-4 text-accent" strokeWidth={1.75} />
-                  <span>{t("Mention (@)")}</span>
+                  <AtSign className="size-4 text-fg-dim" strokeWidth={1.75} />
+                  <span>{t("Mention")}</span>
                 </button>
                 <button
                   type="button"
@@ -1277,7 +1277,7 @@ function PlusMenu({
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                 >
-                  <ImagePlus className="size-4 text-accent" strokeWidth={1.75} />
+                  <ImagePlus className="size-4 text-fg-dim" strokeWidth={1.75} />
                   <span>{t("Attach image")}</span>
                 </button>
                 {onExport && (
@@ -1289,7 +1289,7 @@ function PlusMenu({
                     }}
                     className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                   >
-                    <Download className="size-4 text-accent" strokeWidth={1.75} />
+                    <Download className="size-4 text-fg-dim" strokeWidth={1.75} />
                     <span>{t("Export conversation as Markdown")}</span>
                   </button>
                 )}
@@ -1302,7 +1302,7 @@ function PlusMenu({
                     }}
                     className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                   >
-                    <RefreshCw className="size-4 text-accent" strokeWidth={1.75} />
+                    <RefreshCw className="size-4 text-fg-dim" strokeWidth={1.75} />
                     <span>{t("Compact chat")}</span>
                   </button>
                 )}
@@ -1315,8 +1315,8 @@ function PlusMenu({
                     }}
                     className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                   >
-                    <Settings2 className="size-4 text-accent" strokeWidth={1.75} />
-                    <span>{t("Project AI Instructions (.wide/ai-instructions.md)")}</span>
+                    <Settings2 className="size-4 text-fg-dim" strokeWidth={1.75} />
+                    <span>{t("Project Instructions")}</span>
                   </button>
                 )}
               </div>
@@ -1342,7 +1342,7 @@ function PlusMenu({
                     type="button"
                     onClick={() => void handlePickFiles()}
                     title={t("Browse…")}
-                    className="text-[10px] text-accent hover:underline shrink-0"
+                    className="text-[10px] text-fg-dim hover:text-fg hover:underline shrink-0"
                   >
                     {t("Browse…")}
                   </button>
