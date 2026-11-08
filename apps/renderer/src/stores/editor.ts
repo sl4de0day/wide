@@ -143,6 +143,7 @@ interface EditorState {
   closeSplit(): void;
 
   lastFilePath: string | null;
+  clearLastFilePath(): void;
   cursor: Cursor;
   pendingReveal: { path: string; line: number; column: number; offset?: number } | null;
   pendingReplace: { path: string; content: string } | null;
@@ -806,6 +807,8 @@ export const useEditor = create<EditorState>((set, get) => ({
         state.tabs.find((tab) => tab.path === path)?.kind === "file" ? path : state.lastFilePath,
     })),
 
+  clearLastFilePath: () => set({ lastFilePath: null }),
+
   closeAll: () => {
     useDiagnostics.getState().reset();
     for (const tab of get().tabs) cleanupClosedTab(tab.path);
@@ -1017,6 +1020,9 @@ export const useEditor = create<EditorState>((set, get) => ({
 
       const { useEngine } = await import("./engine");
       useEngine.getState().noticeSave(tab.path);
+      if (tab.path.includes("ai-instructions")) {
+        void import("./ai").then((m) => m.forgetProjectInstructions());
+      }
     } catch (error) {
       console.error(`Could not save file: ${tab.path}`, error);
     }

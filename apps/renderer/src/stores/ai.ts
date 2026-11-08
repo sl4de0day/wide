@@ -17,6 +17,7 @@ import {
 import { t } from "@/lib/i18n";
 import { basename } from "@/lib/utils";
 import { AI_CHAT_PATH, useEditor } from "./editor";
+import { useCatcher, type CatcherTool } from "./catcher";
 import { applyAiEdit, useAiEdits } from "./aiEdits";
 import { useWorkspace } from "./workspace";
 import { useSettings } from "./settings";
@@ -34,6 +35,8 @@ export interface AiToolStep {
   oldContent?: string;
   newContent?: string;
   existed?: boolean;
+  added?: number;
+  removed?: number;
 }
 
 export interface AiTurn {
@@ -156,10 +159,11 @@ interface AiState {
   setConfig(patch: Partial<AiConfig>): Promise<void>;
   setKey(provider: string, key: string): Promise<boolean>;
 
-  ask(sessionId: string, text: string): Promise<void>;
+  ask(sessionId: string, text: string, activeFile?: string | null): Promise<void>;
   regenerate(sessionId: string): Promise<void>;
   stop(sessionId: string): Promise<void>;
   compactChat(sessionId: string): Promise<void>;
+  undoToTurn(sessionId: string, targetTurnId: string): Promise<void>;
 
   setQuery(query: string): void;
   search(): Promise<void>;
@@ -214,9 +218,9 @@ export function forgetProjectInstructions(projectRoot?: string): void {
   else instructionCache.clear();
 }
 
-function systemPrompt(instructions = "", effort: AiEffort = "fast"): string {
+function systemPrompt(instructions = "", effort: AiEffort = "fast", activeFile?: string | null): string {
   const workspace = useWorkspace.getState();
-  const open = useEditor.getState().lastFilePath ?? "";
+  const open = activeFile !== undefined ? (activeFile ?? "") : (useEditor.getState().lastFilePath ?? "");
   const language = useSettings.getState().language;
 
   const LANGUAGE_NAMES: Record<string, string> = {
@@ -224,19 +228,37 @@ function systemPrompt(instructions = "", effort: AiEffort = "fast"): string {
     it: "Italian", ja: "Japanese", ko: "Korean",
   };
   const langLine = language !== "en" && LANGUAGE_NAMES[language]
-    ? `Always respond in ${LANGUAGE_NAMES[language]}.`
+    ? `Always respond in ${LANGUAGE_NAMES[language]}. Tüm yanıtlarda, teknik açıklamalarda ve özetlerde daima ${LANGUAGE_NAMES[language]} dilini kullan.`
+    : "";
+
+  const openTabs = useEditor.getState().tabs
+    .map((tab) => (tab.path ? basename(tab.path) : tab.name))
+    .filter(Boolean)
+    .slice(0, 20);
+
+  const openTabsLine = openTabs.length > 0
+    ? `Currently open tabs in the editor: ${openTabs.join(", ")}.`
     : "";
 
   const effortLine =
     effort === "thinking"
-      ? "Effort level: THINKING. Think carefully and thoroughly before acting. Use tools to inspect the codebase, verify assumptions, write or edit project files directly, and provide a complete response."
+      ? "Effort level: THINKING. Think carefully and thoroughly before acting. Enclose your reasoning in <think>...</think>, use tools to inspect the codebase, verify assumptions, write or edit project files directly, and provide a complete response."
       : "Effort level: FAST. Act directly and efficiently. Immediately use your tools (write_file, edit_file, read_file, list_dir, search, run_command) to create or modify project files as requested, and keep your chat summary brief.";
 
   return [
-    "You are Wide Agent, an autonomous AI coding agent built directly into Wide IDE.",
-    workspace.root ? `The open project workspace is at ${workspace.root}.` : "No project is open.",
-    open ? `The file currently open in the editor is ${open}.` : "",
+    "You are Wide Agent, an autonomous AI software engineering and security agent built directly into Wide IDE.",
+    "Wide IDE is a specialized development environment unifying full-stack coding with web application security tools (Pitcher API client, Catcher web proxy, Security AST Scanner, CyberChef/Decoder, Git, and Terminal).",
+    workspace.root ? `The open project workspace is at: ${workspace.root}` : "No project workspace is currently open.",
+    open ? `The file currently active in the editor is: ${open}` : "",
+    openTabsLine,
     "You are an action-oriented coding agent, NOT a passive chatbot.",
+    "You have full programmatic control over Wide's built-in tools via native tool calls:",
+    "- Pitcher: Dispatch HTTP requests with `send_http_request` and reveal the UI with `open_tool_tab({ tab: 'pitcher' })`.",
+    "- Catcher: Control the intercepting proxy, check status, view captured traffic, and toggle intercept with `manage_catcher` and reveal with `open_tool_tab({ tab: 'catcher', subtool: 'proxy' })`.",
+    "- Security: Trigger AST vulnerability scans with `run_security_scan` and CVE audits with `check_dependencies`.",
+    "- Decoder: Encode/decode/hash data with `transform_data` and inspect errors with `get_diagnostics`.",
+    "NEVER tell the user 'I cannot click Pitcher/Catcher in the UI' or 'Pitcher/Catcher'ı doğrudan UI üzerinden tıklayamam'. You DO NOT need to click UI buttons; you operate them directly via your tools!",
+    "When the user asks you to write code, test an endpoint, or demonstrate Pitcher and Catcher, actively invoke your tools (send_http_request, manage_catcher, open_tool_tab, write_file, edit_file) instead of giving passive instructions.",
     "When the user asks you to write a script, create a file, implement code, fix a bug, or modify the project, DO NOT write the code in the chat window as a message. You MUST use write_file or edit_file to create or modify the actual files in the project workspace.",
     "If the user asks to write a script or code without naming a file, choose a sensible filename in the project and call write_file to create it on disk.",
     "When modifying an existing file, read it first with read_file, then apply the change with edit_file or write_file.",
@@ -472,7 +494,7 @@ export const useAi = create<AiState>((set, get) => ({
       },
     })),
 
-  ask: async (sessionId, text) => {
+  ask: async (sessionId, text, activeFile) => {
     const message = text.trim();
     const chat = get().chats[sessionId];
     if (!message || !chat || chat.activeTurn) return;
@@ -541,6 +563,14 @@ export const useAi = create<AiState>((set, get) => ({
       })),
     }));
 
+    const editorState = useEditor.getState();
+    const openTabs = (editorState.tabs || []).map((t) => ({
+      name: t.name,
+      path: t.path,
+      kind: t.kind,
+      active: t.path === editorState.activePath,
+    }));
+
     const reply = await bridge
       .aiSend({
         id,
@@ -548,8 +578,9 @@ export const useAi = create<AiState>((set, get) => ({
         provider,
         model,
         messages: providerMessages,
-        system: systemPrompt(await projectInstructions(projectRoot), get().effort),
+        system: systemPrompt(await projectInstructions(projectRoot), get().effort, activeFile),
         effort: get().effort,
+        openTabs,
       })
       .catch(
         (failure: unknown): Ok<{ answered?: boolean }> => ({
@@ -699,6 +730,96 @@ export const useAi = create<AiState>((set, get) => ({
     toast.success(t("Context compacted successfully."));
   },
 
+  undoToTurn: async (sessionId: string, targetTurnId: string) => {
+    const chat = get().chats[sessionId];
+    if (!chat || chat.activeTurn || !chat.loaded) return;
+
+    const targetIndex = chat.turns.findIndex((t) => t.id === targetTurnId);
+    if (targetIndex < 0) return;
+
+    const discardedTurns = chat.turns.slice(targetIndex);
+    if (discardedTurns.length === 0) return;
+
+    const projectRoot = chat.root || useWorkspace.getState().root || "";
+
+    const fileRollbackMap = new Map<string, { path: string; root: string; existed: boolean; oldContent: string }>();
+
+    for (const turn of discardedTurns) {
+      for (const step of turn.steps) {
+        let path = step.filePath;
+        if (!path && typeof step.input === "object" && step.input && "path" in step.input) {
+          const rawPath = String((step.input as { path?: unknown }).path || "").trim();
+          if (rawPath) {
+            path = rawPath.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(rawPath)
+              ? rawPath
+              : projectRoot
+                ? `${projectRoot.replace(/[/\\]$/, "")}/${rawPath}`
+                : rawPath;
+          }
+        }
+        if (!path) continue;
+
+        const isModifyingStep =
+          step.name === "write_file" ||
+          step.name === "edit_file" ||
+          step.name === "delete_file" ||
+          step.oldContent !== undefined ||
+          step.newContent !== undefined;
+
+        if (isModifyingStep && !fileRollbackMap.has(path)) {
+          fileRollbackMap.set(path, {
+            path,
+            root: projectRoot,
+            existed: step.existed !== false,
+            oldContent: step.oldContent ?? "",
+          });
+        }
+      }
+    }
+
+    for (const entry of fileRollbackMap.values()) {
+      try {
+        if (!entry.existed) {
+          await bridge.trash(entry.path).catch(() => {});
+          useEditor.getState().closeTab(entry.path);
+        } else {
+          await bridge.aiCommitFile(entry.root, entry.path, entry.oldContent).catch(async () => {
+            await bridge.writeFile(entry.path, entry.oldContent).catch(() => {});
+          });
+          const openTab = useEditor.getState().tabs.find((t) => t.path === entry.path);
+          if (openTab) {
+            useEditor.getState().replaceContent(entry.path, entry.oldContent);
+            void useEditor.getState().reloadFromDisk(entry.path);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to rollback file:", entry.path, err);
+      }
+    }
+
+    if (fileRollbackMap.size > 0) {
+      void useWorkspace.getState().refresh();
+    }
+
+    const keptTurns = chat.turns.slice(0, targetIndex);
+    const keptHistory = keptTurns
+      .filter((t) => t.text.trim().length > 0)
+      .map((t) => ({ role: t.role, content: t.text }));
+
+    set((state) => ({
+      chats: patchChat(state.chats, sessionId, (c) => ({
+        ...c,
+        turns: keptTurns,
+        history: keptHistory,
+        error: "",
+      })),
+    }));
+
+    void bridge.aiSaveSession(sessionId, projectRoot, keptHistory).catch(() => {});
+
+    toast.success(t("Rolled back changes and restored chat to this point."));
+  },
+
   setQuery: (query) => set({ query }),
 
   search: async () => {
@@ -809,8 +930,43 @@ export const useAi = create<AiState>((set, get) => ({
   clearOllamaError: () => set({ ollamaError: null }),
 }));
 
+export function openWideToolTab(tool: string, subtool?: string): void {
+  const norm = (tool || "").toLowerCase().trim();
+  if (norm === "pitcher") {
+    useEditor.getState().openPitcher();
+  } else if (norm === "browser") {
+    useEditor.getState().openBrowser();
+  } else if (norm === "cyberchef" || norm === "decoder") {
+    useEditor.getState().openCyberchef();
+  } else if (norm === "scratchpad") {
+    useEditor.getState().openScratchpad();
+  } else if (norm === "settings") {
+    useEditor.getState().openSettings();
+  } else if (
+    norm === "catcher" ||
+    norm === "scanner" ||
+    norm === "proxy" ||
+    norm === "repeater" ||
+    norm === "intruder" ||
+    norm === "target" ||
+    norm === "sequencer" ||
+    norm === "collaborator" ||
+    norm === "vault" ||
+    norm === "miner"
+  ) {
+    const catcherSub = (subtool || (norm !== "catcher" ? norm : "proxy")) as CatcherTool;
+    useCatcher.getState().show(catcherSub);
+  } else {
+    window.dispatchEvent(new CustomEvent("wide:open-panel", { detail: norm }));
+  }
+}
+
 export function subscribeAiEvents(): () => void {
   return bridge.onAiEvent((event: AiEvent) => {
+    if (event.type === "open_tool") {
+      openWideToolTab(event.tool, event.subtool);
+      return;
+    }
     if (event.type === "open") {
       void useEditor.getState().revealAt(event.path, event.line, 1);
       return;
@@ -848,6 +1004,8 @@ export function subscribeAiEvents(): () => void {
               };
             case "edit": {
               const steps = [...turn.steps];
+              const editAdded = typeof event.added === "number" ? event.added : undefined;
+              const editRemoved = typeof event.removed === "number" ? event.removed : undefined;
               for (let index = steps.length - 1; index >= 0; index -= 1) {
                 if ((steps[index].name === "write_file" || steps[index].name === "edit_file") && !steps[index].done) {
                   steps[index] = {
@@ -856,6 +1014,8 @@ export function subscribeAiEvents(): () => void {
                     oldContent: event.oldContent ?? "",
                     newContent: event.content,
                     existed: Boolean(event.existed),
+                    added: editAdded ?? steps[index].added,
+                    removed: editRemoved ?? steps[index].removed,
                   };
                   return { ...turn, steps };
                 }
@@ -868,6 +1028,8 @@ export function subscribeAiEvents(): () => void {
                   oldContent: event.oldContent ?? "",
                   newContent: event.content,
                   existed: Boolean(event.existed),
+                  added: editAdded ?? steps[lastIdx].added,
+                  removed: editRemoved ?? steps[lastIdx].removed,
                 };
               }
               return { ...turn, steps };

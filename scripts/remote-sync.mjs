@@ -83,7 +83,7 @@ run(
 );
 
 if (noInstall) {
-  console.log(`\n  ⚠ --no-install: skipping npm install. Run it yourself on the remote:`);
+  console.log(`\n  [WARN] --no-install: skipping npm install. Run it yourself on the remote:`);
   console.log(`    ssh ${host} "cd '${remote}' && npm install --omit=dev"`);
 } else {
   run(

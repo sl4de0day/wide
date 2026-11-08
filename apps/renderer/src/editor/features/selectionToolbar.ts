@@ -30,11 +30,20 @@ function parseSelectionForTraffic(raw: string) {
   };
 }
 
-function createBtn(label: string, icon: string, onClick: () => void, isAccent = false): HTMLButtonElement {
+const ICON_PITCHER =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
+const ICON_REPEATER =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>';
+const ICON_DECODE =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
+const ICON_ASK_AI =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>';
+
+function createBtn(label: string, iconSvg: string, onClick: () => void, isAccent = false): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = isAccent ? "cm-selection-btn cm-selection-btn-accent" : "cm-selection-btn";
-  btn.innerHTML = `<span style="font-size: 11px;">${icon}</span> <span>${label}</span>`;
+  btn.innerHTML = `<span class="cm-selection-icon">${iconSvg}</span><span>${label}</span>`;
   btn.addEventListener("mousedown", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -61,7 +70,7 @@ const selectionToolbarTheme = EditorView.baseTheme({
   ".cm-selection-btn": {
     display: "inline-flex",
     alignItems: "center",
-    gap: "4px",
+    gap: "5px",
     padding: "2px 6px",
     borderRadius: "4px",
     border: "none",
@@ -72,6 +81,19 @@ const selectionToolbarTheme = EditorView.baseTheme({
     fontWeight: "500",
     lineHeight: "1.4",
     transition: "background 0.1s, color 0.1s",
+  },
+  ".cm-selection-icon": {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "12px",
+    height: "12px",
+    flexShrink: "0",
+  },
+  ".cm-selection-icon svg": {
+    width: "12px",
+    height: "12px",
+    display: "block",
   },
   ".cm-selection-btn:hover": {
     background: "var(--hover)",
@@ -113,13 +135,13 @@ const selectionToolbarField = StateField.define<Tooltip | null>({
 
         if (isTraffic) {
           dom.appendChild(
-            createBtn("Pitcher", "⚡", () => {
+            createBtn("Pitcher", ICON_PITCHER, () => {
               const req = parseSelectionForTraffic(text);
               sendRouteToPitcher(req);
             }, true),
           );
           dom.appendChild(
-            createBtn("Repeater", "🔁", () => {
+            createBtn("Repeater", ICON_REPEATER, () => {
               const req = parseSelectionForTraffic(text);
               sendRouteToRepeater(req);
             }),
@@ -131,7 +153,7 @@ const selectionToolbarField = StateField.define<Tooltip | null>({
         }
 
         dom.appendChild(
-          createBtn("Decode", "🔤", () => {
+          createBtn("Decode", ICON_DECODE, () => {
             useDecoder.getState().openDecoder(text);
           }),
         );
@@ -141,7 +163,7 @@ const selectionToolbarField = StateField.define<Tooltip | null>({
         dom.appendChild(div2);
 
         dom.appendChild(
-          createBtn("Ask AI", "🤖", () => {
+          createBtn("Ask AI", ICON_ASK_AI, () => {
             void sendSelectionToChat();
           }),
         );

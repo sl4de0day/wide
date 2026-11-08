@@ -1,4 +1,9 @@
 export const TR: Record<string, string> = {
+  "Undo to this point": "Bu noktaya geri al",
+  "Undo to this point?": "Bu noktaya geri alınsın mı?",
+  "This will revert all file modifications and delete subsequent messages.": "Bu işlemden sonraki tüm dosya değişiklikleri eski haline getirilecek ve sonraki mesajlar silinecektir.",
+  "Rolled back changes and restored chat to this point.": "Değişiklikler geri alındı ve sohbet bu noktaya döndürüldü.",
+  "Undo": "Geri Al",
   "AI Analysis": "AI Analizi",
   "AI Fix": "AI Yaması",
   "AI Security Analysis": "AI Güvenlik Analizi",

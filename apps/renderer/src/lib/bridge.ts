@@ -655,7 +655,8 @@ export type AiEvent =
   | { id: string; type: "done" }
   | { id: string; type: "open"; path: string; line: number }
   | { id: string; type: "file_read"; root?: string; path: string; content: string }
-  | { id: string; type: "edit"; root?: string; path: string; oldContent?: string; content: string; existed?: boolean };
+  | { id: string; type: "edit"; root?: string; path: string; oldContent?: string; content: string; existed?: boolean; added?: number; removed?: number }
+  | { id: string; type: "open_tool"; tool: string; subtool?: string };
 
 
 export interface AiSessionMeta {
@@ -1292,6 +1293,7 @@ export interface HostApi {
     messages: AiMessage[];
     system: string;
     effort?: "fast" | "thinking";
+    openTabs?: Array<{ name: string; path?: string; kind?: string; active?: boolean }>;
   }): Promise<Ok<{ answered?: boolean }>>;
   aiStop(id: string): Promise<Ok<{ stopped?: boolean }>>;
 

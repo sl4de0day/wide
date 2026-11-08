@@ -20,6 +20,18 @@ const CLAUDE_DISALLOWED = [
 const CLAUDE_TOOL_MAX_BODY = 16 * 1024 * 1024;
 
 const claudeToolTurns = new Map();
+let wideBridgeGlobalToken = node_crypto.randomBytes(32).toString("hex");
+let wideActiveTurn = null;
+
+function aiRegisterTurnBridge(token, root, send) {
+  if (token) claudeToolTurns.set(token, { root: root ?? "", send });
+  wideActiveTurn = { root: root ?? "", send };
+}
+
+function aiUnregisterTurnBridge(token) {
+  if (token) claudeToolTurns.delete(token);
+  if (wideActiveTurn && (!token || claudeToolTurns.size === 0)) wideActiveTurn = null;
+}
 
 let claudeToolServer = null;
 let claudeToolStarting = null;
@@ -48,7 +60,8 @@ function claudeToolBridge() {
 
       if (request.method !== "POST" || request.url !== "/tool") return finish(404, {});
       const offered = String(request.headers.authorization ?? "");
-      const turn = offered.startsWith("Bearer ") ? claudeToolTurns.get(offered.slice(7)) : null;
+      const token = offered.startsWith("Bearer ") ? offered.slice(7) : "";
+      const turn = claudeToolTurns.get(token) || (token === wideBridgeGlobalToken ? wideActiveTurn : null) || wideActiveTurn;
       if (!turn) return finish(403, {});
 
       const decoder = new StringDecoder("utf8");
@@ -66,8 +79,8 @@ function claudeToolBridge() {
           return finish(400, { result: "That request was not valid JSON." });
         }
         try {
-
-          const result = await aiRunTool(turn.root, call.name ?? "", call.input ?? {}, turn.send);
+          const targetRoot = turn.root || call.root || "";
+          const result = await aiRunTool(targetRoot, call.name ?? "", call.input ?? {}, turn.send);
           finish(200, { result });
         } catch (error) {
           finish(200, { result: `That tool failed: ${String(error.message || error)}` });

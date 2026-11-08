@@ -10,8 +10,8 @@ export async function runScript(code: string, ctx: PmContext): Promise<ScriptOut
   const console = {
     log: (...args: unknown[]) => ctx.logs.push(args.map(fmt).join(" ")),
     info: (...args: unknown[]) => ctx.logs.push(args.map(fmt).join(" ")),
-    warn: (...args: unknown[]) => ctx.logs.push("⚠ " + args.map(fmt).join(" ")),
-    error: (...args: unknown[]) => ctx.logs.push("✖ " + args.map(fmt).join(" ")),
+    warn: (...args: unknown[]) => ctx.logs.push("[WARN] " + args.map(fmt).join(" ")),
+    error: (...args: unknown[]) => ctx.logs.push("[ERROR] " + args.map(fmt).join(" ")),
   };
 
   const tests = new Proxy(

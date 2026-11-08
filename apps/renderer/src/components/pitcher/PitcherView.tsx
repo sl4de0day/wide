@@ -1,4 +1,4 @@
-import { Code2, ChevronDown, ChevronRight, Cookie, Download, FolderPlus, Globe, History, KeyRound, Pencil, Play, Plus, Radar, Send, ShieldOff, Trash2, Upload, X } from "lucide-react";
+import { AlertCircle, Code2, ChevronDown, ChevronRight, Cookie, Download, FolderPlus, Globe, History, KeyRound, Pencil, Play, Plus, Radar, Send, ShieldOff, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
@@ -533,7 +533,12 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
           )}
         </div>
       </div>
-      {run?.scriptError && <div className="shrink-0 border-b border-line bg-status-error/10 px-3 py-1 font-mono text-[10px] text-status-error">⚠ {run.scriptError}</div>}
+      {run?.scriptError && (
+        <div className="shrink-0 border-b border-line bg-status-error/10 px-3 py-1 font-mono text-[10px] text-status-error flex items-center gap-1.5">
+          <AlertCircle className="size-3 shrink-0" />
+          <span>{run.scriptError}</span>
+        </div>
+      )}
       {tab === "body" && <HttpBodyView body={resp.body ?? ""} headers={resp.headers ?? []} truncated={resp.truncated} className="flex-1" />}
       {tab === "headers" && (
         <div className="min-h-0 flex-1 overflow-auto p-2 font-mono text-[11px]">

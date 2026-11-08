@@ -1,4 +1,5 @@
 import {
+  Check,
   ChevronDown,
   Columns2,
   Columns3,
@@ -444,7 +445,7 @@ function LayoutPickerMenu() {
                 >
                   <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
                   <span className="min-w-0 flex-1 truncate">{preset.label}</span>
-                  {isSelected && <span className="text-status-ok text-[11px] font-bold">✓</span>}
+                  {isSelected && <Check className="size-3 text-status-ok shrink-0" strokeWidth={2} />}
                 </button>
               );
             })}

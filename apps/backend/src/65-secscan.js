@@ -3471,8 +3471,8 @@ function registerSecScanHandlers() {
     return { findings: out, capped, suppressed, baselined, scanned: fileMap.size };
   }
 
-  electron.ipcMain.handle("security:scanProject", async (_event, root) => {
-    if (!root || typeof root !== "string") return { findings: [] };
+  async function secScanProject(root) {
+    if (!root || typeof root !== "string") return { findings: [], scanned: 0 };
     const config = await readSecConfig(root);
     secProjectOsv = await readSecOsv(root);
     const baseline = await readSecBaseline(root);
@@ -3513,7 +3513,49 @@ function registerSecScanHandlers() {
 
     for (const key of [...fileMap.keys()]) if (!present.has(key)) fileMap.delete(key);
     return collectFindings(fileMap, config, baseline, root);
-  });
+  }
+
+  async function secScanFile(root, filePath, content) {
+    if (!root || typeof root !== "string" || typeof filePath !== "string") return { findings: [] };
+    const config = await readSecConfig(root);
+    secProjectOsv = await readSecOsv(root);
+    const baseline = await readSecBaseline(root);
+    let fileMap = secCache.get(root);
+    if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
+    const ext = (filePath.split(".").pop() || "").toLowerCase();
+    const lang = SEC_LANG[ext];
+    const osFile = node_path.normalize(filePath);
+    if (lang) {
+      let text = typeof content === "string" ? content : null;
+      let mtime = Date.now(), size = text ? Buffer.byteLength(text) : 0;
+      if (text === null) {
+        try { const st = await promises.stat(filePath); mtime = st.mtimeMs; size = st.size; text = await promises.readFile(filePath, "utf8"); } catch { text = null; }
+      }
+      if (text !== null && size <= SEC_MAX_BYTES) {
+        try {
+          const a = await analyzeFile(osFile, text, lang, config);
+          fileMap.set(osFile, { ...a, mtime, size });
+        } catch {  }
+      }
+    } else if (node_path.basename(filePath) === "package.json") {
+      let text = typeof content === "string" ? content : null;
+      let mtime = Date.now(), size = text ? Buffer.byteLength(text) : 0;
+      if (text === null) {
+        try { const st = await promises.stat(filePath); mtime = st.mtimeMs; size = st.size; text = await promises.readFile(filePath, "utf8"); } catch { text = null; }
+      }
+      if (text !== null && size <= SEC_MAX_BYTES) {
+        fileMap.set(osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text), summaries: [], calls: [], flows: [], mtime, size });
+      }
+    }
+    const res = collectFindings(fileMap, config, baseline, root);
+    const targetNorm = node_path.normalize(filePath);
+    return {
+      ...res,
+      findings: (res.findings || []).filter((f) => node_path.normalize(f.file) === targetNorm),
+    };
+  }
+
+  electron.ipcMain.handle("security:scanProject", async (_event, root) => secScanProject(root));
 
   electron.ipcMain.handle("security:rescanFile", async (_event, root, filePath, content) => {
     if (!root || typeof root !== "string" || typeof filePath !== "string") return { findings: [] };

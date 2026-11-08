@@ -42,12 +42,25 @@ function sendOnce(target, method, headers, body, redirectsLeft, options) {
       return;
     }
 
+    const isProxied = Boolean(options && options.proxy && options.proxy.port);
     const transport = url.protocol === "https:" ? node_https : node_http;
     const startedAt = Date.now();
     const requestOptions = { method, headers: Object.fromEntries(headers) };
     if (url.protocol === "https:" && options && options.insecure) requestOptions.rejectUnauthorized = false;
+
+    let targetArg = url;
+    if (isProxied && url.protocol === "http:") {
+      requestOptions.host = options.proxy.host || "127.0.0.1";
+      requestOptions.port = options.proxy.port;
+      requestOptions.path = url.href;
+      if (!requestOptions.headers["host"] && !requestOptions.headers["Host"]) {
+        requestOptions.headers["host"] = url.host;
+      }
+      targetArg = requestOptions;
+    }
+
     const request = transport.request(
-      url,
+      targetArg,
       requestOptions,
       (response) => {
 

@@ -9,3 +9,4 @@ installer/pkg/
 installer/src/
 installer/*.pkg.tar.*
 .vscode/
+scratch/

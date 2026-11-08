@@ -1,4 +1,9 @@
 export const JA: Record<string, string> = {
+  "Undo to this point": "この時点まで元に戻す",
+  "Undo to this point?": "この時点まで元に戻しますか？",
+  "This will revert all file modifications and delete subsequent messages.": "これによりすべてのファイル変更が元に戻され、以降のメッセージが削除されます。",
+  "Rolled back changes and restored chat to this point.": "変更を元に戻し、この時点までチャットを復元しました。",
+  "Undo": "元に戻す",
   "AI Analysis": "AI分析",
   "AI Fix": "AIによる修正",
   "AI Security Analysis": "AIセキュリティ分析",

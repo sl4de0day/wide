@@ -1,4 +1,4 @@
-import { KeyRound, Network, Play, Repeat2, Square, Trash2 } from "lucide-react";
+import { Flag, KeyRound, Network, Play, Repeat2, Square, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { parseHttpMessage } from "@/lib/httpMessage";
@@ -122,7 +122,12 @@ export function ScannerView() {
               <span className="tabular-nums text-fg-faint">
                 {task.done}/{task.total || "…"}
               </span>
-              {task.issueCount > 0 && <span className="tabular-nums text-amber-400">{task.issueCount} ⚑</span>}
+              {task.issueCount > 0 && (
+                <span className="inline-flex items-center gap-1 tabular-nums text-amber-400">
+                  <span>{task.issueCount}</span>
+                  <Flag className="size-2.5 shrink-0" />
+                </span>
+              )}
               {task.status === "running" ? (
                 <button type="button" onClick={() => useScanner.getState().cancel(task.id)} className="rounded-sm p-0.5 text-status-error hover:bg-hover" title={t("Cancel")}>
                   <Square className="size-3" strokeWidth={2} fill="currentColor" />

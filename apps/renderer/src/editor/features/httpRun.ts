@@ -26,7 +26,8 @@ class RunMarker extends GutterMarker {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "cm-http-run";
-    button.textContent = "▶";
+    button.innerHTML =
+      '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:inline-block;vertical-align:middle;"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
     button.title = `Send ${this.request.method} ${this.request.url}`;
     button.setAttribute("aria-label", `Send ${this.request.method} ${this.request.url}`);
     button.addEventListener("mousedown", (event) => {

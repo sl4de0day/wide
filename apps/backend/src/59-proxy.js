@@ -438,6 +438,9 @@ function leafFor(host) {
 }
 
 function inScope(host) {
+  if (!host) return false;
+  if (isLoopbackName(host)) return true;
+  if (!proxyScope || proxyScope.length === 0) return true;
   const name = String(host || "").toLowerCase().replace(/:\d+$/, "");
   return proxyScope.some((raw) => {
     const pattern = String(raw || "").toLowerCase().trim().replace(/:\d+$/, "");

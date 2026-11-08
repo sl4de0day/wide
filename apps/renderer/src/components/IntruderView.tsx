@@ -1,4 +1,4 @@
-import { ArrowDownUp, ChevronDown, ChevronRight, Crosshair, Download, Flag, Play, Plus, Repeat2, Square, Upload, X } from "lucide-react";
+import { ArrowDownUp, Check, ChevronDown, ChevronRight, Crosshair, Download, Flag, Play, Plus, Repeat2, Square, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
@@ -745,7 +745,7 @@ export function IntruderView() {
                 )}
                 {grepPhrases.map((_, i) => (
                   <td key={i} className="px-1 py-0.5 text-center">
-                    {row.grepHits[i] ? <span className="text-emerald-400">✓</span> : <span className="text-fg-faint">·</span>}
+                    {row.grepHits[i] ? <Check className="size-3 text-emerald-400 inline shrink-0" strokeWidth={2} /> : <span className="text-fg-faint">·</span>}
                   </td>
                 ))}
                 <td className={cn("px-2 py-0.5 font-mono tabular-nums", statusTone(row.status))}>{row.status || "—"}</td>

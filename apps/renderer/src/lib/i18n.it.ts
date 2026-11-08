@@ -1,4 +1,9 @@
 export const IT: Record<string, string> = {
+  "Undo to this point": "Annulla fino a questo punto",
+  "Undo to this point?": "Annullare fino a questo punto?",
+  "This will revert all file modifications and delete subsequent messages.": "Ciò ripristinerà tutte le modifiche ai file ed eliminerà i messaggi successivi.",
+  "Rolled back changes and restored chat to this point.": "Modifiche ripristinate e chat riportata a questo punto.",
+  "Undo": "Annulla",
   "AI Analysis": "Analisi IA",
   "AI Fix": "Correzione IA",
   "AI Security Analysis": "Analisi di sicurezza IA",

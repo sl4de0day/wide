@@ -1,4 +1,4 @@
-import { ArrowRight, Binary, Search, X } from "lucide-react";
+import { ArrowRight, Binary, ExternalLink, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { TRANSFORMS_LIST } from "@/lib/transformSelection";
@@ -100,9 +100,10 @@ export function TransformModal() {
           <button
             type="button"
             onClick={handleOpenDecoder}
-            className="text-[11px] text-fg-dim hover:text-accent hover:underline mr-2"
+            className="inline-flex items-center gap-1 text-[11px] text-fg-dim hover:text-accent mr-2"
           >
-            Open in Full Decoder ↗
+            <span>Open in Full Decoder</span>
+            <ExternalLink className="size-3" />
           </button>
           <button
             type="button"

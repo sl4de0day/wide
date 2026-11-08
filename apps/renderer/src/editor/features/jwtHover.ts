@@ -122,7 +122,7 @@ export function jwtHover(): Extension {
               const decoderBtn = document.createElement("button");
               decoderBtn.type = "button";
               decoderBtn.className = "cm-jwt-btn cm-jwt-btn-accent";
-              decoderBtn.textContent = "Open in Decoder ↗";
+              decoderBtn.textContent = "Open in Decoder";
               decoderBtn.onclick = (e) => {
                 e.stopPropagation();
                 useDecoder.getState().openDecoder(decoded.rawToken);

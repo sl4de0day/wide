@@ -1,4 +1,9 @@
 export const KO: Record<string, string> = {
+  "Undo to this point": "이 시점으로 되돌리기",
+  "Undo to this point?": "이 시점으로 되돌리시겠습니까?",
+  "This will revert all file modifications and delete subsequent messages.": "이렇게 하면 모든 파일 수정 사항이 취소되고 이후 메시지가 삭제됩니다.",
+  "Rolled back changes and restored chat to this point.": "변경 사항을 되돌리고 이 시점까지 채팅을 복원했습니다.",
+  "Undo": "실행 취소",
   "AI Analysis": "AI 분석",
   "AI Fix": "AI 수정",
   "AI Security Analysis": "AI 보안 분석",

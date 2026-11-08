@@ -147,6 +147,166 @@ const AI_TOOLS = [
       required: ["args"],
     },
   },
+  {
+    name: "transform_data",
+    description:
+      "Transform, encode, decode, hash, or format data using Wide's CyberChef / Decoder engine. Supported operations: base64_encode, base64_decode, hex_encode, hex_decode, url_encode, url_decode, jwt_decode, md5, sha1, sha256, sha512, rot13, gzip_compress, gzip_decompress, json_format.",
+    parameters: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          description:
+            "The transformation operation to perform. Supported: base64_encode, base64_decode, hex_encode, hex_decode, url_encode, url_decode, jwt_decode, md5, sha1, sha256, sha512, rot13, gzip_compress, gzip_decompress, json_format.",
+        },
+        input: {
+          type: "string",
+          description: "The input text or data to transform.",
+        },
+      },
+      required: ["operation", "input"],
+    },
+  },
+  {
+    name: "open_tool_tab",
+    description:
+      "Open or navigate to a specific tool or panel tab in Wide IDE (Pitcher API client, Catcher web proxy, scanner, repeater, intruder, CyberChef/decoder, terminal, problems/diagnostics, findings, browser, explorer, search, settings).",
+    parameters: {
+      type: "object",
+      properties: {
+        tab: {
+          type: "string",
+          description:
+            "Target tool or panel name. Options: 'pitcher', 'catcher', 'scanner', 'repeater', 'intruder', 'proxy', 'cyberchef', 'decoder', 'terminal', 'problems', 'findings', 'browser', 'explorer', 'search', 'git', 'tests', 'settings'.",
+        },
+        subtool: {
+          type: "string",
+          description:
+            "Optional subtool for Catcher workbench (e.g. 'scanner', 'repeater', 'intruder', 'proxy', 'target', 'sequencer').",
+        },
+      },
+      required: ["tab"],
+    },
+  },
+  {
+    name: "get_diagnostics",
+    description:
+      "Inspect compile errors, TypeScript issues, syntax problems, and linter warnings for a specific file or the entire project. Call this after editing code to verify the workspace builds without errors.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Path to a specific file relative to the project root. If omitted, returns a project-wide diagnostics summary.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "send_http_request",
+    description:
+      "Send an HTTP or HTTPS request using Wide's Pitcher engine. Allows inspecting API responses, testing endpoints, verifying web vulnerabilities, checking status codes, headers, response times, and bodies.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Target HTTP or HTTPS URL (e.g. 'http://localhost:3000/api/users' or 'https://httpbin.org/get').",
+        },
+        method: {
+          type: "string",
+          description: "HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. Defaults to 'GET'.",
+        },
+        headers: {
+          type: "object",
+          description: "Optional key-value pairs of request headers (e.g. {'Content-Type': 'application/json', 'Authorization': 'Bearer ...'}).",
+        },
+        body: {
+          type: "string",
+          description: "Optional request body (string, JSON string, or form payload).",
+        },
+        insecure: {
+          type: "boolean",
+          description: "Whether to allow self-signed or invalid SSL certificates. Defaults to true for local testing.",
+        },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "run_security_scan",
+    description:
+      "Run Wide's real-time security AST analysis and taint flow scanner on the project workspace or a specific file. Detects vulnerabilities such as SQL injection, XSS, SSRF, command injection, path traversal, hardcoded secrets, and cryptographic weaknesses.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Path to a specific file relative to the project root (optional). If omitted, scans the entire workspace.",
+        },
+        minSeverity: {
+          type: "string",
+          description:
+            "Minimum severity filter: 'info', 'warning', or 'error'. Defaults to 'info'.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "check_dependencies",
+    description:
+      "Audit project dependencies for known CVEs and security advisories using Wide's OSV advisory engine. Inspects package.json, requirements.txt, go.mod, pom.xml, and lockfiles.",
+    parameters: {
+      type: "object",
+      properties: {
+        manifest: {
+          type: "string",
+          description:
+            "Path to a specific manifest file (optional, e.g. 'package.json' or 'requirements.txt'). If omitted, audits all manifests across the project.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_open_tabs",
+    description:
+      "Get the list of currently open tabs and files in the Wide editor, including the active tab, file paths, and document kinds.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "manage_catcher",
+    description:
+      "Control Wide's built-in Catcher web security workbench and intercepting proxy. Allows starting/stopping the proxy server, inspecting proxy status and listening port, viewing live captured HTTP traffic, and configuring request interception.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          description:
+            "Action to perform: 'status' (get proxy running state, port, intercept state, traffic count), 'start' (start proxy server on 127.0.0.1), 'stop' (stop proxy), 'get_traffic' (view recent captured HTTP requests/responses), or 'set_intercept' (toggle request interception on/off).",
+          enum: ["status", "start", "stop", "get_traffic", "set_intercept"],
+        },
+        intercept: {
+          type: "boolean",
+          description: "Whether request interception should be enabled (only used when action is 'set_intercept').",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of recent traffic entries to return (defaults to 15, max 50).",
+        },
+      },
+      required: ["action"],
+    },
+  },
 ];
 
 const AI_WRITE_TOOLS = new Set(["write_file", "edit_file", "create_dir", "delete_file", "run_command"]);
@@ -189,6 +349,51 @@ const AI_TOOL_NAME_ALIASES = {
   rm: "delete_file",
   remove_file: "delete_file",
   unlink: "delete_file",
+  open_tool: "open_tool_tab",
+  open_tab: "open_tool_tab",
+  switch_tab: "open_tool_tab",
+  navigate_tool: "open_tool_tab",
+  diagnostics: "get_diagnostics",
+  check_diagnostics: "get_diagnostics",
+  problems: "get_diagnostics",
+  check_errors: "get_diagnostics",
+  transform: "transform_data",
+  decode: "transform_data",
+  encode: "transform_data",
+  jwt: "transform_data",
+  hash: "transform_data",
+  http_request: "send_http_request",
+  http: "send_http_request",
+  pitcher_send: "send_http_request",
+  send_request: "send_http_request",
+  request: "send_http_request",
+  fetch: "send_http_request",
+  curl: "send_http_request",
+  security_scan: "run_security_scan",
+  sec_scan: "run_security_scan",
+  scan_security: "run_security_scan",
+  scan_project: "run_security_scan",
+  vuln_scan: "run_security_scan",
+  audit_dependencies: "check_dependencies",
+  audit_deps: "check_dependencies",
+  osv_scan: "check_dependencies",
+  check_cve: "check_dependencies",
+  cve_audit: "check_dependencies",
+  list_open_tabs: "get_open_tabs",
+  open_tabs: "get_open_tabs",
+  get_tabs: "get_open_tabs",
+  active_tabs: "get_open_tabs",
+  catcher: "manage_catcher",
+  catcher_proxy: "manage_catcher",
+  proxy_control: "manage_catcher",
+  control_proxy: "manage_catcher",
+  get_proxy_traffic: "manage_catcher",
+  proxy_traffic: "manage_catcher",
+  catcher_traffic: "manage_catcher",
+  start_proxy: "manage_catcher",
+  stop_proxy: "manage_catcher",
+  proxy_status: "manage_catcher",
+  catcher_status: "manage_catcher",
 };
 
 const AI_KNOWN_TOOL_NAMES = new Set([
@@ -231,6 +436,95 @@ function aiNormalizeToolCall(rawName, rawInput) {
     const aliasQuery =
       src.pattern ?? src.search_query ?? src.term ?? src.keyword;
     if (aliasQuery !== undefined) input.query = String(aliasQuery);
+  }
+
+  if (name === "transform_data") {
+    if (input.operation === undefined) {
+      const aliasOp = src.op ?? src.type ?? src.action ?? src.method ?? src.mode;
+      if (aliasOp !== undefined) input.operation = String(aliasOp);
+    }
+    if (input.input === undefined) {
+      const aliasInput = src.data ?? src.text ?? src.value ?? src.content ?? src.payload;
+      if (aliasInput !== undefined) input.input = String(aliasInput);
+    }
+  }
+
+  if (name === "open_tool_tab") {
+    if (input.tab === undefined) {
+      const aliasTab = src.tool ?? src.target ?? src.name ?? src.panel ?? src.view;
+      if (aliasTab !== undefined) input.tab = String(aliasTab);
+    }
+    if (input.subtool === undefined) {
+      const aliasSub = src.sub ?? src.sub_tool ?? src.view;
+      if (aliasSub !== undefined && aliasSub !== input.tab) input.subtool = String(aliasSub);
+    }
+  }
+
+  if (name === "get_diagnostics") {
+    if (input.path === undefined) {
+      const aliasPath = src.file ?? src.filepath ?? src.file_path;
+      if (aliasPath !== undefined) input.path = String(aliasPath);
+    }
+  }
+
+  if (name === "send_http_request") {
+    if (input.url === undefined) {
+      const aliasUrl = src.target ?? src.uri ?? src.address ?? src.endpoint ?? src.link;
+      if (aliasUrl !== undefined) input.url = String(aliasUrl);
+    }
+    if (input.method === undefined) {
+      const aliasMethod = src.verb ?? src.http_method;
+      if (aliasMethod !== undefined) input.method = String(aliasMethod);
+    }
+    if (input.headers === undefined) {
+      const aliasHeaders = src.header ?? src.req_headers ?? src.request_headers;
+      if (aliasHeaders !== undefined) input.headers = aliasHeaders;
+    }
+    if (input.body === undefined) {
+      const aliasBody = src.data ?? src.payload ?? src.post_data ?? src.content;
+      if (aliasBody !== undefined) input.body = aliasBody;
+    }
+    if (input.insecure === undefined) {
+      const aliasInsecure = src.allow_insecure ?? src.ignore_ssl ?? src.reject_unauthorized;
+      if (aliasInsecure !== undefined) input.insecure = Boolean(aliasInsecure);
+    }
+  }
+
+  if (name === "run_security_scan") {
+    if (input.path === undefined) {
+      const aliasPath = src.file ?? src.filepath ?? src.target ?? src.file_path;
+      if (aliasPath !== undefined) input.path = String(aliasPath);
+    }
+    if (input.minSeverity === undefined) {
+      const aliasSev = src.severity ?? src.level ?? src.min_severity;
+      if (aliasSev !== undefined) input.minSeverity = String(aliasSev);
+    }
+  }
+
+  if (name === "check_dependencies") {
+    if (input.manifest === undefined) {
+      const aliasManifest = src.file ?? src.path ?? src.target ?? src.file_path;
+      if (aliasManifest !== undefined) input.manifest = String(aliasManifest);
+    }
+  }
+
+  if (name === "get_open_tabs") {
+    return { name: "get_open_tabs", input: {} };
+  }
+
+  if (name === "manage_catcher") {
+    if (input.action === undefined) {
+      const aliasAction = src.command ?? src.operation ?? src.op ?? src.method ?? src.type;
+      if (aliasAction !== undefined) input.action = String(aliasAction);
+      else if (cleanRaw === "start_proxy") input.action = "start";
+      else if (cleanRaw === "stop_proxy") input.action = "stop";
+      else if (cleanRaw === "proxy_status" || cleanRaw === "catcher_status") input.action = "status";
+      else if (cleanRaw.includes("traffic")) input.action = "get_traffic";
+      else input.action = "status";
+    }
+    if (input.intercept === undefined && src.enabled !== undefined) {
+      input.intercept = Boolean(src.enabled);
+    }
   }
 
   if (name === "edit_file" && input.find === undefined && typeof input.content === "string") {
@@ -717,11 +1011,687 @@ const AI_GIT_READ = new Set(["status", "diff", "log", "show", "branch", "rev-par
 const AI_GIT_WRITE = new Set(["add", "commit"]);
 const AI_GIT_BANNED = new Set(["push", "pull", "fetch", "clone", "reset", "clean", "rebase", "merge", "cherry-pick", "revert", "rm", "mv", "config", "gc", "checkout", "switch", "restore", "filter-branch", "update-ref", "reflog", "worktree", "submodule"]);
 
-async function aiRunTool(root, rawName, rawInput, send, allowWrites) {
+function isProtectedInstructionsFile(rel) {
+  const norm = String(rel || "").replace(/\\/g, "/").toLowerCase().trim();
+  return (
+    norm === ".wide/ai-instructions.md" ||
+    norm === ".wide/ai-instructions" ||
+    norm.startsWith(".wide/ai-instructions.")
+  );
+}
+
+function aiGetLatestUserText(messages) {
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      const c = messages[i].content;
+      if (typeof c === "string") return c;
+      if (Array.isArray(c)) {
+        return c.map((p) => (p && typeof p.text === "string" ? p.text : "")).join(" ");
+      }
+    }
+  }
+  return "";
+}
+
+function aiDiffCounts(oldText, newText) {
+  const oldLines = String(oldText ?? "").split("\n");
+  const newLines = String(newText ?? "").split("\n");
+  const n = oldLines.length;
+  const m = newLines.length;
+  if (!oldText && newText) return { added: m, removed: 0 };
+  if (oldText && !newText) return { added: 0, removed: n };
+  if (oldText === newText) return { added: 0, removed: 0 };
+
+  const MAX = 2500;
+  if (n > MAX || m > MAX) {
+    let same = 0;
+    const len = Math.min(n, m);
+    for (let i = 0; i < len; i += 1) {
+      if (oldLines[i] === newLines[i]) same += 1;
+    }
+    return { added: Math.max(1, m - same), removed: Math.max(1, n - same) };
+  }
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      dp[i][j] = oldLines[i] === newLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const lcs = dp[0][0];
+  const added = m - lcs;
+  const removed = n - lcs;
+  return { added: added > 0 ? added : 1, removed: removed > 0 ? removed : 1 };
+}
+
+function aiOffsetToPosition(content, offset) {
+  const clamped = Math.max(0, Math.min(offset, content.length));
+  const slice = content.slice(0, clamped);
+  const lines = slice.split("\n");
+  const line = lines.length;
+  const col = lines[lines.length - 1].length + 1;
+  return { line, col };
+}
+
+function aiExecuteDataTransform(op, text) {
+  try {
+    switch (op) {
+      case "base64_encode":
+      case "base64":
+      case "b64_encode":
+        return Buffer.from(text, "utf8").toString("base64");
+
+      case "base64_decode":
+      case "b64_decode":
+      case "atob":
+        return Buffer.from(text, "base64").toString("utf8");
+
+      case "hex_encode":
+      case "hex":
+        return Buffer.from(text, "utf8").toString("hex");
+
+      case "hex_decode":
+        return Buffer.from(text.replace(/\s+/g, ""), "hex").toString("utf8");
+
+      case "url_encode":
+      case "urlencode":
+        return encodeURIComponent(text);
+
+      case "url_decode":
+      case "urldecode":
+        return decodeURIComponent(text);
+
+      case "md5":
+        return node_crypto.createHash("md5").update(text, "utf8").digest("hex");
+
+      case "sha1":
+        return node_crypto.createHash("sha1").update(text, "utf8").digest("hex");
+
+      case "sha256":
+        return node_crypto.createHash("sha256").update(text, "utf8").digest("hex");
+
+      case "sha512":
+        return node_crypto.createHash("sha512").update(text, "utf8").digest("hex");
+
+      case "rot13":
+        return text.replace(/[a-zA-Z]/g, (c) => {
+          const base = c <= "Z" ? 65 : 97;
+          return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+        });
+
+      case "jwt_decode":
+      case "jwt": {
+        const parts = text.trim().split(".");
+        if (parts.length < 2) {
+          return "Invalid JWT token: Expected at least header and payload segments separated by '.'";
+        }
+        const b64UrlDecode = (str) => {
+          let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
+          while (b64.length % 4) b64 += "=";
+          return Buffer.from(b64, "base64").toString("utf8");
+        };
+        let headerObj = null;
+        let payloadObj = null;
+        try {
+          headerObj = JSON.parse(b64UrlDecode(parts[0]));
+        } catch {
+          headerObj = b64UrlDecode(parts[0]);
+        }
+        try {
+          payloadObj = JSON.parse(b64UrlDecode(parts[1]));
+        } catch {
+          payloadObj = b64UrlDecode(parts[1]);
+        }
+        const out = [];
+        out.push("=== JWT Header ===");
+        out.push(JSON.stringify(headerObj, null, 2));
+        out.push("\n=== JWT Payload ===");
+        if (payloadObj && typeof payloadObj === "object") {
+          const enriched = { ...payloadObj };
+          if (typeof enriched.exp === "number") {
+            enriched["_exp_human"] = new Date(enriched.exp * 1000).toISOString();
+          }
+          if (typeof enriched.iat === "number") {
+            enriched["_iat_human"] = new Date(enriched.iat * 1000).toISOString();
+          }
+          if (typeof enriched.nbf === "number") {
+            enriched["_nbf_human"] = new Date(enriched.nbf * 1000).toISOString();
+          }
+          out.push(JSON.stringify(enriched, null, 2));
+        } else {
+          out.push(String(payloadObj));
+        }
+        if (parts[2]) {
+          out.push(`\n=== Signature Segment ===\nLength: ${parts[2].length} chars (present)`);
+        }
+        return out.join("\n");
+      }
+
+      case "gzip_compress":
+      case "gzip": {
+        const compressed = node_zlib.gzipSync(Buffer.from(text, "utf8"));
+        return compressed.toString("base64");
+      }
+
+      case "gzip_decompress":
+      case "gunzip": {
+        const decompressed = node_zlib.gunzipSync(Buffer.from(text.trim(), "base64"));
+        return decompressed.toString("utf8");
+      }
+
+      case "json_format":
+      case "json_prettify":
+      case "prettify_json": {
+        const parsed = JSON.parse(text);
+        return JSON.stringify(parsed, null, 2);
+      }
+
+      default:
+        return `Unsupported operation '${op}'. Supported operations: base64_encode, base64_decode, hex_encode, hex_decode, url_encode, url_decode, jwt_decode, md5, sha1, sha256, sha512, rot13, gzip_compress, gzip_decompress, json_format.`;
+    }
+  } catch (err) {
+    return `Data transformation error for '${op}': ${String(err.message || err)}`;
+  }
+}
+
+function aiNormalizeToolTabName(target, sub) {
+  const t = String(target || "").toLowerCase().trim();
+  if (t === "scanner" || t === "repeater" || t === "intruder" || t === "proxy" || t === "target" || t === "sequencer" || t === "collaborator" || t === "vault" || t === "miner") {
+    return { tool: "catcher", subtool: t };
+  }
+  if (t === "catcher") {
+    return { tool: "catcher", subtool: sub || "proxy" };
+  }
+  if (t === "pitcher" || t === "api" || t === "http") {
+    return { tool: "pitcher" };
+  }
+  if (t === "cyberchef" || t === "decoder") {
+    return { tool: "cyberchef" };
+  }
+  if (t === "browser") {
+    return { tool: "browser" };
+  }
+  if (t === "terminal" || t === "bash" || t === "shell") {
+    return { tool: "terminal" };
+  }
+  if (t === "problems" || t === "diagnostics" || t === "errors") {
+    return { tool: "problems" };
+  }
+  if (t === "findings" || t === "security_findings") {
+    return { tool: "findings" };
+  }
+  if (t === "explorer" || t === "files" || t === "project") {
+    return { tool: "project" };
+  }
+  if (t === "search") {
+    return { tool: "search" };
+  }
+  if (t === "git" || t === "source-control" || t === "scm") {
+    return { tool: "source-control" };
+  }
+  if (t === "tests" || t === "test") {
+    return { tool: "tests" };
+  }
+  if (t === "debug") {
+    return { tool: "debug" };
+  }
+  if (t === "build") {
+    return { tool: "build" };
+  }
+  if (t === "settings") {
+    return { tool: "settings" };
+  }
+  if (t === "scratchpad") {
+    return { tool: "scratchpad" };
+  }
+  return { tool: t, subtool: sub };
+}
+
+async function aiGetDiagnostics(root, filePath) {
+  if (!root) return "No project workspace is currently open.";
+
+  if (filePath) {
+    const resolved = aiResolvePath(root, filePath);
+    if (resolved.error) return resolved.error;
+
+    let content = "";
+    try {
+      content = await promises.readFile(resolved.path, "utf8");
+    } catch {
+      return `Could not read file: ${resolved.relative}`;
+    }
+
+    const items = [];
+    const isTsJs = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(resolved.path);
+
+    if (isTsJs && typeof tsCall === "function") {
+      try {
+        const tsResult = await tsCall("diagnostics", [root, resolved.path], { diagnostics: [] });
+        const list = Array.isArray(tsResult?.diagnostics) ? tsResult.diagnostics : [];
+        for (const item of list) {
+          const pos = aiOffsetToPosition(content, item.from ?? 0);
+          items.push({
+            source: "TypeScript",
+            line: pos.line,
+            col: pos.col,
+            severity: item.severity || "error",
+            code: item.code ? `TS${item.code}` : "",
+            message: String(item.message || ""),
+          });
+        }
+      } catch (e) {
+        void e;
+      }
+    }
+
+    if (isTsJs && typeof runLinter === "function") {
+      try {
+        const lintResult = await runLinter({ root, filePath: resolved.path, text: content });
+        if (lintResult && lintResult.ok && Array.isArray(lintResult.diagnostics)) {
+          for (const item of lintResult.diagnostics) {
+            const pos = aiOffsetToPosition(content, item.from ?? 0);
+            items.push({
+              source: "ESLint",
+              line: pos.line,
+              col: pos.col,
+              severity: item.severity || "warning",
+              code: "",
+              message: String(item.message || ""),
+            });
+          }
+        }
+      } catch (e) {
+        void e;
+      }
+    }
+
+    if (items.length === 0) {
+      return `No syntax, type, or lint diagnostics found in ${resolved.relative}. Code is clean!`;
+    }
+
+    items.sort((a, b) => a.line - b.line || a.col - b.col);
+    const lines = [
+      `Found ${items.length} diagnostic(s) in ${resolved.relative}:`,
+      ...items.map(
+        (it) =>
+          `- [Line ${it.line}, Col ${it.col}] [${it.severity.toUpperCase()}${it.code ? ` ${it.code}` : ""} - ${it.source}]: ${it.message}`
+      ),
+    ];
+    return lines.join("\n");
+  }
+
+  if (typeof tsCall === "function") {
+    try {
+      const projResult = await tsCall("projectDiagnostics", [root], { counts: {}, problems: [] });
+      const counts = projResult?.counts || {};
+      const problems = Array.isArray(projResult?.problems) ? projResult.problems : [];
+
+      const fileKeys = Object.keys(counts);
+      if (fileKeys.length === 0 && problems.length === 0) {
+        return "No compile, type, or syntax errors detected across the project. Project builds cleanly!";
+      }
+
+      const totalErrors = problems.filter((p) => p.severity === "error").length;
+      const totalWarnings = problems.filter((p) => p.severity === "warning").length;
+
+      const lines = [
+        `Project diagnostics: ${totalErrors} error(s), ${totalWarnings} warning(s) in ${fileKeys.length || 1} file(s):`,
+      ];
+
+      const byFile = new Map();
+      for (const p of problems) {
+        const rel = node_path.relative(root, p.file || "").replace(/\\/g, "/") || p.file;
+        if (!byFile.has(rel)) byFile.set(rel, []);
+        byFile.get(rel).push(p);
+      }
+
+      for (const [file, list] of byFile.entries()) {
+        lines.push(`\n* ${file} (${list.length} issues):`);
+        for (const item of list.slice(0, 5)) {
+          lines.push(`  - Line ${item.line}, Col ${item.column} [${item.severity}]: ${item.message} ${item.code ? `(TS${item.code})` : ""}`);
+        }
+        if (list.length > 5) {
+          lines.push(`  ... and ${list.length - 5} more issues.`);
+        }
+      }
+
+      return lines.join("\n");
+    } catch (e) {
+      return `Could not inspect project diagnostics: ${String(e.message || e)}`;
+    }
+  }
+
+  return "Diagnostics language service is not active for this workspace.";
+}
+
+function aiNormalizeHttpRequestHeaders(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    const list = [];
+    for (const item of raw) {
+      if (Array.isArray(item) && item.length >= 2) {
+        list.push([String(item[0]), String(item[1])]);
+      } else if (typeof item === "string" && item.includes(":")) {
+        const colon = item.indexOf(":");
+        list.push([item.slice(0, colon).trim(), item.slice(colon + 1).trim()]);
+      }
+    }
+    return list;
+  }
+  if (typeof raw === "object") {
+    return Object.entries(raw).map(([k, v]) => [String(k), String(v ?? "")]);
+  }
+  return [];
+}
+
+async function aiExecuteHttpRequest(url, method = "GET", headers = {}, body = null, insecure = true) {
+  const normUrl = String(url || "").trim();
+  if (!normUrl) return "Missing required argument: 'url'.";
+
+  const normMethod = String(method || "GET").trim().toUpperCase();
+  const safeHeaders = aiNormalizeHttpRequestHeaders(headers);
+  const normBody = body != null ? (typeof body === "object" ? JSON.stringify(body) : String(body)) : null;
+
+  try {
+    const proxyOpts =
+      typeof proxyServer !== "undefined" && proxyServer && typeof proxyPort === "number" && proxyPort > 0
+        ? { host: "127.0.0.1", port: proxyPort }
+        : null;
+
+    const res = await sendOnce(normUrl, normMethod, safeHeaders, normBody, HTTP_MAX_REDIRECTS, {
+      insecure: insecure !== false,
+      ...(proxyOpts ? { proxy: proxyOpts } : {}),
+    });
+
+    if (!res.ok) {
+      return `HTTP Request to ${normUrl} failed: ${res.error}`;
+    }
+
+    const headerLines = (res.headers || []).map(([k, v]) => `${k}: ${v}`).join("\n");
+    let formattedBody = String(res.body ?? "");
+
+    if (formattedBody.length < 64 * 1024) {
+      try {
+        const parsed = JSON.parse(formattedBody);
+        formattedBody = JSON.stringify(parsed, null, 2);
+      } catch {
+        // keep text
+      }
+    }
+
+    const sections = [
+      `HTTP/1.1 ${res.status} ${res.statusText} (${res.ms}ms, ${res.bytes} bytes)`,
+      `Final URL: ${res.url}`,
+      "",
+      "--- Response Headers ---",
+      headerLines || "(no headers)",
+      "",
+      "--- Response Body ---",
+      formattedBody || "(empty body)",
+    ];
+
+    if (res.truncated) {
+      sections.push("\n[Note: Response body exceeded 8MB and was truncated]");
+    }
+
+    return aiTrim(sections.join("\n"));
+  } catch (err) {
+    return `HTTP Request failed with exception: ${String(err.message || err)}`;
+  }
+}
+
+async function aiExecuteSecurityScan(root, filePath, minSeverity = "info") {
+  if (!root) return "No project workspace is currently open.";
+
+  const sevWeight = { info: 1, warning: 2, error: 3 };
+  const minWeight = sevWeight[String(minSeverity || "info").toLowerCase()] ?? 1;
+
+  try {
+    let result;
+    if (filePath) {
+      const resolved = aiResolvePath(root, filePath);
+      if (resolved.error) return resolved.error;
+      result = await secScanFile(root, resolved.path, null);
+    } else {
+      result = await secScanProject(root);
+    }
+
+    const allFindings = Array.isArray(result?.findings) ? result.findings : [];
+    const filtered = allFindings.filter((f) => (sevWeight[f.severity] ?? 2) >= minWeight);
+
+    if (filtered.length === 0) {
+      return `Wide Security Scanner: 0 vulnerabilities found (scanned ${result?.scanned ?? 1} file(s)). Code passed security inspection with no injection sinks, hardcoded secrets, XSS, or taint flow issues.`;
+    }
+
+    const byFile = new Map();
+    for (const f of filtered) {
+      const rel = node_path.relative(root, f.file || "").replace(/\\/g, "/") || f.file;
+      if (!byFile.has(rel)) byFile.set(rel, []);
+      byFile.get(rel).push(f);
+    }
+
+    const lines = [
+      `Wide Security Scanner Report: Found ${filtered.length} vulnerability finding(s) across ${byFile.size} file(s) (scanned ${result?.scanned ?? 1} files):`,
+    ];
+
+    for (const [file, items] of byFile.entries()) {
+      lines.push(`\n* ${file}:`);
+      for (const item of items.slice(0, 10)) {
+        const sev = String(item.severity || "warning").toUpperCase();
+        const conf = item.confidence ? ` / Conf: ${item.confidence}` : "";
+        const cwe = item.cwe ? ` [${item.cwe}]` : "";
+        const rule = item.ruleId ? ` (${item.ruleId})` : "";
+        lines.push(`  - Line ${item.line}, Col ${item.col || 1} [${sev}${conf}]${cwe}${rule}:`);
+        lines.push(`    ${item.message}`);
+        if (item.snippet) {
+          lines.push(`    Snippet: ${item.snippet.trim().slice(0, 120)}`);
+        }
+      }
+      if (items.length > 10) {
+        lines.push(`    ... and ${items.length - 10} more findings in this file.`);
+      }
+    }
+
+    return aiTrim(lines.join("\n"));
+  } catch (err) {
+    return `Security scan failed: ${String(err.message || err)}`;
+  }
+}
+
+async function aiExecuteDependencyCheck(root, manifest) {
+  if (!root) return "No project workspace is currently open.";
+
+  if (manifest) {
+    const resolved = aiResolvePath(root, manifest);
+    if (resolved.error) return resolved.error;
+    let content = "";
+    try {
+      content = await promises.readFile(resolved.path, "utf8");
+    } catch {
+      return `Could not read manifest file: ${resolved.relative}`;
+    }
+
+    secProjectOsv = await readSecOsv(root);
+    const findings = auditManifest(resolved.path, content);
+    if (!findings || findings.length === 0) {
+      return `Dependency Audit for ${resolved.relative}: Clean! No vulnerable packages or CVEs found.`;
+    }
+
+    const lines = [
+      `Dependency Audit for ${resolved.relative}: Found ${findings.length} vulnerable package advisory/advisories:`,
+      ...findings.map((f) => `- [Line ${f.line}] [${(f.severity || "warning").toUpperCase()}] ${f.cwe ? `(${f.cwe}) ` : ""}${f.message}`),
+    ];
+    return lines.join("\n");
+  }
+
+  const manifestNames = ["package.json", "package-lock.json", "requirements.txt", "go.mod", "pom.xml"];
+  const allFindings = [];
+  const scanned = [];
+
+  for (const name of manifestNames) {
+    const p = node_path.join(root, name);
+    try {
+      const stats = await promises.stat(p);
+      if (stats.isFile()) {
+        scanned.push(name);
+        const text = await promises.readFile(p, "utf8");
+        secProjectOsv = await readSecOsv(root);
+        const res = auditManifest(p, text);
+        if (Array.isArray(res) && res.length > 0) {
+          allFindings.push({ file: name, findings: res });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (scanned.length === 0) {
+    return "No standard package manifests found (looked for package.json, requirements.txt, go.mod, pom.xml).";
+  }
+
+  if (allFindings.length === 0) {
+    return `Dependency Audit: Clean! No vulnerable dependencies or CVEs found across scanned manifests (${scanned.join(", ")}).`;
+  }
+
+  const total = allFindings.reduce((sum, item) => sum + item.findings.length, 0);
+  const out = [
+    `Dependency Audit: Found ${total} vulnerable dependency issue(s) across project manifests:`,
+  ];
+
+  for (const item of allFindings) {
+    out.push(`\n* ${item.file} (${item.findings.length} issues):`);
+    for (const f of item.findings) {
+      out.push(`  - [Line ${f.line}] [${(f.severity || "warning").toUpperCase()}] ${f.cwe ? `(${f.cwe}) ` : ""}${f.message}`);
+    }
+  }
+
+  return aiTrim(out.join("\n"));
+}
+
+let aiLastKnownOpenTabs = [];
+
+function aiExecuteGetOpenTabs(root) {
+  if (!Array.isArray(aiLastKnownOpenTabs) || aiLastKnownOpenTabs.length === 0) {
+    return "No open tabs reported by the editor currently.";
+  }
+  const formatted = aiLastKnownOpenTabs.map((t, index) => {
+    const activeMarker = t.active ? " (ACTIVE)" : "";
+    const kind = t.kind ? ` [${t.kind}]` : "";
+    const rel = t.path && root && t.path.startsWith(root)
+      ? node_path.relative(root, t.path).replace(/\\/g, "/")
+      : t.path || t.name;
+    return `${index + 1}. ${t.name || rel}${kind}${activeMarker}${t.path ? ` -> ${rel}` : ""}`;
+  });
+  return `Currently open tabs in Wide editor (${aiLastKnownOpenTabs.length} tab${aiLastKnownOpenTabs.length > 1 ? "s" : ""}):\n${formatted.join("\n")}`;
+}
+
+async function aiExecuteManageCatcher(action = "status", intercept = undefined, limit = 15) {
+  const cleanAction = String(action || "status").trim().toLowerCase();
+
+  if (cleanAction === "status") {
+    const isRunning = Boolean(typeof proxyServer !== "undefined" && proxyServer);
+    const port = typeof proxyPort !== "undefined" ? proxyPort : 0;
+    const isIntercepting = typeof intercepting !== "undefined" ? Boolean(intercepting) : false;
+    const totalTraffic = typeof proxyLog !== "undefined" && Array.isArray(proxyLog) ? proxyLog.length : 0;
+    return `Catcher Intercepting Proxy Status:
+- State: ${isRunning ? "RUNNING (Active)" : "STOPPED"}
+- Port: ${isRunning ? port : "Not listening"}
+- Target Host: 127.0.0.1
+- Request Intercept: ${isIntercepting ? "ENABLED (holding requests)" : "DISABLED (pass-through)"}
+- Captured Traffic Entries: ${totalTraffic} requests in buffer
+${!isRunning ? "\nTip: To start the proxy, invoke `manage_catcher` with action: 'start'." : ""}`;
+  }
+
+  if (cleanAction === "start") {
+    try {
+      if (typeof loadOrMakeCa === "function") await loadOrMakeCa();
+      if (typeof startProxy === "function") {
+        const listening = await startProxy();
+        if (typeof electron !== "undefined" && electron.hostRequest) {
+          electron.hostRequest("browser:proxy", { port: proxyPort });
+        }
+        return `Successfully started Catcher Proxy on 127.0.0.1:${listening.port || proxyPort}. Traffic from the built-in browser and configured apps will now be captured and analyzed in Wide Catcher.`;
+      }
+      return "Catcher proxy subsystem is not available.";
+    } catch (error) {
+      return `Failed to start Catcher proxy: ${String((error && error.message) || error)}`;
+    }
+  }
+
+  if (cleanAction === "stop") {
+    try {
+      if (typeof stopProxy === "function") {
+        stopProxy();
+        if (typeof electron !== "undefined" && electron.hostRequest) {
+          electron.hostRequest("browser:proxy", { port: 0 });
+        }
+        return "Catcher Proxy has been stopped.";
+      }
+      return "Catcher proxy subsystem is not available.";
+    } catch (error) {
+      return `Failed to stop Catcher proxy: ${String((error && error.message) || error)}`;
+    }
+  }
+
+  if (cleanAction === "get_traffic" || cleanAction === "traffic") {
+    if (typeof proxyLog === "undefined" || !Array.isArray(proxyLog) || proxyLog.length === 0) {
+      const isRunning = Boolean(typeof proxyServer !== "undefined" && proxyServer);
+      return `No HTTP traffic captured in Catcher yet.${!isRunning ? " (Note: Catcher proxy is currently STOPPED. Start it using `manage_catcher({ action: 'start' })`)" : " (Send HTTP requests through 127.0.0.1:" + proxyPort + " or using Pitcher's `send_http_request` to see captured entries)."}`;
+    }
+    const max = Math.min(Math.max(1, Number(limit) || 15), 50);
+    const slice = proxyLog.slice(-max).reverse();
+    const formatted = slice.map((entry, idx) => {
+      const method = entry.method || entry.request?.method || "GET";
+      const url = entry.url || entry.request?.url || entry.host || "";
+      const status = entry.status ? `${entry.status}` : (entry.error ? `ERR (${entry.error})` : "Pending");
+      const duration = typeof entry.ms === "number" ? `${entry.ms}ms` : (typeof entry.durationMs === "number" ? `${entry.durationMs}ms` : "");
+      const resSize = entry.resBody ? `${Buffer.byteLength(entry.resBody, "utf8")}B` : "";
+      let item = `${idx + 1}. [${method}] ${url} -> ${status} (${[duration, resSize].filter(Boolean).join(", ") || "streamed"})`;
+      if (entry.reqBody) {
+        item += `\n   Request Body: ${entry.reqBody.slice(0, 300)}`;
+      }
+      if (entry.resBody) {
+        item += `\n   Response Body: ${entry.resBody.slice(0, 500)}`;
+      }
+      return item;
+    });
+    return `Recent Catcher Proxy Traffic (latest ${slice.length} of ${proxyLog.length} captured requests):\n${formatted.join("\n")}`;
+  }
+
+  if (cleanAction === "set_intercept" || cleanAction === "intercept") {
+    const shouldEnable = Boolean(intercept);
+    if (typeof intercepting !== "undefined") {
+      intercepting = shouldEnable;
+      if (!intercepting && typeof releaseIntercepts === "function") {
+        releaseIntercepts();
+      }
+      if (typeof broadcast === "function") {
+        broadcast("proxy:interceptState", { enabled: intercepting });
+      }
+      return `Catcher request interception is now ${shouldEnable ? "ENABLED. Incoming HTTP requests will be held for manual inspection and tampering." : "DISABLED. Requests will pass through normally."}`;
+    }
+    return "Catcher interception control is not available.";
+  }
+
+  return `Unknown Catcher action: '${action}'. Supported actions: 'status', 'start', 'stop', 'get_traffic', 'set_intercept'.`;
+}
+
+async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt = "") {
   try {
     const normalized = aiNormalizeToolCall(rawName, rawInput);
     const name = normalized.name;
     const input = normalized.input;
+
+    if (name === "write_file" || name === "edit_file" || name === "delete_file") {
+      const resolved = aiResolvePath(root, input.path);
+      if (!resolved.error && isProtectedInstructionsFile(resolved.relative)) {
+        const isExplicit = /(?:ai-?instructions|talimat|proje kural|instruction|system prompt|custom rules)/i.test(userPrompt || "");
+        if (!isExplicit) {
+          return "Protected file: `.wide/ai-instructions.md` cannot be modified unless the user explicitly requested to edit project instructions.";
+        }
+      }
+    }
 
     if (isMcpTool(name)) {
       const allowed = aiAllowed("ai:tool.mcp", [name]);
@@ -819,7 +1789,8 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites) {
       const newContent = String(input.content ?? "");
       await promises.mkdir(node_path.dirname(resolved.path), { recursive: true });
       await writeFileAtomic(resolved.path, newContent, "utf8");
-      send({ type: "edit", root, path: resolved.path, oldContent, content: newContent, existed });
+      const { added, removed } = aiDiffCounts(oldContent, newContent);
+      send({ type: "edit", root, path: resolved.path, oldContent, content: newContent, existed, added, removed });
       return `Successfully ${existed ? "updated" : "created"} ${resolved.relative} (${Buffer.byteLength(newContent, "utf8")} bytes) in the project workspace.`;
     }
 
@@ -861,7 +1832,8 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites) {
       }
 
       await writeFileAtomic(resolved.path, next, "utf8");
-      send({ type: "edit", root, path: resolved.path, oldContent: content, content: next, existed: true });
+      const { added, removed } = aiDiffCounts(content, next);
+      send({ type: "edit", root, path: resolved.path, oldContent: content, content: next, existed: true, added, removed });
       return `Successfully edited ${resolved.relative} in the project workspace.`;
     }
 
@@ -909,6 +1881,44 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites) {
       const allowed = aiAllowed(mutating ? "ai:tool.write" : "ai:tool.search", [root]);
       if (!allowed.ok) return allowed.reason;
       return await aiRunGit(root, args);
+    }
+
+    if (name === "transform_data") {
+      const op = String(input.operation ?? "").trim().toLowerCase();
+      const text = String(input.input ?? "");
+      return aiExecuteDataTransform(op, text);
+    }
+
+    if (name === "open_tool_tab") {
+      const target = String(input.tab ?? "").trim().toLowerCase();
+      const sub = input.subtool ? String(input.subtool).trim().toLowerCase() : undefined;
+      const valid = aiNormalizeToolTabName(target, sub);
+      send({ type: "open_tool", tool: valid.tool, subtool: valid.subtool });
+      return `Opened ${valid.tool}${valid.subtool ? ` (${valid.subtool})` : ""} in Wide IDE.`;
+    }
+
+    if (name === "get_diagnostics") {
+      return await aiGetDiagnostics(root, input.path);
+    }
+
+    if (name === "send_http_request") {
+      return await aiExecuteHttpRequest(input.url, input.method, input.headers, input.body, input.insecure);
+    }
+
+    if (name === "run_security_scan") {
+      return await aiExecuteSecurityScan(root, input.path, input.minSeverity);
+    }
+
+    if (name === "check_dependencies") {
+      return await aiExecuteDependencyCheck(root, input.manifest);
+    }
+
+    if (name === "get_open_tabs") {
+      return aiExecuteGetOpenTabs(root);
+    }
+
+    if (name === "manage_catcher") {
+      return await aiExecuteManageCatcher(input.action, input.intercept, input.limit);
     }
 
     return `There is no tool called ${name}.`;
@@ -983,12 +1993,14 @@ async function aiRunTurn({ provider, model, key, root, system, messages, allowWr
 
     history.push(aiAssistantTurn(provider, calls, said));
 
+    const latestUserText = aiGetLatestUserText(history);
+
     for (const call of calls) {
       const norm = aiNormalizeToolCall(call.name, call.input);
       send({ type: "tool_start", id: call.id, name: norm.name, input: norm.input });
       const result = call.truncated
         ? `The call to ${norm.name} arrived cut off, so nothing was done. Send the call again with the complete argument object.`
-        : await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites);
+        : await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites, latestUserText);
       send({ type: "tool_end", id: call.id, name: norm.name, result });
       history.push(aiToolResultTurn(provider, call, result));
       if (signal?.aborted) return { ok: false, error: "stopped" };
@@ -1090,48 +2102,84 @@ function aiBuildToolCatalogPrompt(allowWrites) {
   }));
   return [
     "## Available IDE Tools",
-    "You have direct access to the following tools to read, search, create, edit, and run files in the user's project workspace:",
+    "You have direct access to the following tools to read, search, create, edit, run, and interact with Wide IDE:",
     JSON.stringify(specs),
     "",
     "## How to Call Tools",
-    "Whenever you need to inspect files, create a new script/file, edit existing code, or run a command, invoke the appropriate tool.",
+    "Whenever you need to inspect files, edit code, open a tool tab, send an HTTP request, control Catcher proxy, or run a security scan, invoke the appropriate tool.",
     "If native function calling is active, use it directly. You can ALWAYS invoke any tool by emitting a <tool_call> XML block containing a JSON object with \"name\" and \"arguments\":",
     "<tool_call>",
-    "{\"name\": \"write_file\", \"arguments\": {\"path\": \"example.py\", \"content\": \"print('Hello World')\\n\"}}",
+    "{\"name\": \"open_tool_tab\", \"arguments\": {\"tab\": \"pitcher\"}}",
     "</tool_call>",
     "",
     "Examples of tool calls:",
-    "1. Create or overwrite a file in the project:",
+    "1. Open a tool tab in Wide IDE (Pitcher, Catcher, Scanner, CyberChef, etc.):",
     "<tool_call>",
-    "{\"name\": \"write_file\", \"arguments\": {\"path\": \"script.py\", \"content\": \"import os\\nprint(os.getcwd())\\n\"}}",
+    "{\"name\": \"open_tool_tab\", \"arguments\": {\"tab\": \"pitcher\"}}",
     "</tool_call>",
-    "2. Read an existing file before editing:",
+    "2. Send an HTTP request via Wide's Pitcher engine:",
+    "<tool_call>",
+    "{\"name\": \"send_http_request\", \"arguments\": {\"url\": \"http://localhost:3000/api/health\", \"method\": \"GET\"}}",
+    "</tool_call>",
+    "3. Control Catcher Intercepting Proxy (start proxy, check status, inspect traffic):",
+    "<tool_call>",
+    "{\"name\": \"manage_catcher\", \"arguments\": {\"action\": \"start\"}}",
+    "</tool_call>",
+    "<tool_call>",
+    "{\"name\": \"manage_catcher\", \"arguments\": {\"action\": \"get_traffic\", \"limit\": 10}}",
+    "</tool_call>",
+    "4. Run Wide's Security AST and taint flow scan:",
+    "<tool_call>",
+    "{\"name\": \"run_security_scan\", \"arguments\": {}}",
+    "</tool_call>",
+    "5. Create or overwrite a file in the project workspace:",
+    "<tool_call>",
+    "{\"name\": \"write_file\", \"arguments\": {\"path\": \"script.py\", \"content\": \"print('Hello World')\\n\"}}",
+    "</tool_call>",
+    "6. Read an existing file before editing:",
     "<tool_call>",
     "{\"name\": \"read_file\", \"arguments\": {\"path\": \"package.json\"}}",
     "</tool_call>",
-    "3. Edit a specific section of an existing file:",
+    "7. Edit a specific section of an existing file:",
     "<tool_call>",
     "{\"name\": \"edit_file\", \"arguments\": {\"path\": \"src/index.js\", \"find\": \"const port = 3000;\", \"replace\": \"const port = 8080;\"}}",
     "</tool_call>",
-    "4. List files in a directory:",
+    "8. List files in a directory:",
     "<tool_call>",
     "{\"name\": \"list_dir\", \"arguments\": {\"path\": \"\"}}",
     "</tool_call>",
   ].join("\n");
 }
 
-const AI_INSTRUCTION_FILES = [
+const WIDE_INSTRUCTION_FILES = [
   ".wide/ai-instructions.md",
   ".wide/ai-instructions",
+];
+
+const FALLBACK_AGENT_FILES = [
   "AGENTS.md",
   "CLAUDE.md",
   ".cursorrules",
 ];
 
-async function aiReadProjectInstructions(root) {
+async function aiReadProjectInstructions(root, strictWideOnly = false) {
   if (!root) return { path: "", relativePath: "", content: "", exists: false };
   const primary = node_path.join(root, ".wide", "ai-instructions.md");
-  for (const rel of AI_INSTRUCTION_FILES) {
+  for (const rel of WIDE_INSTRUCTION_FILES) {
+    const full = node_path.join(root, ...rel.split("/"));
+    try {
+      const stats = await promises.stat(full);
+      if (stats.isFile() && stats.size <= 256 * 1024) {
+        const text = await promises.readFile(full, "utf8");
+        return { path: full, relativePath: rel, content: text, exists: true };
+      }
+    } catch {
+    }
+  }
+  if (strictWideOnly) {
+    return { path: primary, relativePath: ".wide/ai-instructions.md", content: "", exists: false };
+  }
+  for (const rel of FALLBACK_AGENT_FILES) {
     const full = node_path.join(root, ...rel.split("/"));
     try {
       const stats = await promises.stat(full);
@@ -1172,8 +2220,14 @@ async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstru
       ].join("\n");
 
   const coreRules = [
-    "# Wide IDE Autonomous Coding Agent",
-    "You are an autonomous AI software engineering agent integrated directly into Wide IDE.",
+    "# Wide IDE Autonomous Coding & Security Agent",
+    "You are an autonomous AI software engineering and security agent integrated natively into Wide IDE.",
+    "Wide IDE is a next-generation engineering environment that uniquely unites high-performance code editing with built-in web security tools:",
+    "- Pitcher: Comprehensive API client (REST, GraphQL, WebSocket, gRPC, auth, test scripting).",
+    "- Catcher: Web security workbench and intercepting proxy for live pentesting and traffic inspection.",
+    "- Security Scanner: Real-time AST vulnerability inspection engine flagging injection sinks, weak crypto, and secret leaks.",
+    "- Decoder / CyberChef: Integrated encoder/decoder suite (Base64, Hex, URL, JWT, hashing, compression).",
+    "- Git & Terminal: Native source control and shell execution directly within the workspace.",
     root
       ? `The user's active project workspace is open at: ${root}`
       : "No project workspace folder is currently open.",
@@ -1187,6 +2241,16 @@ async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstru
     "3. If the user asks you to write a script or create code without specifying a filename, pick a clean, appropriate filename in the project workspace (for example `script.py`, `index.js`, `main.py`, etc.) and immediately call `write_file` to create it.",
     "4. Before editing an existing file, read it first with `read_file` so you know its exact contents, then modify it with `edit_file` or `write_file`.",
     "5. After your tool calls complete and the files are written on disk, provide a concise, helpful summary in the user's language explaining which files you created or modified.",
+    "6. NEVER modify, overwrite, create, or delete `.wide/ai-instructions.md` unless the user explicitly requested to update project instructions. That file is managed exclusively by the user.",
+    "7. LANGUAGE CONSISTENCY: Always converse and summarize in the user's language (if the user writes in Turkish, reply in fluent Turkish; if English, respond in English).",
+    "8. SECURITY MINDSET: Always produce clean, secure, production-grade code. Never introduce SQL injection, XSS, command injection, path traversal, hardcoded secrets, or insecure dependencies. Fix issues defensively at their root cause.",
+    "9. NATIVE WIDE TOOLS CONSCIOUSNESS & CONTROL: You have full programmatic control over Wide's built-in tools! NEVER tell the user 'I cannot click Pitcher/Catcher in the UI', 'Pitcher/Catcher'ı doğrudan UI üzerinden tıklayamam', or that you cannot interact with Wide's interface. You do not need to click UI buttons like a human; you ARE the core agent of Wide IDE! When the user asks you to demonstrate, test, or use Pitcher, Catcher, Scanner, or Decoder:",
+    "   - Use `open_tool_tab` to navigate to that tool on the user's screen (e.g. `open_tool_tab({ tab: 'pitcher' })` or `open_tool_tab({ tab: 'catcher', subtool: 'proxy' })`).",
+    "   - Use `manage_catcher` to start the Catcher proxy (`action: 'start'`), check status (`action: 'status'`), inspect live captured traffic (`action: 'get_traffic'`), or toggle intercept (`action: 'set_intercept'`).",
+    "   - Use `send_http_request` to dispatch HTTP/HTTPS requests with Wide's Pitcher engine.",
+    "   - Use `run_security_scan` to trigger AST & taint vulnerability scans.",
+    "   - Use `transform_data` to encode/decode/hash data in CyberChef.",
+    "   Actively call these tools to perform the actions directly!",
     projectInstructions && !hasInstructionsInSystem
       ? `\n## Project AI Instructions (.wide/ai-instructions.md — Mandatory Project Rules)\n${projectInstructions}`
       : "",
@@ -1219,8 +2283,13 @@ function aiWithAgentDirective(messages, root, allowWrites, projectInstructions =
   }
   if (root && allowWrites) {
     parts.push(
-      `[Agent Reminder: You are an autonomous coding agent inside Wide IDE (workspace: ${root}). ` +
-        `If the user is asking you to write a script, create a file, or edit/fix code in the project, DO NOT just print the code in chat — you MUST call write_file or edit_file (either via native tool call or <tool_call>{"name": "write_file", "arguments": {"path": "...", "content": "..."}}</tool_call>) to create or update the actual file in the project workspace. Reply in the user's language.]`
+      `[Agent Reminder: You are an autonomous coding and security agent inside Wide IDE (workspace: ${root}). ` +
+        `Wide IDE uniquely integrates code editing with live security & API tools: ` +
+        `Pitcher (send_http_request), Catcher Proxy & Pentest Workbench (manage_catcher), AST Security Scanner (run_security_scan), CyberChef Decoder (transform_data), and UI Navigation (open_tool_tab). ` +
+        `DO NOT say you cannot click or interact with Pitcher/Catcher in the UI — you have native tools for them! ` +
+        `If the user asks you to write code, create a file, or demonstrate/test Pitcher or Catcher, actively invoke your tools (` +
+        `open_tool_tab, manage_catcher, send_http_request, write_file, edit_file). ` +
+        `Apply secure coding practices and reply in the user's language (e.g. Türkçe).]`
     );
   }
   copy[last] = {
@@ -1327,6 +2396,9 @@ function registerAiAgentHandlers() {
       effort = "fast",
     } = request ?? {};
     const cleanEffort = effort === "thinking" ? "thinking" : "fast";
+    if (Array.isArray(request?.openTabs)) {
+      aiLastKnownOpenTabs = request.openTabs;
+    }
     if (!id) return { ok: false, error: "No turn id." };
 
     const egress = check({ channel: "ai:egress", args: [provider], subject: "user" });
@@ -1379,7 +2451,7 @@ function registerAiAgentHandlers() {
         return await aiRunOpenCodeTurn({
           root,
           model,
-          system,
+          system: prompt,
           messages,
           projectInstructions: projInstr.content,
           allowWrites: config.allowWrites,
@@ -1455,7 +2527,7 @@ function registerAiAgentHandlers() {
         await aiRunOpenCodeTurn({
           root: "",
           model,
-          system,
+          system: prompt,
           messages,
           projectInstructions: "",
           allowWrites: false,
@@ -1521,7 +2593,7 @@ function registerAiAgentHandlers() {
     if (gate) return gate;
     if (!root) return { ok: false, error: "No project is open." };
     try {
-      const info = await aiReadProjectInstructions(String(root));
+      const info = await aiReadProjectInstructions(String(root), true);
       return { ok: true, path: info.path, relativePath: info.relativePath, content: info.content, exists: info.exists };
     } catch (error) {
       return { ok: false, error: String((error && error.message) || error) };

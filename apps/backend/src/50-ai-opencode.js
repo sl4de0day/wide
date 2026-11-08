@@ -711,14 +711,56 @@ function openCodeResolveModel(raw, catalog) {
 }
 
 function openCodeMapToolName(name) {
-  const key = String(name || "").toLowerCase();
+  const clean = String(name || "").replace(/^mcp__(?:wide__)?|^wide_/, "");
+  const key = clean.toLowerCase();
   if (key === "read") return "read_file";
   if (key === "write") return "write_file";
   if (key === "edit" || key === "patch" || key === "multiedit") return "edit_file";
   if (key === "list" || key === "ls") return "list_dir";
   if (key === "grep" || key === "glob") return "search";
   if (key === "shell" || key === "bash") return "run_command";
-  return name || "tool";
+  return clean || name || "tool";
+}
+
+async function openCodeEnsureWideMcp(bridgePort, token, root) {
+  try {
+    const home = electron.app.getPath("home");
+    const globalConfigDir = node_path.join(home, ".config", "opencode");
+    const globalConfigFile = node_path.join(globalConfigDir, "opencode.json");
+
+    const mcpEntry = {
+      type: "local",
+      command: [process.execPath, node_path.join(appRoot(), "sidecar", "ai-mcp.cjs")],
+      environment: {
+        WIDE_AI_PORT: String(bridgePort),
+        WIDE_AI_TOKEN: token,
+        WIDE_AI_ROOT: root || "",
+      },
+    };
+
+    const updateConfig = async (filePath) => {
+      let existing = {};
+      try {
+        existing = JSON.parse(await promises.readFile(filePath, "utf8"));
+      } catch {
+        existing = {};
+      }
+      if (!existing || typeof existing !== "object") existing = {};
+      if (!existing.mcp || typeof existing.mcp !== "object") existing.mcp = {};
+      if (!existing.mcp.servers || typeof existing.mcp.servers !== "object") existing.mcp.servers = {};
+      existing.mcp.servers.wide = mcpEntry;
+      await promises.mkdir(node_path.dirname(filePath), { recursive: true });
+      await promises.writeFile(filePath, JSON.stringify(existing, null, 2), "utf8");
+    };
+
+    await updateConfig(globalConfigFile);
+
+    if (root) {
+      await updateConfig(node_path.join(root, ".opencode", "opencode.json")).catch(() => {});
+    }
+  } catch (error) {
+    console.error("[openCodeEnsureWideMcp] Failed to configure MCP:", error);
+  }
 }
 
 function openCodeExtractMessageText(message) {
@@ -807,6 +849,9 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
 
     const cleanup = () => {
       signal?.removeEventListener("abort", onAbort);
+      if (typeof aiUnregisterTurnBridge === "function") {
+        aiUnregisterTurnBridge(wideBridgeGlobalToken);
+      }
       if (sseRequest) {
         try {
           sseRequest.destroy();
@@ -867,6 +912,18 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
     signal?.addEventListener("abort", onAbort, { once: true });
 
     (async () => {
+      try {
+        if (typeof claudeToolBridge === "function") {
+          const bridge = await claudeToolBridge();
+          if (typeof aiRegisterTurnBridge === "function") {
+            aiRegisterTurnBridge(wideBridgeGlobalToken, root, send);
+          }
+          await openCodeEnsureWideMcp(bridge.port, wideBridgeGlobalToken, root);
+        }
+      } catch (err) {
+        console.error("[openCodeRunTurnV2] Tool bridge setup error:", err);
+      }
+
       const permissions = [
         { action: "*", resource: "*", effect: "allow" },
         { action: "read", resource: "*.env", effect: "deny" },

@@ -1,5 +1,5 @@
 pkgname=wide-ide
-pkgver=1.581126
+pkgver=1.681126
 pkgrel=1
 pkgdesc="Security-first IDE for the web stack — real-time vulnerability detection, built-in Catcher proxy & Pitcher API client"
 arch=('x86_64')

@@ -213,7 +213,7 @@ function ActivityButton({
         active ? "bg-selected text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
       )}
     >
-      <Icon className="size-5" strokeWidth={1.5} />
+      <Icon className="size-5" strokeWidth={1.8} />
     </button>
   );
 }
@@ -236,7 +236,7 @@ function ToolBarButton({ tool, active }: { tool: ToolButton; active: boolean }) 
         active ? "bg-selected text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
       )}
     >
-      <Icon className="size-5" strokeWidth={1.5} />
+      <Icon className="size-5" strokeWidth={1.8} />
     </button>
   );
 }
@@ -296,7 +296,7 @@ function ExtensionsFlyout({
           active ? "bg-selected text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
         )}
       >
-        <Icon className="size-5" strokeWidth={1.5} />
+        <Icon className="size-5" strokeWidth={1.8} />
       </button>
       <div
         onMouseEnter={show}
@@ -331,7 +331,7 @@ function ExtensionsFlyout({
                 item.active ? "bg-selected text-fg-bright" : "text-fg-dim hover:text-fg",
               )}
             >
-              <ItemIcon className="size-5" strokeWidth={1.5} />
+              <ItemIcon className="size-5" strokeWidth={1.8} />
             </button>
           );
         })}

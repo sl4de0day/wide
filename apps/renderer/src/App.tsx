@@ -1,4 +1,4 @@
-import { ChevronLeft, ShieldAlert } from "lucide-react";
+import { ChevronLeft, ShieldAlert, X } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -104,7 +104,7 @@ function RemoteFallbackNotice() {
         aria-label={t("Dismiss")}
         className="shrink-0 text-fg-faint transition-colors duration-100 hover:text-fg"
       >
-        ✕
+        <X className="size-3.5" strokeWidth={2} />
       </button>
     </div>
   );
@@ -670,6 +670,15 @@ export default function App() {
     setMounted((current) => (current.has(id) ? current : new Set(current).add(id)));
     (isBottom(id) ? setActiveBottom : setActiveSide)(id);
   };
+
+  useEffect(() => {
+    const handleOpenPanel = (e: Event) => {
+      const panelId = (e as CustomEvent<string>).detail;
+      if (panelId) openPanel(panelId);
+    };
+    window.addEventListener("wide:open-panel", handleOpenPanel);
+    return () => window.removeEventListener("wide:open-panel", handleOpenPanel);
+  }, []);
 
 
 
