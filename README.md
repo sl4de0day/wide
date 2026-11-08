@@ -22,6 +22,7 @@ Wide is a high-performance cross-platform application designed for speed and min
 
 - **Editor.** A fast multi-language code editor built on CodeMirror 6, with structure and symbol navigation, an integrated terminal, source control, and a debugger.
 - **Real-time security analysis.** An inspection engine flags likely vulnerabilities as you type — injection, XSS sinks, weak crypto, hardcoded secrets, and cross-file taint flow — each with a fix on hover.
+- **AI integration.** An autonomous coding and security agent powered by local Ollama/HuggingFace models or cloud providers (Gemini, Claude, DeepSeek). Features direct workspace editing, code inspection, interactive reasoning, and automated model management.
 - **Catcher.** A built-in web-security workbench: intercepting proxy, target site map, repeater, intruder, active scanner, OAST collaborator, and sequencer.
 - **Pitcher.** A complete API client: collections and environments, Bearer / Basic / API-key / OAuth 2.0 / Digest / AWS SigV4 auth, `pm.*` scripting and tests, a collection runner, and REST, GraphQL, WebSocket, SSE, and gRPC.
 - **Pentest browser.** A built-in browser wired into Catcher for proxying and inspection (WebView2 on Windows, embedded Chromium on Linux).
