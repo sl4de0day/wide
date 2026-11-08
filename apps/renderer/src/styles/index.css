@@ -520,6 +520,44 @@ button {
   }
 }
 
+@keyframes wide-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.wide-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--fg) 35%, transparent) 0%,
+    var(--fg) 50%,
+    color-mix(in srgb, var(--fg) 35%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: wide-shimmer 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes wide-step-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wide-step-item {
+  animation: wide-step-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 button:not(:disabled):active {
   transform: scale(0.985);
 }

@@ -4,12 +4,12 @@ import {
   AtSign,
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   ExternalLink,
   FileCode,
   ImagePlus,
-  Loader2,
   Mic,
   MicOff,
   Pencil,
@@ -645,6 +645,129 @@ function DiffSlidePanel({
   );
 }
 
+function ReactAtomIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="-11.5 -10.23174 23 20.46348" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="0" cy="0" r="2.05" fill="#00d8ff" />
+      <g stroke="#00d8ff" strokeWidth="1" fill="none">
+        <ellipse rx="11" ry="4.2" />
+        <ellipse rx="11" ry="4.2" transform="rotate(60)" />
+        <ellipse rx="11" ry="4.2" transform="rotate(120)" />
+      </g>
+    </svg>
+  );
+}
+
+function FileTypeBadge({ fileName, isCommand }: { fileName: string; isCommand?: boolean }) {
+  if (isCommand) {
+    return <Terminal className="size-3 text-fg-dim shrink-0" strokeWidth={2} />;
+  }
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) {
+    return <ReactAtomIcon className="size-3.5 shrink-0" />;
+  }
+  if (lower.endsWith(".ts")) {
+    return (
+      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#3178c6] bg-[#3178c6]/15 border border-[#3178c6]/30 leading-none select-none shrink-0">
+        TS
+      </span>
+    );
+  }
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
+    return (
+      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#f7df1e] bg-[#f7df1e]/15 border border-[#f7df1e]/30 leading-none select-none shrink-0">
+        JS
+      </span>
+    );
+  }
+  if (lower.endsWith(".py")) {
+    return (
+      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#3572A5] bg-[#3572A5]/15 border border-[#3572A5]/30 leading-none select-none shrink-0">
+        PY
+      </span>
+    );
+  }
+  if (lower.endsWith(".json")) {
+    return (
+      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#cb9c38] bg-[#cb9c38]/15 border border-[#cb9c38]/30 leading-none select-none shrink-0">
+        {"{}"}
+      </span>
+    );
+  }
+  if (lower.endsWith(".css") || lower.endsWith(".scss")) {
+    return (
+      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#b366ff] bg-[#b366ff]/15 border border-[#b366ff]/30 leading-none select-none shrink-0">
+        CSS
+      </span>
+    );
+  }
+  if (lower.endsWith(".html")) {
+    return (
+      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#e34c26] bg-[#e34c26]/15 border border-[#e34c26]/30 leading-none select-none shrink-0">
+        HTML
+      </span>
+    );
+  }
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
+    return (
+      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-fg-dim bg-panel border border-line/50 leading-none select-none shrink-0">
+        MD
+      </span>
+    );
+  }
+  return <FileCode className="size-3.5 text-fg-dim shrink-0" strokeWidth={1.75} />;
+}
+
+function extractLineRange(step: AiToolStep, rawTarget: string): string {
+  const input = (step.input && typeof step.input === "object" ? step.input : {}) as Record<string, unknown>;
+  const start = input.StartLine ?? input.start_line ?? input.start ?? input.fromLine ?? input.from;
+  const end = input.EndLine ?? input.end_line ?? input.end ?? input.toLine ?? input.to;
+  const single = input.line ?? input.Line ?? input.lineNumber;
+  if (start !== undefined && end !== undefined) {
+    return `#L${start}-${end}`;
+  }
+  if (start !== undefined) {
+    return `#L${start}`;
+  }
+  if (single !== undefined) {
+    return `#L${single}`;
+  }
+  const match = String(rawTarget).match(/(?:#L|:)(\d+)(?:-(\d+))?/i);
+  if (match) {
+    return match[2] ? `#L${match[1]}-${match[2]}` : `#L${match[1]}`;
+  }
+  return "";
+}
+
+function extractCommandInfo(step: AiToolStep): { commandText: string; exitCode: number | null } {
+  const input = (step.input && typeof step.input === "object" ? step.input : {}) as Record<string, unknown>;
+  let commandText = "";
+  if (typeof input.toolSummary === "string" && input.toolSummary.trim()) {
+    commandText = input.toolSummary.trim();
+  } else if (typeof input.command === "string" && input.command.trim()) {
+    commandText = input.command.trim();
+  } else if (typeof input.CommandLine === "string" && input.CommandLine.trim()) {
+    commandText = input.CommandLine.trim();
+  } else if (Array.isArray(input.args)) {
+    commandText = `git ${input.args.map(String).join(" ")}`;
+  } else {
+    commandText = stepTarget(step) || step.name;
+  }
+
+  let exitCode: number | null = null;
+  const rawResult = step.result || "";
+  const exitMatch = rawResult.match(/^exit\s+(\d+)/i) || rawResult.match(/exited with code\s+(\d+)/i);
+  if (exitMatch) {
+    exitCode = parseInt(exitMatch[1], 10);
+  }
+
+  return { commandText, exitCode };
+}
+
+function cleanCommandResult(raw: string): string {
+  return raw.replace(/^exit\s+\d+\r?\n?/i, "").trim() || "(no output)";
+}
+
 interface EnrichedStep {
   key: string;
   step: AiToolStep;
@@ -652,10 +775,12 @@ interface EnrichedStep {
   fullPath: string;
   fileName: string;
   actionLabel: string;
-  actionKind: "edited" | "created" | "analyzed" | "other";
+  actionKind: "edited" | "created" | "analyzed" | "command" | "other";
   added: number;
   removed: number;
-  stepSec: number | null;
+  lineRange: string;
+  commandText: string;
+  exitCode: number | null;
 }
 
 function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof useT>, turnId: string): EnrichedStep[] {
@@ -664,28 +789,29 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
     const fullPath = step.filePath || (OPENS_A_FILE.has(step.name) ? resolvePath(root, rawTarget) : "");
     const fileName = fullPath ? basename(fullPath) : basename(rawTarget) || rawTarget;
     let actionLabel = step.name;
-    let actionKind: "edited" | "created" | "analyzed" | "other" = "other";
+    let actionKind: "edited" | "created" | "analyzed" | "command" | "other" = "other";
 
     if (step.name === "read_file" || step.name === "open_file") {
-      actionLabel = step.done ? t("Analyzed") : t("Analyzing");
+      actionLabel = t("Analyzed");
       actionKind = "analyzed";
     } else if (step.name === "write_file") {
       if (step.existed === false) {
-        actionLabel = step.done ? t("Created") : t("Creating");
+        actionLabel = t("Created");
         actionKind = "created";
       } else {
-        actionLabel = step.done ? t("Edited") : t("Editing");
+        actionLabel = t("Edited");
         actionKind = "edited";
       }
     } else if (step.name === "edit_file") {
-      actionLabel = step.done ? t("Edited") : t("Editing");
+      actionLabel = t("Edited");
       actionKind = "edited";
-    } else if (step.name === "search" || step.name === "find_relevant") {
-      actionLabel = step.done ? t("Searched") : t("Searching");
-    } else if (step.name === "list_dir" || step.name === "create_dir") {
-      actionLabel = step.done ? t("Explored directory") : t("Exploring directory");
     } else if (step.name === "run_command" || step.name === "git") {
-      actionLabel = step.done ? t("Ran command") : t("Running command");
+      actionLabel = t("Ran");
+      actionKind = "command";
+    } else if (step.name === "search" || step.name === "find_relevant") {
+      actionLabel = t("Searched");
+    } else if (step.name === "list_dir" || step.name === "create_dir") {
+      actionLabel = t("Explored");
     }
 
     let added = 0;
@@ -696,10 +822,8 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
       removed = counts.removed;
     }
 
-    const stepSec =
-      step.startedAt && step.endedAt
-        ? Math.max(0.1, Math.round((step.endedAt - step.startedAt) / 100) / 10)
-        : null;
+    const lineRange = actionKind === "analyzed" ? extractLineRange(step, rawTarget) : "";
+    const { commandText, exitCode } = extractCommandInfo(step);
 
     return {
       key: `${turnId}-step-${index}`,
@@ -711,9 +835,157 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
       actionKind,
       added,
       removed,
-      stepSec,
+      lineRange,
+      commandText,
+      exitCode,
     };
   });
+}
+
+function AgentProcessStream({
+  steps,
+  streaming,
+  activeInspectKey,
+  onInspectFile,
+  onFailure,
+  turnId,
+}: {
+  steps: AiToolStep[];
+  streaming: boolean;
+  activeInspectKey: string;
+  onInspectFile: (target: InspectorTarget) => void;
+  onFailure: (message: string) => void;
+  turnId: string;
+}) {
+  const t = useT();
+  const root = useWorkspace((state) => state.root) ?? "";
+  const enrichedSteps = useMemo(() => enrichSteps(steps, root, t, turnId), [steps, root, t, turnId]);
+  const [expandedCommands, setExpandedCommands] = useState<Record<string, boolean>>({});
+
+  const toggleCommand = (key: string) => {
+    setExpandedCommands((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleStepClick = async (item: EnrichedStep) => {
+    if (!item.fullPath) return;
+    if (item.step.newContent !== undefined) {
+      onInspectFile({
+        key: item.key,
+        path: item.fullPath,
+        relativePath: item.rawTarget || basename(item.fullPath),
+        action: item.actionKind === "edited" || item.actionKind === "created" ? item.actionKind : "analyzed",
+        oldContent: item.step.oldContent ?? "",
+        newContent: item.step.newContent,
+      });
+      return;
+    }
+    const read = await bridge.readFile(item.fullPath);
+    if (!read || read.error || read.content == null) {
+      onFailure(t("{name} could not be opened.", { name: item.fileName }));
+      return;
+    }
+    onInspectFile({
+      key: item.key,
+      path: item.fullPath,
+      relativePath: item.rawTarget || basename(item.fullPath),
+      action: "analyzed",
+      oldContent: item.step.oldContent ?? "",
+      newContent: read.content,
+    });
+  };
+
+  if (enrichedSteps.length === 0 && !streaming) return null;
+
+  return (
+    <div className="flex flex-col gap-0.5 my-1.5 font-sans">
+      {enrichedSteps.map((item) => {
+        const isSelected = activeInspectKey === item.key;
+        const isCommand = item.actionKind === "command";
+        const isCommandExpanded = Boolean(expandedCommands[item.key]);
+
+        return (
+          <div key={item.key} className="flex flex-col">
+            <div
+              onClick={() => {
+                if (isCommand) {
+                  toggleCommand(item.key);
+                } else if (item.fullPath) {
+                  void handleStepClick(item);
+                }
+              }}
+              className={cn(
+                "wide-step-item group flex items-center gap-2 py-0.5 px-1.5 -mx-1.5 rounded text-left transition-all duration-150 cursor-pointer select-none",
+                isSelected
+                  ? "bg-accent/10 text-fg"
+                  : "hover:bg-hover/50 text-fg-dim",
+              )}
+            >
+              <span className="text-[12px] text-fg-dim/80 font-normal shrink-0">
+                {item.actionLabel}
+              </span>
+
+              <FileTypeBadge fileName={item.fileName} isCommand={isCommand} />
+
+              <span
+                className={cn(
+                  "min-w-0 truncate text-[12px] transition-colors",
+                  isCommand
+                    ? "font-sans text-fg-dim group-hover:text-fg"
+                    : "font-mono text-fg group-hover:text-fg",
+                )}
+                title={item.fullPath || item.commandText || item.fileName}
+              >
+                {isCommand ? item.commandText : item.fileName}
+              </span>
+
+              {item.lineRange && (
+                <span className="font-mono text-[11px] text-fg-faint/70 select-none shrink-0">
+                  {item.lineRange}
+                </span>
+              )}
+
+              {(item.added > 0 || item.removed > 0) && (
+                <div className="flex items-center gap-1 font-mono text-[11px] shrink-0 select-none">
+                  {item.added > 0 && <span className="text-emerald-400 font-medium">+{item.added}</span>}
+                  {item.removed > 0 && <span className="text-rose-400 font-medium">−{item.removed}</span>}
+                </div>
+              )}
+
+              {isCommand && item.exitCode !== null && item.exitCode !== 0 && (
+                <span className="text-[11px] text-rose-400 shrink-0 select-none">
+                  · {t("Exited with code {code}", { code: item.exitCode })}
+                </span>
+              )}
+
+              {isCommand && (
+                <ChevronRight
+                  className={cn(
+                    "size-3 text-fg-faint/60 group-hover:text-fg transition-transform shrink-0 ml-auto",
+                    isCommandExpanded && "rotate-90",
+                  )}
+                  strokeWidth={2}
+                />
+              )}
+            </div>
+
+            {isCommand && isCommandExpanded && (
+              <div className="my-1 ml-6 mr-1 p-2 rounded-md bg-canvas/80 border border-line/60 font-mono text-[11px] text-fg-dim max-h-48 overflow-auto whitespace-pre-wrap select-text wide-enter-fade">
+                {cleanCommandResult(item.step.result)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {streaming && (
+        <div className="flex items-center gap-2 pt-1 pb-0.5 select-none wide-step-item">
+          <span className="wide-shimmer-text font-medium text-[12.5px] tracking-wide">
+            {t("Working")}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const Turn = memo(function Turn({
@@ -778,47 +1050,7 @@ const Turn = memo(function Turn({
   }
 
   const hasThinking = Boolean(turn.thinking && turn.thinking.trim().length > 0);
-  const isWaiting = Boolean(turn.streaming && !shown && turn.steps.length === 0);
-
-  const root = useWorkspace((state) => state.root) ?? "";
-
-  const enrichedSteps = useMemo(
-    () => enrichSteps(turn.steps, root, t, turn.id),
-    [turn.steps, root, t, turn.id],
-  );
-
-  const activeStep = useMemo(
-    () => enrichedSteps.find((s) => !s.step.done) ?? (turn.streaming && enrichedSteps.length > 0 ? enrichedSteps[enrichedSteps.length - 1] : null),
-    [enrichedSteps, turn.streaming],
-  );
-
-  const handleStepClick = useCallback(async (item: EnrichedStep) => {
-    if (!item.fullPath) return;
-    if (item.step.newContent !== undefined) {
-      onInspectFile({
-        key: item.key,
-        path: item.fullPath,
-        relativePath: item.rawTarget || basename(item.fullPath),
-        action: item.actionKind === "other" ? "analyzed" : item.actionKind,
-        oldContent: item.step.oldContent ?? "",
-        newContent: item.step.newContent,
-      });
-      return;
-    }
-    const read = await bridge.readFile(item.fullPath);
-    if (!read || read.error || read.content == null) {
-      onFailure(t("{name} could not be opened.", { name: item.fileName }));
-      return;
-    }
-    onInspectFile({
-      key: item.key,
-      path: item.fullPath,
-      relativePath: item.rawTarget || basename(item.fullPath),
-      action: item.actionKind === "other" ? "analyzed" : item.actionKind,
-      oldContent: item.step.oldContent ?? "",
-      newContent: read.content,
-    });
-  }, [onInspectFile, onFailure, t]);
+  const showStream = turn.steps.length > 0 || (turn.streaming && !shown);
 
   const thoughtSec = useMemo(() => {
     if (!turn.startedAt || turn.streaming) return 0;
@@ -834,22 +1066,15 @@ const Turn = memo(function Turn({
 
   return (
     <div className="group/turn relative mr-auto flex w-full flex-col gap-2 self-start py-1 text-left">
-      {turn.streaming && activeStep && (
-        <div className="flex items-center gap-1.5 py-1">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-accent border border-accent/40 animate-pulse">
-            <Loader2 className="size-2.5 animate-spin text-accent" />
-            <span>{activeStep.actionLabel}</span>
-            {activeStep.fileName && <span className="font-mono text-fg-dim">{activeStep.fileName}</span>}
-          </span>
-        </div>
-      )}
-
-      {isWaiting && !activeStep && (
-        <div className="flex items-center gap-1.5 py-2 px-1 select-none" aria-label="Thinking">
-          <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
-          <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
-          <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
-        </div>
+      {showStream && (
+        <AgentProcessStream
+          steps={turn.steps}
+          streaming={turn.streaming}
+          activeInspectKey={activeInspectKey}
+          onInspectFile={onInspectFile}
+          onFailure={onFailure}
+          turnId={turn.id}
+        />
       )}
 
       {shown && (
@@ -859,7 +1084,7 @@ const Turn = memo(function Turn({
         </div>
       )}
 
-      {!turn.streaming && (shown || last || (turn.usage && turn.usage.total > 0) || thoughtSec > 0 || enrichedSteps.length > 0) && (
+      {!turn.streaming && (shown || last || (turn.usage && turn.usage.total > 0) || thoughtSec > 0) && (
         <div className="flex items-center gap-1.5 pt-0.5">
           {shown && (
             <button
@@ -895,44 +1120,6 @@ const Turn = memo(function Turn({
             </button>
           )}
           <div className="ml-auto flex items-center gap-1.5 flex-wrap">
-            {enrichedSteps.map((item) => {
-              const isFileAction = Boolean(item.fullPath);
-              const isSelected = activeInspectKey === item.key;
-              if (isFileAction) {
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => void handleStepClick(item)}
-                    title={item.fullPath}
-                    className={cn(
-                      "flex items-center gap-1 rounded-full bg-panel px-2.5 py-0.5 text-[10px] border transition-colors cursor-pointer",
-                      isSelected
-                        ? "border-accent text-accent bg-accent/10"
-                        : "text-fg-faint border-line/50 hover:text-fg hover:border-line",
-                    )}
-                  >
-                    <span>{item.actionLabel}</span>
-                    <span className="font-mono text-fg-dim">{item.fileName}</span>
-                    {(item.added > 0 || item.removed > 0) && (
-                      <span className="font-mono font-medium text-emerald-400">+{item.added}</span>
-                    )}
-                    {item.removed > 0 && (
-                      <span className="font-mono font-medium text-rose-400">−{item.removed}</span>
-                    )}
-                  </button>
-                );
-              }
-              return (
-                <span
-                  key={item.key}
-                  className="flex items-center gap-1 rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-fg-faint border border-line/50"
-                >
-                  <span>{item.actionLabel}</span>
-                  {item.fileName && <span className="font-mono text-fg-dim truncate max-w-[120px]">{item.fileName}</span>}
-                </span>
-              );
-            })}
             {thoughtSec > 0 && (
               hasThinking ? (
                 <button
