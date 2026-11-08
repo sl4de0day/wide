@@ -147,7 +147,7 @@ export function breakpointSupport(filePath: string): Extension {
         height: "7px",
       },
       ".cm-paused-line": {
-        backgroundColor: "color-mix(in srgb, var(--status-warn, #d9a441) 22%, transparent)",
+        backgroundColor: "color-mix(in srgb, var(--status-warn) 22%, transparent)",
       },
     }),
   ];

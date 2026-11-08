@@ -895,9 +895,9 @@ function ResponseInterceptEditor({ response, count }: { response: InterceptedRes
   };
 
   return (
-    <div className="wide-enter-fade shrink-0 border-b-2 border-sky-500/50 bg-sky-500/5">
+    <div className="wide-enter-fade shrink-0 border-b-2 border-accent/50 bg-accent/5">
       <div className="flex items-center gap-2 px-3 py-1.5">
-        <Reply className="size-3.5 shrink-0 text-sky-400" strokeWidth={1.75} />
+        <Reply className="size-3.5 shrink-0 text-accent" strokeWidth={1.75} />
         <span className="min-w-0 flex-1 truncate text-[11px] text-fg" title={response.url}>
           {t("Held response")}: {response.status} {response.host}
         </span>
@@ -1209,7 +1209,7 @@ export function ProxyPanel() {
                       <Reply className="size-3.5 text-fg-faint" strokeWidth={1.75} />
                       <span>{t("Intercept responses")}</span>
                     </div>
-                    <span className={cn("text-[10px] font-medium", interceptingResponses ? "text-sky-400" : "text-fg-faint")}>
+                    <span className={cn("text-[10px] font-medium", interceptingResponses ? "text-accent" : "text-fg-faint")}>
                       {interceptingResponses ? t("On") : t("Off")}
                     </span>
                   </button>

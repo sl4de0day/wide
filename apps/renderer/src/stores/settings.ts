@@ -132,6 +132,9 @@ export const useSettings = create<SettingsState>((set, get) => ({
   set: (patch) => {
     const next = { ...get(), ...patch };
     set(patch);
+    applyTheme();
+    applySyntaxPalette();
+    applyLanguage();
     const values = valuesOf(next);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
@@ -139,9 +142,6 @@ export const useSettings = create<SettingsState>((set, get) => ({
 
     }
     persistToDisk(values);
-    applySyntaxPalette();
-    applyLanguage();
-    applyTheme();
   },
 
   reset: () => {
@@ -152,17 +152,16 @@ export const useSettings = create<SettingsState>((set, get) => ({
 
     }
     persistToDisk({ ...DEFAULTS });
+    applyTheme();
     applySyntaxPalette();
     applyLanguage();
-    applyTheme();
   },
 }));
 
 export function applyTheme(): void {
   const { theme } = useSettings.getState();
-  let activeTheme = theme;
-  if (activeTheme === BASE_THEME) delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = activeTheme;
+  const activeTheme = theme || BASE_THEME;
+  document.documentElement.dataset.theme = activeTheme;
 }
 
 if (typeof window !== "undefined" && typeof window.matchMedia === "function") {

@@ -471,10 +471,10 @@ button {
 
 .cm-editor .cm-cursor,
 .cm-editor .cm-dropCursor {
-  border-left-color: var(--mono-50);
+  border-left-color: var(--fg-bright);
 }
 .cm-editor .cm-gutters {
-  background: var(--mono-800);
+  background: var(--canvas);
   color: var(--syn-comment);
   border: none;
 }

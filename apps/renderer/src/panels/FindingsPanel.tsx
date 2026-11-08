@@ -166,7 +166,7 @@ const SEVERITY_TONE: Record<Severity, string> = {
   critical: "bg-rose-500/15 text-rose-300 border-rose-500/40",
   high: "bg-orange-500/15 text-orange-300 border-orange-500/40",
   medium: "bg-amber-500/15 text-amber-300 border-amber-500/40",
-  low: "bg-sky-500/15 text-sky-300 border-sky-500/40",
+  low: "bg-accent/15 text-accent border-accent/40",
   info: "bg-fg/10 text-fg-dim border-line",
 };
 

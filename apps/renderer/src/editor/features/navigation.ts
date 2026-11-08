@@ -265,6 +265,6 @@ const navTheme = EditorView.baseTheme({
     borderRadius: "2px",
   },
   ".cm-nav-write": {
-    backgroundColor: "color-mix(in srgb, var(--status-warn, #d9a441) 26%, transparent)",
+    backgroundColor: "color-mix(in srgb, var(--status-warn) 26%, transparent)",
   },
 });

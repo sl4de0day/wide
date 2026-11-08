@@ -180,13 +180,13 @@ export function jwtHover(): Extension {
       color: "var(--fg)",
     },
     ".cm-jwt-pill-danger": {
-      backgroundColor: "rgba(239, 68, 68, 0.2)",
-      color: "#ef4444",
+      backgroundColor: "color-mix(in srgb, var(--status-error) 20%, transparent)",
+      color: "var(--status-error)",
       fontWeight: "600",
     },
     ".cm-jwt-pill-success": {
-      backgroundColor: "rgba(34, 197, 94, 0.15)",
-      color: "#22c55e",
+      backgroundColor: "color-mix(in srgb, var(--status-ok) 15%, transparent)",
+      color: "var(--status-ok)",
     },
     ".cm-jwt-body": {
       display: "flex",

@@ -139,7 +139,7 @@ export function signatureHelp(ext: string, filePath: string, root: string | null
         maxWidth: "480px",
         padding: "4px 8px",
         borderRadius: "4px",
-        border: "1px solid var(--line-strong, #d8dee933)",
+        border: "1px solid var(--line-strong)",
         background: "var(--raised)",
         color: "var(--fg-muted)",
         fontFamily: "var(--font-mono)",

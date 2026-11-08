@@ -652,8 +652,8 @@ function DiffSlidePanel({
 function ReactAtomIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="-11.5 -10.23174 23 20.46348" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="0" cy="0" r="2.05" fill="#00d8ff" />
-      <g stroke="#00d8ff" strokeWidth="1" fill="none">
+      <circle cx="0" cy="0" r="2.05" fill="var(--accent)" />
+      <g stroke="var(--accent)" strokeWidth="1" fill="none">
         <ellipse rx="11" ry="4.2" />
         <ellipse rx="11" ry="4.2" transform="rotate(60)" />
         <ellipse rx="11" ry="4.2" transform="rotate(120)" />
@@ -670,56 +670,21 @@ function FileTypeBadge({ fileName, isCommand }: { fileName: string; isCommand?: 
   if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) {
     return <ReactAtomIcon className="size-3.5 shrink-0" />;
   }
-  if (lower.endsWith(".ts")) {
-    return (
-      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#3178c6] bg-[#3178c6]/15 border border-[#3178c6]/30 leading-none select-none shrink-0">
-        TS
-      </span>
-    );
-  }
-  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
-    return (
-      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#f7df1e] bg-[#f7df1e]/15 border border-[#f7df1e]/30 leading-none select-none shrink-0">
-        JS
-      </span>
-    );
-  }
-  if (lower.endsWith(".py")) {
-    return (
-      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#3572A5] bg-[#3572A5]/15 border border-[#3572A5]/30 leading-none select-none shrink-0">
-        PY
-      </span>
-    );
-  }
-  if (lower.endsWith(".json")) {
-    return (
-      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#cb9c38] bg-[#cb9c38]/15 border border-[#cb9c38]/30 leading-none select-none shrink-0">
-        {"{}"}
-      </span>
-    );
-  }
-  if (lower.endsWith(".css") || lower.endsWith(".scss")) {
-    return (
-      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#b366ff] bg-[#b366ff]/15 border border-[#b366ff]/30 leading-none select-none shrink-0">
-        CSS
-      </span>
-    );
-  }
-  if (lower.endsWith(".html")) {
-    return (
-      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-[#e34c26] bg-[#e34c26]/15 border border-[#e34c26]/30 leading-none select-none shrink-0">
-        HTML
-      </span>
-    );
-  }
-  if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
-    return (
-      <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-fg-dim bg-panel border border-line/50 leading-none select-none shrink-0">
-        MD
-      </span>
-    );
-  }
-  return <FileCode className="size-3.5 text-fg-dim shrink-0" strokeWidth={1.75} />;
+  let label = "CODE";
+  if (lower.endsWith(".ts")) label = "TS";
+  else if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) label = "JS";
+  else if (lower.endsWith(".py")) label = "PY";
+  else if (lower.endsWith(".json")) label = "{}";
+  else if (lower.endsWith(".css") || lower.endsWith(".scss")) label = "CSS";
+  else if (lower.endsWith(".html")) label = "HTML";
+  else if (lower.endsWith(".md") || lower.endsWith(".markdown")) label = "MD";
+  else return <FileCode className="size-3.5 text-fg-dim shrink-0" strokeWidth={1.75} />;
+
+  return (
+    <span className="px-1 py-0.5 rounded text-[9px] font-bold font-mono text-fg-dim bg-canvas border border-line/60 leading-none select-none shrink-0">
+      {label}
+    </span>
+  );
 }
 
 function extractLineRange(step: AiToolStep, rawTarget: string): string {
@@ -2164,7 +2129,7 @@ export function AiChatView({ id }: { id: string }) {
                       disabled={!draft.trim() || !ready || !root || !loaded}
                       title={t("Send")}
                       aria-label={t("Send")}
-                      className="flex size-8 items-center justify-center rounded-full bg-[#2F71E3] hover:bg-[#2563eb] text-white shadow-sm transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                      className="flex size-8 items-center justify-center rounded-full bg-accent hover:opacity-90 text-white shadow-sm transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
                     >
                       <ArrowRight className="size-4" strokeWidth={2.5} />
                     </button>

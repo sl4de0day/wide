@@ -1,15 +1,15 @@
 
 
-const BLUE = "#81a1c1";
-const CYAN = "#88c0d0";
-const TEAL = "#8fbcbb";
-const GREEN = "#a3be8c";
-const YELLOW = "#ebcb8b";
-const ORANGE = "#d08770";
-const RED = "#bf616a";
-const PURPLE = "#b48ead";
-const DIM = "#6d7a91";
-const DEFAULT = "#7b88a1";
+const BLUE = "var(--accent)";
+const CYAN = "var(--syn-function)";
+const TEAL = "var(--syn-type)";
+const GREEN = "var(--status-ok)";
+const YELLOW = "var(--status-warn)";
+const ORANGE = "var(--syn-constant)";
+const RED = "var(--status-error)";
+const PURPLE = "var(--syn-keyword)";
+const DIM = "var(--fg-faint)";
+const DEFAULT = "var(--fg-dim)";
 
 const BY_NAME: Readonly<Record<string, string>> = {
 

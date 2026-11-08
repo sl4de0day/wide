@@ -84,7 +84,7 @@ function StreamerChip() {
         toast.info("Streamer mode disabled");
       }}
       title="Streamer Mode is ON (Secrets & keys are masked). Click to disable."
-      className="flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30 transition-colors"
+      className="flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium bg-accent/20 text-accent border border-accent/40 hover:bg-accent/30 transition-colors"
     >
       <EyeOff className="size-3" strokeWidth={2} />
       <span>Streamer Mode</span>

@@ -269,7 +269,7 @@ const Row = memo(function Row({
               ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
               : badge.maxSeverity === "medium"
               ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-              : "bg-blue-500/20 text-blue-300 border border-blue-500/40",
+              : "bg-accent/20 text-accent border border-accent/40",
           )}
         >
           {badge.count}

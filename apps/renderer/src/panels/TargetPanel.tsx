@@ -26,7 +26,7 @@ function statusTone(status: number): string {
 function methodBadgeColor(method: string): string {
   const m = (method || "").toUpperCase();
   if (m === "GET") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-400";
-  if (m === "POST") return "border-sky-500/40 bg-sky-500/10 text-sky-400";
+  if (m === "POST") return "border-accent/40 bg-accent/10 text-accent";
   if (m === "PUT") return "border-amber-500/40 bg-amber-500/10 text-amber-400";
   if (m === "DELETE") return "border-rose-500/40 bg-rose-500/10 text-rose-400";
   if (m === "PATCH") return "border-purple-500/40 bg-purple-500/10 text-purple-400";
