@@ -664,7 +664,7 @@ export function useModelLabel(): { label: string; ready: boolean } {
   };
 }
 
-export function ModelPicker() {
+export function ModelPicker({ className }: { className?: string } = {}) {
   const t = useT();
   const { label, ready } = useModelLabel();
   const [open, setOpen] = useState(false);
@@ -703,8 +703,12 @@ export function ModelPicker() {
         onClick={() => setOpen((was) => !was)}
         title={t("Providers and models")}
         className={cn(
-          "flex max-w-[320px] items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors duration-150",
-          open ? "border-accent bg-hover text-fg" : "border-line text-fg-dim hover:bg-hover hover:text-fg",
+          "flex max-w-[320px] items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] font-medium transition-colors duration-150",
+          className
+            ? className
+            : open
+              ? "border border-accent bg-hover text-fg"
+              : "border border-line text-fg-dim hover:bg-hover hover:text-fg",
         )}
       >
         <span className={cn("size-1.5 shrink-0 rounded-full", ready ? "bg-emerald-400" : "bg-fg-faint/40")} />

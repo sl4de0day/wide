@@ -1,7 +1,9 @@
 import {
   AlertCircle,
   ArrowDown,
+  ArrowRight,
   AtSign,
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -9,16 +11,18 @@ import {
   Download,
   ExternalLink,
   FileCode,
+  FolderOpen,
   ImagePlus,
   Mic,
   MicOff,
   Pencil,
+  Plus,
   RefreshCw,
-  Send,
   Settings2,
   Square,
   Terminal,
   X,
+  Zap,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorState } from "@codemirror/state";
@@ -1161,70 +1165,212 @@ const Turn = memo(function Turn({
   );
 });
 
-function AttachButton({ session }: { session: string }) {
+function PlusMenu({
+  session,
+  onInsertMention,
+  onPickImage,
+  onExport,
+  onOpenInstructions,
+  onCompact,
+}: {
+  session: string;
+  onInsertMention: () => void;
+  onPickImage: () => void;
+  onExport?: () => void;
+  onOpenInstructions?: () => void;
+  onCompact?: () => void;
+}) {
   const t = useT();
   const root = useWorkspace((state) => state.root);
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"menu" | "files">("menu");
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<{ path: string; relativePath: string }[]>([]);
 
   useEffect(() => {
-    if (!open || !root) return;
-    setQuery("");
-    void bridge.listProjectFiles(root).then((reply) => setFiles(reply.files ?? []));
-  }, [open, root]);
+    if (!open) {
+      setMode("menu");
+      setQuery("");
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (mode === "files" && root) {
+      void bridge.listProjectFiles(root).then((reply) => setFiles(reply.files ?? []));
+    }
+  }, [mode, root]);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     return files.filter((file) => !q || file.relativePath.toLowerCase().includes(q)).slice(0, 30);
   }, [files, query]);
 
+  const handlePickFiles = async () => {
+    const res = await bridge.openFile();
+    if (res && res.path) {
+      useAi.getState().attach(session, res.path);
+      setOpen(false);
+    }
+  };
+
+  const handlePickFolder = async () => {
+    const res = await bridge.openFolder();
+    if (res && res.path) {
+      useAi.getState().attach(session, res.path);
+      setOpen(false);
+    }
+  };
+
   return (
     <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={t("Attach a file as context")}
-        aria-label={t("Attach a file as context")}
+        title={t("Add context")}
+        aria-label={t("Add context")}
         className={cn(
-          "flex size-7 items-center justify-center rounded-lg border border-line/70 transition-colors duration-100 hover:bg-hover",
-          open ? "text-fg bg-hover" : "text-fg-faint hover:text-fg",
+          "flex size-7 items-center justify-center rounded-lg text-fg-dim transition-colors hover:bg-hover hover:text-fg",
+          open && "bg-hover text-fg",
         )}
       >
-        <AtSign className="size-3.5" strokeWidth={1.75} />
+        <Plus className="size-4" strokeWidth={2} />
       </button>
+
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-50 mb-1 w-[min(360px,80vw)] overflow-hidden rounded-xl border border-line bg-panel shadow-2xl">
-            <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("Attach a file…")}
-              spellCheck={false}
-              className="w-full border-b border-line bg-transparent px-3 py-2 text-[12px] text-fg outline-none placeholder:text-fg-faint"
-            />
-            <div className="max-h-48 overflow-auto py-1">
-              {matches.length === 0 ? (
-                <p className="px-3 py-2 text-[11px] text-fg-faint">{root ? t("No files match.") : t("Open a folder first.")}</p>
-              ) : (
-                matches.map((file) => (
+          <div className="wide-pop-up absolute bottom-full left-0 z-50 mb-2 w-52 overflow-hidden rounded-xl border border-line bg-panel p-1.5 shadow-2xl">
+            {mode === "menu" ? (
+              <div className="flex flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setMode("files")}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+                >
+                  <FileCode className="size-4 text-accent" strokeWidth={1.75} />
+                  <span>{t("Files")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePickFolder()}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+                >
+                  <FolderOpen className="size-4 text-accent" strokeWidth={1.75} />
+                  <span>{t("Folder")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onInsertMention();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+                >
+                  <AtSign className="size-4 text-accent" strokeWidth={1.75} />
+                  <span>{t("Mention (@)")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onPickImage();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+                >
+                  <ImagePlus className="size-4 text-accent" strokeWidth={1.75} />
+                  <span>{t("Attach image")}</span>
+                </button>
+                {onExport && (
                   <button
-                    key={file.path}
                     type="button"
                     onClick={() => {
-                      useAi.getState().attach(session, file.path);
                       setOpen(false);
+                      onExport();
                     }}
-                    className="block w-full truncate px-3 py-1.5 text-left text-[12px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
-                    title={file.relativePath}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                   >
-                    {file.relativePath}
+                    <Download className="size-4 text-accent" strokeWidth={1.75} />
+                    <span>{t("Export conversation as Markdown")}</span>
                   </button>
-                ))
-              )}
-            </div>
+                )}
+                {onCompact && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      onCompact();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+                  >
+                    <RefreshCw className="size-4 text-accent" strokeWidth={1.75} />
+                    <span>{t("Compact chat")}</span>
+                  </button>
+                )}
+                {onOpenInstructions && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      onOpenInstructions();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+                  >
+                    <Settings2 className="size-4 text-accent" strokeWidth={1.75} />
+                    <span>{t("Project AI Instructions (.wide/ai-instructions.md)")}</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5 border-b border-line px-2 py-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMode("menu")}
+                    className="flex size-6 items-center justify-center rounded text-fg-faint hover:bg-hover hover:text-fg"
+                  >
+                    <ChevronDown className="size-3.5 rotate-90" />
+                  </button>
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={t("Search files…")}
+                    spellCheck={false}
+                    className="min-w-0 flex-1 bg-transparent text-[12px] text-fg outline-none placeholder:text-fg-faint"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handlePickFiles()}
+                    title={t("Browse…")}
+                    className="text-[10px] text-accent hover:underline shrink-0"
+                  >
+                    {t("Browse…")}
+                  </button>
+                </div>
+                <div className="max-h-48 overflow-auto py-1">
+                  {matches.length === 0 ? (
+                    <p className="px-3 py-2 text-[11px] text-fg-faint">
+                      {root ? t("No files match.") : t("Open a folder first.")}
+                    </p>
+                  ) : (
+                    matches.map((file) => (
+                      <button
+                        key={file.path}
+                        type="button"
+                        onClick={() => {
+                          useAi.getState().attach(session, file.path);
+                          setOpen(false);
+                        }}
+                        className="block w-full truncate px-3 py-1.5 text-left text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg font-mono"
+                        title={file.relativePath}
+                      >
+                        {file.relativePath}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1253,29 +1399,44 @@ function EffortToggle() {
         title={t("Response effort level")}
         aria-label={t("Response effort level")}
         className={cn(
-          "flex items-center gap-1 rounded-lg border border-line/70 px-2.5 py-1 text-[11px] transition-colors duration-100 hover:bg-hover",
-          open ? "text-fg bg-hover" : "text-fg-faint hover:text-fg",
+          "flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] font-medium text-fg-dim transition-colors hover:bg-hover hover:text-fg",
+          open && "text-fg bg-hover",
         )}
       >
+        {current.value === "fast" ? (
+          <Zap className="size-3.5 text-amber-400 shrink-0" strokeWidth={2} />
+        ) : (
+          <Brain className="size-3.5 text-sky-400 shrink-0" strokeWidth={2} />
+        )}
         <span>{t(current.label)}</span>
-        <ChevronDown className="size-3 shrink-0" strokeWidth={2} />
+        <ChevronDown className={cn("size-3 shrink-0 opacity-60 transition-transform", open && "rotate-180")} strokeWidth={2} />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-50 mb-1 w-44 overflow-hidden rounded-xl border border-line bg-panel shadow-2xl">
+          <div className="wide-pop-up absolute bottom-full right-0 z-50 mb-2 w-48 overflow-hidden rounded-xl border border-line bg-panel p-1 shadow-2xl">
             {EFFORT_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => { setEffort(opt.value); setOpen(false); }}
+                onClick={() => {
+                  setEffort(opt.value);
+                  setOpen(false);
+                }}
                 className={cn(
-                  "flex w-full flex-col px-3 py-2 text-left transition-colors duration-100 hover:bg-hover",
-                  effort === opt.value ? "text-fg bg-hover" : "text-fg-dim",
+                  "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover",
+                  effort === opt.value ? "bg-hover text-fg" : "text-fg-dim",
                 )}
               >
-                <span className="text-[12px] font-medium">{t(opt.label)}</span>
-                <span className="text-[10px] text-fg-faint">{t(opt.desc)}</span>
+                {opt.value === "fast" ? (
+                  <Zap className="mt-0.5 size-3.5 text-amber-400 shrink-0" strokeWidth={2} />
+                ) : (
+                  <Brain className="mt-0.5 size-3.5 text-sky-400 shrink-0" strokeWidth={2} />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium">{t(opt.label)}</div>
+                  <div className="text-[10px] text-fg-faint">{t(opt.desc)}</div>
+                </div>
               </button>
             ))}
           </div>
@@ -1950,107 +2111,64 @@ export function AiChatView({ id }: { id: string }) {
                 )}
               />
 
-              <div className="flex items-center gap-1.5 pt-2 border-t border-line/50">
-                <AttachButton session={id} />
-                <button
-                  type="button"
-                  onClick={() => void pickImage()}
-                  title={t("Attach an image")}
-                  aria-label={t("Attach an image")}
-                  className="flex size-7 items-center justify-center rounded-lg border border-line/70 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-                >
-                  <ImagePlus className="size-3.5" strokeWidth={1.75} />
-                </button>
-                <ModelPicker />
-                {speechSupported && (
-                  <button
-                    type="button"
-                    onClick={toggleSpeech}
-                    title={listening ? t("Stop listening") : t("Speak your message")}
-                    aria-label={listening ? t("Stop listening") : t("Speak your message")}
-                    className={cn(
-                      "flex size-7 items-center justify-center rounded-lg border border-line/70 transition-colors duration-100 hover:bg-hover",
-                      listening ? "border-accent text-accent" : "text-fg-faint hover:text-fg",
-                    )}
-                  >
-                    {listening ? <MicOff className="size-3.5" strokeWidth={1.75} /> : <Mic className="size-3.5" strokeWidth={1.75} />}
-                  </button>
-                )}
-                {contextTokens > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void useAi.getState().compactChat(id)}
-                    className={cn(
-                      "shrink-0 rounded-md border border-line/60 px-2 py-1 text-[10px] tabular-nums transition-colors duration-100 hover:bg-hover",
-                      contextTokens > 120000 ? "text-amber-400" : "text-fg-faint hover:text-fg"
-                    )}
-                    title={t("Tokens in context window. Click to compact / summarize history.")}
-                  >
-                    {t("{count} ctx", { count: tokens(contextTokens) })}
-                  </button>
-                )}
-                {(chat?.turns?.length ?? 0) > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void exportConversation()}
-                    title={t("Export conversation as Markdown")}
-                    aria-label={t("Export conversation as Markdown")}
-                    className="flex size-7 items-center justify-center rounded-lg border border-line/70 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-                  >
-                    <Download className="size-3.5" strokeWidth={1.75} />
-                  </button>
-                )}
-                {root && (
-                  <button
-                    type="button"
-                    onClick={() => void openInstructions()}
-                    title={t("Project AI Instructions (.wide/ai-instructions.md)")}
-                    aria-label={t("Project AI Instructions")}
-                    className="flex size-7 items-center justify-center rounded-lg border border-line/70 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-                  >
-                    <Settings2 className="size-3.5" strokeWidth={1.75} />
-                  </button>
-                )}
-                <span className="flex-1" />
-                <EffortToggle />
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => void useAi.getState().stop(id)}
-                    title={t("Stop")}
-                    aria-label={t("Stop")}
-                    data-stop=""
-                    aria-disabled={stopping}
-                    tabIndex={active && !stopping ? 0 : -1}
-                    aria-hidden={!active}
-                    className={cn(
-                      "absolute inset-0 flex items-center justify-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] text-fg-dim",
-                      "transition-opacity duration-100 hover:bg-hover hover:text-fg",
-                      active ? "opacity-100" : "pointer-events-none opacity-0",
-                      stopping && "opacity-60",
-                    )}
-                  >
-                    <Square className="size-3" strokeWidth={2} fill="currentColor" />
-                    {stopping ? t("Stopping…") : t("Stop")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submit}
-                    disabled={!draft.trim() || !ready || !root || !loaded}
-                    title={t("Send")}
-                    aria-label={t("Send")}
-                    tabIndex={active ? -1 : 0}
-                    aria-hidden={Boolean(active)}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-1.5 text-[12px] font-medium text-bg shadow-sm",
-                      "transition-all duration-100 hover:brightness-110 active:scale-95",
-                      "disabled:hover:bg-accent disabled:opacity-40 disabled:pointer-events-none",
-                      active ? "pointer-events-none opacity-0" : "",
-                    )}
-                  >
-                    <Send className="size-3" strokeWidth={2} />
-                    <span>{t("Send")}</span>
-                  </button>
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-line/40">
+                <div className="flex items-center gap-1 min-w-0">
+                  <PlusMenu
+                    session={id}
+                    onInsertMention={() => {
+                      setDraft((cur) => (cur ? cur.endsWith(" ") ? cur + "@" : cur + " @" : "@"));
+                      composer.current?.focus();
+                    }}
+                    onPickImage={() => void pickImage()}
+                    onExport={(chat?.turns?.length ?? 0) > 0 ? () => void exportConversation() : undefined}
+                    onOpenInstructions={root ? () => void openInstructions() : undefined}
+                    onCompact={contextTokens > 0 ? () => void useAi.getState().compactChat(id) : undefined}
+                  />
+                  <ModelPicker className="border-none bg-transparent hover:bg-hover text-fg-dim px-2 py-1 text-[12px]" />
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <EffortToggle />
+                  {speechSupported && (
+                    <button
+                      type="button"
+                      onClick={toggleSpeech}
+                      title={listening ? t("Stop listening") : t("Speak your message")}
+                      aria-label={listening ? t("Stop listening") : t("Speak your message")}
+                      className={cn(
+                        "flex size-8 items-center justify-center rounded-lg text-fg-dim transition-colors hover:bg-hover hover:text-fg",
+                        listening && "bg-accent/15 text-accent animate-pulse",
+                      )}
+                    >
+                      {listening ? <MicOff className="size-4" strokeWidth={1.75} /> : <Mic className="size-4" strokeWidth={1.75} />}
+                    </button>
+                  )}
+                  {active ? (
+                    <button
+                      type="button"
+                      onClick={() => void useAi.getState().stop(id)}
+                      title={t("Stop")}
+                      aria-label={t("Stop")}
+                      disabled={stopping}
+                      className={cn(
+                        "flex size-8 items-center justify-center rounded-full bg-rose-500 hover:bg-rose-600 text-white shadow-sm transition-all active:scale-95",
+                        stopping && "opacity-60",
+                      )}
+                    >
+                      <Square className="size-3.5 fill-current" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={submit}
+                      disabled={!draft.trim() || !ready || !root || !loaded}
+                      title={t("Send")}
+                      aria-label={t("Send")}
+                      className="flex size-8 items-center justify-center rounded-full bg-[#2F71E3] hover:bg-[#2563eb] text-white shadow-sm transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                    >
+                      <ArrowRight className="size-4" strokeWidth={2.5} />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
