@@ -1404,9 +1404,9 @@ function EffortToggle() {
         )}
       >
         {current.value === "fast" ? (
-          <Zap className="size-3.5 text-amber-400 shrink-0" strokeWidth={2} />
+          <Zap className="size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
         ) : (
-          <Brain className="size-3.5 text-sky-400 shrink-0" strokeWidth={2} />
+          <Brain className="size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
         )}
         <span>{t(current.label)}</span>
         <ChevronDown className={cn("size-3 shrink-0 opacity-60 transition-transform", open && "rotate-180")} strokeWidth={2} />
@@ -1429,9 +1429,9 @@ function EffortToggle() {
                 )}
               >
                 {opt.value === "fast" ? (
-                  <Zap className="mt-0.5 size-3.5 text-amber-400 shrink-0" strokeWidth={2} />
+                  <Zap className="mt-0.5 size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
                 ) : (
-                  <Brain className="mt-0.5 size-3.5 text-sky-400 shrink-0" strokeWidth={2} />
+                  <Brain className="mt-0.5 size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="text-[12px] font-medium">{t(opt.label)}</div>

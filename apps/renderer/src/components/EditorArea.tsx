@@ -109,17 +109,18 @@ function RunButton({ tab, root, run }: { tab: Tab; root: string | null; run: (pa
 }
 
 function TabKindIcon({ kind }: { kind: Tab["kind"] }) {
-  if (kind === "catcher") return <Radar className="size-3.5 shrink-0 text-emerald-400" strokeWidth={1.75} />;
-  if (kind === "pitcher") return <Send className="size-3.5 shrink-0 text-sky-400" strokeWidth={1.75} />;
-  if (kind === "ai-chat") return <Sparkles className="size-3.5 shrink-0 text-purple-400" strokeWidth={1.75} />;
-  if (kind === "browser") return <Globe className="size-3.5 shrink-0 text-blue-400" strokeWidth={1.75} />;
-  if (kind === "cyberchef") return <FlaskConical className="size-3.5 shrink-0 text-amber-400" strokeWidth={1.75} />;
-  if (kind === "scratchpad") return <StickyNote className="size-3.5 shrink-0 text-amber-300" strokeWidth={1.75} />;
-  if (kind === "settings") return <Settings className="size-3.5 shrink-0 text-fg-dim" strokeWidth={1.75} />;
-  if (kind === "policy") return <ShieldAlert className="size-3.5 shrink-0 text-rose-400" strokeWidth={1.75} />;
-  if (kind === "diff") return <Columns2 className="size-3.5 shrink-0 text-accent" strokeWidth={1.75} />;
-  if (kind === "markdown-preview") return <Eye className="size-3.5 shrink-0 text-teal-400" strokeWidth={1.75} />;
-  return <FileCode className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />;
+  const iconClass = "size-3.5 shrink-0 text-fg-dim";
+  if (kind === "catcher") return <Radar className={iconClass} strokeWidth={1.75} />;
+  if (kind === "pitcher") return <Send className={iconClass} strokeWidth={1.75} />;
+  if (kind === "ai-chat") return <Sparkles className={iconClass} strokeWidth={1.75} />;
+  if (kind === "browser") return <Globe className={iconClass} strokeWidth={1.75} />;
+  if (kind === "cyberchef") return <FlaskConical className={iconClass} strokeWidth={1.75} />;
+  if (kind === "scratchpad") return <StickyNote className={iconClass} strokeWidth={1.75} />;
+  if (kind === "settings") return <Settings className={iconClass} strokeWidth={1.75} />;
+  if (kind === "policy") return <ShieldAlert className={iconClass} strokeWidth={1.75} />;
+  if (kind === "diff") return <Columns2 className={iconClass} strokeWidth={1.75} />;
+  if (kind === "markdown-preview") return <Eye className={iconClass} strokeWidth={1.75} />;
+  return <FileCode className={iconClass} strokeWidth={1.75} />;
 }
 
 function TabOverflowMenu({ tabs, activePath, onPick }: { tabs: Tab[]; activePath: string | null; onPick: (path: string) => void }) {
@@ -297,9 +298,9 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
                 title={t("Unpin tab")}
                 aria-label={t("Unpin tab")}
                 onClick={(e) => { e.stopPropagation(); useEditor.getState().togglePinTab(tab.path); }}
-                className="flex size-3.5 items-center justify-center rounded text-accent transition-colors hover:bg-hover"
+                className="flex size-3.5 items-center justify-center rounded text-fg-dim transition-colors hover:bg-hover"
               >
-                <Pin className="size-2.5 fill-accent" strokeWidth={1.5} />
+                <Pin className="size-2.5 fill-current" strokeWidth={1.5} />
               </button>
             )}
           </div>
