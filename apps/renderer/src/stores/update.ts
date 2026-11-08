@@ -44,7 +44,7 @@ export const useUpdate = create<UpdateState>((set, get) => ({
   configured: false,
   blocked: false,
   installing: "idle",
-  booting: true,
+  booting: false,
 
   check: async () => {
     const manifestUrl = useSettings.getState().updateManifestUrl;
@@ -106,6 +106,7 @@ export const useUpdate = create<UpdateState>((set, get) => ({
       await Promise.race([get().check(), new Promise((resolve) => setTimeout(resolve, 12000))]);
       const { available, blocked, url } = get();
       if (available && !blocked && url && INSTALLER_RE.test(url)) {
+        set({ booting: true });
         await get().install();
         if (get().installing !== "idle") return;
       }

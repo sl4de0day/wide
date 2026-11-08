@@ -43,11 +43,11 @@
     style.textContent = [
       "#hc-winctl{position:fixed;top:0;right:0;height:36px;display:flex;align-items:center;z-index:2147483647;",
       "  -webkit-app-region:no-drag;app-region:no-drag;user-select:none;}",
-      "#hc-winctl button{width:46px;height:36px;border:0;background:transparent;color:#94b4c1;",
+      "#hc-winctl button{width:46px;height:36px;border:0;background:transparent;color:var(--fg-dim,#A1A1AA);",
       "  display:flex;align-items:center;justify-content:center;cursor:default;outline:none;padding:0;",
-      "  transition:background-color 120ms ease,color 120ms ease;}",
-      "#hc-winctl button:hover{background:rgba(148, 180, 193, 0.14);color:#d8dee9;}",
-      "#hc-winctl button:active{background:rgba(148, 180, 193, 0.22);}",
+      "  transition:background-color 140ms ease,color 140ms ease;}",
+      "#hc-winctl button:hover{background:var(--hover,#17171E);color:var(--fg,#FFFFFF);}",
+      "#hc-winctl button:active{background:var(--active,#1F1F29);}",
       "#hc-winctl button.close:hover{background:#e81123 !important;color:#ffffff !important;}",
       "#hc-winctl button.close:active{background:#c42b1c !important;color:#ffffff !important;}",
     ].join("");

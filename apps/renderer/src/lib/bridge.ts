@@ -69,6 +69,21 @@ export interface ExtensionSettingsRecord {
   env: Record<string, string>;
 }
 
+export interface DiscordActivity {
+  details?: string;
+  state?: string;
+  workspace?: string;
+  filename?: string;
+  language?: string;
+  startTimestamp?: number;
+  buttonLabel?: string;
+  buttonUrl?: string;
+  largeImage?: string;
+  largeText?: string;
+  smallImage?: string;
+  smallText?: string;
+}
+
 export type RecentKind = "folder" | "file" | "workflow";
 
 export interface Project {
@@ -638,9 +653,9 @@ export type AiEvent =
   | { id: string; type: "usage"; input: number; output: number; total: number }
   | { id: string; type: "error"; message: string }
   | { id: string; type: "done" }
-
   | { id: string; type: "open"; path: string; line: number }
-  | { id: string; type: "edit"; root?: string; path: string; content: string; existed?: boolean };
+  | { id: string; type: "file_read"; root?: string; path: string; content: string }
+  | { id: string; type: "edit"; root?: string; path: string; oldContent?: string; content: string; existed?: boolean };
 
 
 export interface AiSessionMeta {
@@ -693,6 +708,43 @@ export interface AiHardware {
   totalRam: number;
   vram: number;
   gpu: string;
+}
+
+export interface AiRunningLocalModel {
+  name: string;
+  size: number;
+  sizeVram: number;
+  processor: string;
+  contextLength: number;
+  expiresAt: string;
+}
+
+export interface AiSystemResources {
+  totalRam: number;
+  freeRam: number;
+  usedRam: number;
+  ramPercent: number;
+  cpuPercent: number;
+  cpuCores: number;
+  gpu: string;
+  vramTotal: number;
+  vramUsed: number;
+  gpuUtil: number;
+}
+
+export interface AiCloudProviderTelemetry {
+  requestsLimit: number;
+  requestsRemaining: number;
+  tokensLimit: number;
+  tokensRemaining: number;
+  requestsUsed: number;
+  tokensUsed: number;
+  inputTokens: number;
+  outputTokens: number;
+  resetAt: string;
+  lastLatencyMs: number;
+  lastStatus: string;
+  updatedAt: number;
 }
 
 export interface AiMessage {
@@ -913,8 +965,6 @@ export interface HostApi {
 
 
   setTitle(title: string): Promise<void>;
-
-
 
   browserNavigate(tabId: string, url: string): Promise<Ok<{ url?: string }>>;
 
@@ -1209,6 +1259,7 @@ export interface HostApi {
     model: string;
     messages: AiMessage[];
     system: string;
+    effort?: "fast" | "thinking";
   }): Promise<Ok<{ answered?: boolean }>>;
   aiStop(id: string): Promise<Ok<{ stopped?: boolean }>>;
 
@@ -1216,6 +1267,15 @@ export interface HostApi {
 
 
   aiCommitFile(root: string, path: string, content: string): Promise<Ok<{ path?: string }>>;
+  aiInstructionsGet(root: string): Promise<Ok<{ path?: string; relativePath?: string; content?: string; exists?: boolean }>>;
+  aiInstructionsSave(root: string, content: string): Promise<Ok<{ path?: string; content?: string }>>;
+  aiTelemetry(): Promise<
+    Ok<{
+      system?: AiSystemResources;
+      runningModels?: AiRunningLocalModel[];
+      cloud?: Record<string, AiCloudProviderTelemetry>;
+    }>
+  >;
   aiSearch(query: string, limit?: number): Promise<Ok<{ results?: AiSearchResult[]; failed?: string[] }>>;
   aiFiles(source: string, id: string): Promise<Ok<{ files?: AiModelFile[] }>>;
   aiRecommended(): Promise<
@@ -1225,7 +1285,17 @@ export interface HostApi {
     Ok<{
       running?: boolean;
       installed?: boolean;
-      models?: { name: string; size: number; quantization: string; parameters: string }[];
+      models?: {
+        name: string;
+        size: number;
+        quantization: string;
+        parameters: string;
+        family?: string;
+        fit?: "gpu" | "cpu" | "no" | "unknown";
+        neededBytes?: number;
+        fitRatio?: number;
+      }[];
+      runningModels?: AiRunningLocalModel[];
       hardware?: AiHardware;
     }>
   >;
@@ -1283,7 +1353,9 @@ export interface HostApi {
   codebergStash(root: string, action: "push" | "pop" | "apply" | "drop" | "list", ref?: string): Promise<Ok<{ output?: string; entries?: { ref: string; description: string }[]; reason?: string }>>;
   codebergClone(url: string, parentDir: string, folder?: string): Promise<Ok<{ path?: string; reason?: string }>>;
 
-
+  discordSetActivity(activity: DiscordActivity): Promise<Ok>;
+  discordClear(): Promise<Ok>;
+  discordStatus(): Promise<Ok<{ connected: boolean; enabled: boolean }>>;
 }
 
 
@@ -1553,6 +1625,9 @@ const fallback = {
   aiComplete: async () => (warn(), { ok: false, error: "No bridge" }),
   aiStop: async () => (warn(), { ok: false, error: "No bridge" }),
   aiCommitFile: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiInstructionsGet: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiInstructionsSave: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiTelemetry: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSearch: async () => (warn(), { ok: false, error: "No bridge" }),
   aiFiles: async () => (warn(), { ok: false, error: "No bridge" }),
   aiRecommended: async () => (warn(), { ok: false, error: "No bridge" }),
@@ -1593,6 +1668,9 @@ const fallback = {
   codebergStash: async () => (warn(), { ok: false, error: "No bridge" }),
   codebergClone: async () => (warn(), { ok: false, error: "No bridge" }),
 
+  discordSetActivity: async () => (warn(), { ok: false, error: "No bridge" }),
+  discordClear: async () => (warn(), { ok: false, error: "No bridge" }),
+  discordStatus: async () => (warn(), { ok: false, connected: false, enabled: false }),
 } as unknown as HostApi;
 
 declare global {

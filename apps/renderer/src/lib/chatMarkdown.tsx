@@ -67,10 +67,31 @@ export function renderProse(text: string): ReactNode {
   const flushList = () => {
     if (!list.length) return;
     blocks.push(
-      <ul key={`ul-${key++}`} className="ml-4 list-disc space-y-0.5">
-        {list.map((item, idx) => (
-          <li key={idx}>{renderInline(item, `li${key}-${idx}`)}</li>
-        ))}
+      <ul key={`ul-${key++}`} className="ml-4 space-y-1 list-none">
+        {list.map((item, idx) => {
+          const taskMatch = /^\[([ xX])\]\s*(.*)$/.exec(item);
+          if (taskMatch) {
+            const checked = taskMatch[1].toLowerCase() === "x";
+            return (
+              <li key={idx} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  readOnly
+                  className="mt-1 size-3.5 rounded border border-line accent-accent pointer-events-none"
+                />
+                <span className={checked ? "line-through text-fg-faint" : ""}>
+                  {renderInline(taskMatch[2], `li${key}-${idx}`)}
+                </span>
+              </li>
+            );
+          }
+          return (
+            <li key={idx} className="list-disc ml-4">
+              {renderInline(item, `li${key}-${idx}`)}
+            </li>
+          );
+        })}
       </ul>,
     );
     list = [];

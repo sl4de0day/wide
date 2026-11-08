@@ -93,7 +93,7 @@ export function TransformModal() {
         className="wide-enter-fade relative z-10 flex w-full max-w-lg flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl"
         onKeyDown={handleKeyDown}
       >
-        <div className="flex items-center gap-2 border-b border-line px-3 py-2 bg-chrome">
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2.5 bg-chrome">
           <Binary className="size-4 text-accent" />
           <span className="text-xs font-semibold text-fg">Transform Selection</span>
           <div className="flex-1" />
@@ -113,7 +113,7 @@ export function TransformModal() {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 border-b border-line px-3 py-2 bg-canvas">
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2.5 bg-canvas">
           <Search className="size-3.5 text-fg-faint" />
           <input
             ref={inputRef}

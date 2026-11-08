@@ -322,6 +322,9 @@
     aiComplete: function (prefix, suffix, language) { return invoke("ai:complete", prefix, suffix, language); },
     aiStop: function (id) { return invoke("ai:stop", id); },
     aiCommitFile: function (root, path, content) { return invoke("ai:commitFile", root, path, content); },
+    aiInstructionsGet: function (root) { return invoke("ai:instructionsGet", root); },
+    aiInstructionsSave: function (root, content) { return invoke("ai:instructionsSave", root, content); },
+    aiTelemetry: function () { return invoke("ai:telemetry"); },
     aiSearch: function (query, limit) { return invoke("ai:search", query, limit); },
     aiFiles: function (source, id) { return invoke("ai:files", source, id); },
     aiRecommended: function () { return invoke("ai:recommended"); },
@@ -362,6 +365,10 @@
     codebergDiscard: function (root, paths) { return invoke("codeberg:discard", root, paths); },
     codebergStash: function (root, action, ref) { return invoke("codeberg:stash", root, action, ref); },
     codebergClone: function (url, parentDir, folder) { return invoke("codeberg:clone", url, parentDir, folder); },
+
+    discordSetActivity: function (activity) { return invoke("discord:setActivity", activity); },
+    discordClear: function () { return invoke("discord:clear"); },
+    discordStatus: function () { return invoke("discord:status"); },
   };
 
   try {

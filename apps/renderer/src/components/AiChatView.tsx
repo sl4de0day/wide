@@ -1,18 +1,53 @@
-import { ArrowDown, AtSign, Check, ChevronDown, ChevronRight, Copy, FilePlus, FileUp, ImagePlus, RefreshCw, Send, Square, X } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowDown,
+  AtSign,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  ExternalLink,
+  FileCode,
+  FileDiff,
+  FolderOpen,
+  ImagePlus,
+  Loader2,
+  Maximize2,
+  Mic,
+  MicOff,
+  Minimize2,
+  Pencil,
+  RefreshCw,
+  Search,
+  Send,
+  Settings2,
+  Square,
+  Terminal,
+  X,
+} from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { EditorState } from "@codemirror/state";
+import { EditorView, lineNumbers } from "@codemirror/view";
+import { syntaxHighlighting } from "@codemirror/language";
 
 import { ModelPicker, useModelLabel } from "@/components/ai/ModelPicker";
+import { codeHighlight } from "@/editor/theme";
+import { languageFor } from "@/editor/languages";
 import { bridge } from "@/lib/bridge";
 import { splitChatSegments, renderProse } from "@/lib/chatMarkdown";
-import { useT, type Values } from "@/lib/i18n";
+import { exportConversation } from "@/lib/chatExport";
+import { useT } from "@/lib/i18n";
+import { diffCounts, lineDiff } from "@/lib/lineDiff";
 import { plainText } from "@/lib/plainText";
 import { basename, cn, copyText } from "@/lib/utils";
-import { confirm } from "@/stores/confirm";
-import { promptText } from "@/stores/prompt";
 import { toast } from "@/stores/toast";
-import { AI_IMAGE_PROVIDERS, useAi, type AiImage, type AiToolStep, type AiTurn } from "@/stores/ai";
+import { AI_IMAGE_PROVIDERS, forgetProjectInstructions, useAi, type AiImage, type AiToolStep, type AiTurn } from "@/stores/ai";
 import { useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
+import { useRun } from "@/stores/run";
+import { useCommandPalette } from "@/stores/commands";
+import wideLogo from "@/assets/wide-logo.png";
 
 const kept: Record<string, { draft: string; scroll: number; pinned: boolean }> = {};
 const keptFor = (id: string) => (kept[id] ??= { draft: "", scroll: 0, pinned: true });
@@ -49,11 +84,17 @@ const SLASH_COMMANDS: { name: string; label: string; prompt: string; open?: bool
   { name: "regex", label: "Write a regex", prompt: "Write a regular expression, with an explanation and examples, for: ", open: true },
   { name: "find", label: "Find in the project", prompt: "Search the project and tell me where: ", open: true },
   { name: "payload", label: "Suggest test payloads", prompt: "Suggest attack payloads (for authorized security testing) to probe: ", open: true },
+  { name: "git", label: "Analyze git history", prompt: "Analyze the recent git log and diff for this project. Summarize what changed, why, and flag anything suspicious." },
+  { name: "deps", label: "Audit dependencies", prompt: "Read the package.json (or equivalent) in this project and audit all dependencies: check for outdated packages, known vulnerabilities, and unnecessary bloat." },
+  { name: "diagram", label: "Generate a diagram", prompt: "Generate a Mermaid diagram that visualizes the architecture or data flow of the current file or project. Read relevant files first." },
+  { name: "translate", label: "Translate code to another language", prompt: "Translate the code in the current file to: ", open: true },
+  { name: "perf", label: "Profile and optimize", prompt: "Analyze the current file for performance bottlenecks. Identify the top issues and propose concrete optimizations. Read it first." },
+  { name: "commit", label: "Commit with AI message", prompt: "Inspect the current git diff/status, write a concise conventional commit message, and show it to me for approval before committing." },
+  { name: "compact", label: "Summarize and compact history", prompt: "Summarize our conversation so far, highlighting the key decisions, tasks completed, and next steps." },
+  { name: "todo", label: "Task breakdown checklist", prompt: "Break down the implementation into a structured checklist with '- [ ]' tasks for: ", open: true },
+  { name: "pr", label: "PR / Code Review", prompt: "Perform a thorough Pull Request review of the current changes. Check for bugs, edge cases, performance, security, and maintainability. Inspect the diff first." },
+  { name: "compare", label: "Compare architectures / models", prompt: "Compare alternative architectural approaches, tradeoffs, pros and cons for: ", open: true },
 ];
-
-function stepCount(t: (text: string, values?: Values) => string, count: number) {
-  return count === 1 ? t("1 step") : t("{count} steps", { count });
-}
 
 function tokens(total: number): string {
   if (total < 1000) return String(total);
@@ -72,121 +113,135 @@ function resolvePath(root: string, path: string): string {
 }
 
 function stepTarget(step: AiToolStep): string {
-  const input = step.input as { path?: string; query?: string } | null;
-  return String(input?.path ?? input?.query ?? "");
+  const input = step.input as { path?: string; query?: string; command?: string } | null;
+  return String(input?.path ?? input?.query ?? input?.command ?? "");
 }
 
-const OPENS_A_FILE = new Set(["read_file", "open_file", "write_file"]);
+const OPENS_A_FILE = new Set(["read_file", "open_file", "write_file", "edit_file"]);
 
-function Steps({
-  steps,
-  streaming,
-  turnId,
-  onFailure,
-}: {
-  steps: AiToolStep[];
-  streaming: boolean;
-  turnId: string;
-  onFailure: (message: string) => void;
-}) {
-  const t = useT();
-  const root = useWorkspace((state) => state.root) ?? "";
-  const [open, setOpen] = useState(() => unfolded[turnId] === true);
-  const folded = !streaming && !open;
-
-  const unfold = (next: boolean) => {
-    unfolded[turnId] = next;
-    setOpen(next);
-  };
-
-  const names = useMemo(() => {
-    const seen: string[] = [];
-    for (const step of steps) if (!seen.includes(step.name)) seen.push(step.name);
-    return seen;
-  }, [steps]);
-
-  if (folded) {
-    return (
-      <button
-        type="button"
-        onClick={() => unfold(true)}
-        className={cn("mb-2 flex w-full items-center gap-1.5 text-left hover:text-fg-bright", BODY)}
-      >
-        <ChevronRight className="size-3.5 shrink-0 text-fg-faint" strokeWidth={2} />
-        <span className="shrink-0 text-fg-faint">{stepCount(t, steps.length)}</span>
-        <span className="min-w-0 flex-1 truncate text-fg-faint">{names.join(", ")}</span>
-      </button>
-    );
+function normalizeLangToExt(lang: string): string {
+  const l = (lang || "").trim().toLowerCase();
+  switch (l) {
+    case "javascript":
+    case "js":
+      return "js";
+    case "typescript":
+    case "ts":
+      return "ts";
+    case "tsx":
+      return "tsx";
+    case "jsx":
+      return "jsx";
+    case "html":
+      return "html";
+    case "css":
+      return "css";
+    case "scss":
+    case "sass":
+      return "scss";
+    case "json":
+    case "jsonc":
+      return "json";
+    case "python":
+    case "py":
+      return "py";
+    case "rust":
+    case "rs":
+      return "rs";
+    case "go":
+    case "golang":
+      return "go";
+    case "sql":
+      return "sql";
+    case "bash":
+    case "sh":
+    case "shell":
+    case "zsh":
+      return "sh";
+    case "powershell":
+    case "ps1":
+    case "pwsh":
+      return "ps1";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    case "toml":
+      return "toml";
+    case "markdown":
+    case "md":
+      return "md";
+    case "dockerfile":
+    case "docker":
+      return "dockerfile";
+    case "c":
+    case "cpp":
+    case "c++":
+      return "c";
+    case "java":
+      return "java";
+    case "php":
+      return "php";
+    case "ruby":
+    case "rb":
+      return "rb";
+    default:
+      return l || "txt";
   }
-
-  return (
-    <div className="mb-2 flex flex-col gap-0.5">
-      {!streaming && (
-        <button
-          type="button"
-          onClick={() => unfold(false)}
-          className={cn("flex w-full items-center gap-1.5 text-left hover:text-fg-bright", BODY)}
-        >
-          <ChevronDown className="size-3.5 shrink-0 text-fg-faint" strokeWidth={2} />
-          <span className="text-fg-faint">{stepCount(t, steps.length)}</span>
-        </button>
-      )}
-      {steps.map((step, index) => {
-        const target = stepTarget(step);
-
-        const path = OPENS_A_FILE.has(step.name) ? resolvePath(root, target) : "";
-        const key = `${step.name}-${index}`;
-        const inside = (
-          <>
-            {
-
 }
-            <span className={cn("shrink-0", step.done ? "text-fg-faint" : "text-accent wide-pulse")}>
-              ▸
-            </span>
-            <span className="shrink-0">{step.name}</span>
-            <span
-              className={cn("min-w-0 flex-1 truncate", path && "underline-offset-2 group-hover/step:underline")}
-            >
-              {target}
-            </span>
-          </>
-        );
 
-        return path ? (
-          <button
-            key={key}
-            type="button"
-            title={path}
-
-            onClick={() =>
-              void useEditor
-                .getState()
-                .openFile(path)
-                .then((opened) => {
-                  if (!opened) onFailure(t("{name} could not be opened.", { name: target }));
-                })
-            }
-            className={cn(
-              "group/step flex w-full items-center gap-1.5 rounded-sm text-left hover:bg-hover",
-              BODY,
-            )}
-          >
-            {inside}
-          </button>
-        ) : (
-          <div key={key} className={cn("flex w-full items-center gap-1.5", BODY)}>
-            {inside}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+const codeBlockTheme = EditorView.theme({
+  "&": {
+    fontSize: "12px",
+    fontFamily: "var(--font-mono)",
+    backgroundColor: "transparent",
+  },
+  ".cm-scroller": {
+    fontFamily: "var(--font-mono)",
+    lineHeight: "1.6",
+    overflow: "auto",
+    maxHeight: "440px",
+  },
+  ".cm-content": {
+    padding: "8px 0",
+  },
+  ".cm-line": {
+    padding: "0 12px 0 8px",
+  },
+  "&.cm-focused": {
+    outline: "none",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    borderRight: "1px solid var(--line)",
+    color: "var(--fg-faint)",
+    userSelect: "none",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "28px",
+    paddingRight: "8px",
+    textAlign: "right",
+    color: "var(--fg-faint)",
+    fontSize: "11px",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "transparent",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "transparent",
+  },
+  "::selection": {
+    backgroundColor: "var(--mono-600)",
+    color: "var(--mono-50)",
+  },
+});
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+
+  const isShell = useMemo(() => /^(bash|sh|shell|zsh|powershell|ps1|pwsh|cmd|bat)$/i.test(lang), [lang]);
 
   const copy = async () => {
     if (await copyText(code)) {
@@ -194,59 +249,118 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
       setTimeout(() => setCopied(false), 1500);
     }
   };
-  const newFile = async () => {
-    const root = useWorkspace.getState().root;
-    if (!root) {
-      toast.error(t("Open a folder first."));
-      return;
-    }
-    const name = await promptText({ title: t("New file from code"), placeholder: t("path/to/file.ext") });
-    if (!name || !name.trim()) return;
-    const sep = root.includes("\\") ? "\\" : "/";
-    const target = `${root.replace(/[\\/]+$/, "")}${sep}${name.trim().replace(/^[\\/]+/, "")}`;
-    const written = await bridge.writeFile(target, code);
-    if (written.error) {
-      toast.error(t(written.error));
-      return;
-    }
-    await useEditor.getState().openFile(target);
-    toast.success(t("Created {name}.", { name: name.trim() }));
-  };
-  const applyToFile = async () => {
-    const editor = useEditor.getState();
-    const tab = editor.tabs.find((x) => x.path === editor.activePath);
-    if (!tab || tab.kind !== "file") {
-      toast.error(t("Open a file first."));
-      return;
-    }
-    const ok = await confirm({
-      title: t("Replace the file's contents?"),
-      message: t("This replaces the whole active file with this code block."),
-      confirmLabel: t("Replace"),
-      danger: true,
-    });
-    if (!ok) return;
-    editor.replaceContent(tab.path, code);
+
+  const runInTerminal = () => {
+    useCommandPalette.getState().runById("view.terminal");
+    useRun.getState().send(code.trim());
+    toast.success(t("Running in terminal."));
   };
 
-  const iconBtn = "rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg";
+  useEffect(() => {
+    let active = true;
+    const mount = async () => {
+      if (!containerRef.current) return;
+      const ext = normalizeLangToExt(lang);
+      const grammar = await languageFor(`snippet.${ext}`);
+      if (!active || !containerRef.current) return;
+
+      const extensions = [
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        lineNumbers(),
+        codeBlockTheme,
+        syntaxHighlighting(codeHighlight),
+      ];
+      if (grammar) extensions.push(grammar);
+
+      const state = EditorState.create({
+        doc: code,
+        extensions,
+      });
+
+      if (viewRef.current) {
+        viewRef.current.setState(state);
+      } else {
+        viewRef.current = new EditorView({
+          state,
+          parent: containerRef.current,
+        });
+      }
+    };
+
+    void mount();
+    return () => {
+      active = false;
+    };
+  }, [lang]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const current = view.state.doc.toString();
+    if (current !== code) {
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: code },
+      });
+    }
+  }, [code]);
+
+  useEffect(() => {
+    return () => {
+      viewRef.current?.destroy();
+      viewRef.current = null;
+    };
+  }, []);
+
+  const iconBtn = "flex items-center gap-1 rounded-md px-1.5 py-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg text-[11px]";
+  const lineCount = code.split("\n").length;
+
   return (
-    <div className="my-2 overflow-hidden rounded-md border border-line">
-      <div className="flex items-center gap-1 border-b border-line bg-panel px-2 py-1">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] uppercase tracking-wide text-fg-faint">{lang || t("code")}</span>
-        <button type="button" onClick={() => void copy()} title={copied ? t("Copied") : t("Copy")} aria-label={t("Copy")} className={iconBtn}>
-          {copied ? <Check className="size-3.5 text-emerald-400" strokeWidth={2} /> : <Copy className="size-3.5" strokeWidth={1.75} />}
-        </button>
-        <button type="button" onClick={() => void applyToFile()} title={t("Apply to the active file")} aria-label={t("Apply to the active file")} className={iconBtn}>
-          <FileUp className="size-3.5" strokeWidth={1.75} />
-        </button>
-        <button type="button" onClick={() => void newFile()} title={t("Save as a new file")} aria-label={t("Save as a new file")} className={iconBtn}>
-          <FilePlus className="size-3.5" strokeWidth={1.75} />
-        </button>
+    <div className="my-3 overflow-hidden rounded-xl border border-line bg-canvas shadow-sm">
+      <div className="flex items-center justify-between border-b border-line bg-panel/80 px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-canvas/80 px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-accent border border-line/60">
+            {lang || t("Code")}
+          </span>
+          <span className="text-[11px] text-fg-faint">
+            {t("{count} lines", { count: lineCount })}
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5">
+          {isShell && (
+            <button
+              type="button"
+              onClick={runInTerminal}
+              title={t("Run in terminal")}
+              aria-label={t("Run in terminal")}
+              className={iconBtn}
+            >
+              <Terminal className="size-3.5" strokeWidth={1.75} />
+              <span className="hidden sm:inline">{t("Run")}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void copy()}
+            title={copied ? t("Copied") : t("Copy")}
+            aria-label={t("Copy")}
+            className={iconBtn}
+          >
+            {copied ? (
+              <>
+                <Check className="size-3.5 text-emerald-400" strokeWidth={2} />
+                <span className="text-emerald-400 text-[11px]">{t("Copied")}</span>
+              </>
+            ) : (
+              <>
+                <Copy className="size-3.5" strokeWidth={1.75} />
+                <span className="hidden sm:inline">{t("Copy")}</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
-      <pre className="overflow-auto bg-canvas p-3 font-mono text-[12px] leading-relaxed text-fg">
-        <code>{code}</code>
-      </pre>
+      <div ref={containerRef} className="overflow-hidden bg-canvas" />
     </div>
   );
 }
@@ -268,29 +382,605 @@ function MessageBody({ text }: { text: string }) {
   );
 }
 
+interface InspectorTarget {
+  key: string;
+  path: string;
+  relativePath: string;
+  action: "edited" | "created" | "analyzed";
+  oldContent: string;
+  newContent: string;
+}
+
+interface NumberedDiffRow {
+  index: number;
+  type: "same" | "add" | "del";
+  text: string;
+  oldLine: number | null;
+  newLine: number | null;
+}
+
+function DiffSlidePanel({
+  target,
+  onClose,
+}: {
+  target: InspectorTarget;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const hasDiff = target.action !== "analyzed" && target.oldContent !== target.newContent && target.oldContent !== "";
+  const [mode, setMode] = useState<"changes" | "full">(() => (hasDiff ? "changes" : "full"));
+  const [expandedGaps, setExpandedGaps] = useState<Record<number, boolean>>({});
+  const firstChangeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMode(target.action !== "analyzed" && target.oldContent !== target.newContent && target.oldContent !== "" ? "changes" : "full");
+    setExpandedGaps({});
+  }, [target.key, target.action, target.oldContent, target.newContent]);
+
+  const rawRows = useMemo(
+    () =>
+      target.action === "analyzed"
+        ? target.newContent.split("\n").map((text) => ({ type: "same" as const, text }))
+        : lineDiff(target.oldContent, target.newContent),
+    [target.action, target.oldContent, target.newContent],
+  );
+
+  const { added, removed } = useMemo(() => diffCounts(rawRows), [rawRows]);
+
+  const numberedRows = useMemo<NumberedDiffRow[]>(() => {
+    let oldNo = 1;
+    let newNo = 1;
+    return rawRows.map((row, index) => {
+      if (row.type === "same") {
+        const item: NumberedDiffRow = { index, type: "same", text: row.text, oldLine: oldNo, newLine: newNo };
+        oldNo += 1;
+        newNo += 1;
+        return item;
+      }
+      if (row.type === "del") {
+        const item: NumberedDiffRow = { index, type: "del", text: row.text, oldLine: oldNo, newLine: null };
+        oldNo += 1;
+        return item;
+      }
+      const item: NumberedDiffRow = { index, type: "add", text: row.text, oldLine: null, newLine: newNo };
+      newNo += 1;
+      return item;
+    });
+  }, [rawRows]);
+
+  const firstChangedLine = useMemo(() => {
+    for (const r of numberedRows) {
+      if (r.type !== "same") return r.newLine ?? r.oldLine ?? 1;
+    }
+    return 1;
+  }, [numberedRows]);
+
+  const firstChangeRowIndex = useMemo(() => {
+    return numberedRows.findIndex((r) => r.type !== "same");
+  }, [numberedRows]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      firstChangeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [target.key, mode]);
+
+  const visibleBlocks = useMemo(() => {
+    if (mode === "full" || (added === 0 && removed === 0)) {
+      return [{ kind: "rows" as const, rows: numberedRows, gapId: 0 }];
+    }
+    const CONTEXT = 5;
+    const keep = new Array(numberedRows.length).fill(false);
+    for (let i = 0; i < numberedRows.length; i += 1) {
+      if (numberedRows[i].type !== "same") {
+        const from = Math.max(0, i - CONTEXT);
+        const to = Math.min(numberedRows.length - 1, i + CONTEXT);
+        for (let j = from; j <= to; j += 1) keep[j] = true;
+      }
+    }
+    const blocks: (
+      | { kind: "rows"; rows: NumberedDiffRow[]; gapId: number }
+      | { kind: "gap"; count: number; rows: NumberedDiffRow[]; gapId: number }
+    )[] = [];
+    let i = 0;
+    while (i < numberedRows.length) {
+      if (keep[i]) {
+        const slice: NumberedDiffRow[] = [];
+        const start = i;
+        while (i < numberedRows.length && keep[i]) {
+          slice.push(numberedRows[i]);
+          i += 1;
+        }
+        blocks.push({ kind: "rows", rows: slice, gapId: start });
+      } else {
+        const slice: NumberedDiffRow[] = [];
+        const start = i;
+        while (i < numberedRows.length && !keep[i]) {
+          slice.push(numberedRows[i]);
+          i += 1;
+        }
+        if (slice.length <= 3 || expandedGaps[start]) {
+          blocks.push({ kind: "rows", rows: slice, gapId: start });
+        } else {
+          blocks.push({ kind: "gap", count: slice.length, rows: slice, gapId: start });
+        }
+      }
+    }
+    return blocks;
+  }, [mode, added, removed, numberedRows, expandedGaps]);
+
+  const actionLabel =
+    target.action === "created"
+      ? t("Created")
+      : target.action === "edited"
+        ? t("Edited")
+        : t("Analyzed");
+
+  return (
+    <div className="wide-enter-fade flex h-full w-[min(560px,54%)] shrink-0 flex-col border-l border-line bg-panel shadow-2xl">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-canvas/70 px-3.5 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              "shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider border",
+              target.action === "analyzed"
+                ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+            )}
+          >
+            {actionLabel}
+          </span>
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate font-mono text-[12px] font-semibold text-fg" title={target.path}>
+              {basename(target.path)}
+            </span>
+            <span className="truncate font-mono text-[10px] text-fg-faint" title={target.path}>
+              {target.relativePath || target.path}
+            </span>
+          </div>
+          {(added > 0 || removed > 0) && (
+            <div className="flex shrink-0 items-center gap-1.5 pl-1">
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-400">
+                +{added}
+              </span>
+              <span className="rounded bg-rose-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-rose-400">
+                −{removed}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {(added > 0 || removed > 0) && target.oldContent !== "" && (
+            <div className="flex items-center rounded-lg border border-line bg-canvas p-0.5 text-[10px]">
+              <button
+                type="button"
+                onClick={() => setMode("changes")}
+                className={cn(
+                  "rounded-md px-2 py-0.5 transition-colors",
+                  mode === "changes" ? "bg-accent text-bg font-medium" : "text-fg-faint hover:text-fg",
+                )}
+              >
+                {t("Changes")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("full")}
+                className={cn(
+                  "rounded-md px-2 py-0.5 transition-colors",
+                  mode === "full" ? "bg-accent text-bg font-medium" : "text-fg-faint hover:text-fg",
+                )}
+              >
+                {t("Full file")}
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => void useEditor.getState().revealAt(target.path, firstChangedLine, 1)}
+            title={t("Open in editor")}
+            aria-label={t("Open in editor")}
+            className="flex items-center gap-1 rounded-lg border border-line/70 px-2 py-1 text-[11px] text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+          >
+            <ExternalLink className="size-3" strokeWidth={1.75} />
+            <span className="hidden xl:inline">{t("Open in editor")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            title={t("Close")}
+            aria-label={t("Close")}
+            className="flex size-7 items-center justify-center rounded-lg text-fg-faint transition-colors hover:bg-hover hover:text-fg"
+          >
+            <X className="size-4" strokeWidth={2} />
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto bg-canvas font-mono text-[11.5px] leading-[1.65]">
+        {visibleBlocks.map((block) => {
+          if (block.kind === "gap") {
+            return (
+              <button
+                key={`gap-${block.gapId}`}
+                type="button"
+                onClick={() => setExpandedGaps((prev) => ({ ...prev, [block.gapId]: true }))}
+                className="flex w-full items-center justify-center gap-2 border-y border-line/40 bg-panel/60 py-1 text-[10px] text-fg-faint transition-colors hover:bg-hover hover:text-fg"
+              >
+                <span>··· {t("{count} unchanged lines", { count: block.count })} ···</span>
+              </button>
+            );
+          }
+          return block.rows.map((row) => {
+            const isFirstChange = row.index === firstChangeRowIndex;
+            return (
+              <div
+                key={row.index}
+                ref={isFirstChange ? firstChangeRef : undefined}
+                className={cn(
+                  "flex items-stretch border-l-2 px-2",
+                  row.type === "add" && "border-emerald-500 bg-emerald-500/15 text-emerald-200",
+                  row.type === "del" && "border-rose-500 bg-rose-500/15 text-rose-200",
+                  row.type === "same" && "border-transparent text-fg-dim hover:bg-panel/40",
+                )}
+              >
+                <span className="w-9 shrink-0 select-none pr-2 text-right text-[10px] text-fg-faint/70 tabular-nums">
+                  {row.oldLine ?? ""}
+                </span>
+                <span className="w-9 shrink-0 select-none pr-2 text-right text-[10px] text-fg-faint/70 tabular-nums">
+                  {row.newLine ?? ""}
+                </span>
+                <span
+                  className={cn(
+                    "w-4 shrink-0 select-none text-center font-bold",
+                    row.type === "add" && "text-emerald-400",
+                    row.type === "del" && "text-rose-400",
+                    row.type === "same" && "text-fg-faint",
+                  )}
+                >
+                  {row.type === "add" ? "+" : row.type === "del" ? "−" : " "}
+                </span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pl-1">
+                  {row.text || " "}
+                </span>
+              </div>
+            );
+          });
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AgentActivityStream({
+  turn,
+  activeInspectKey,
+  onInspectFile,
+  onFailure,
+}: {
+  turn: AiTurn;
+  activeInspectKey: string;
+  onInspectFile: (target: InspectorTarget) => void;
+  onFailure: (message: string) => void;
+}) {
+  const t = useT();
+  const root = useWorkspace((state) => state.root) ?? "";
+  const [maximized, setMaximized] = useState(() => unfolded[turn.id] ?? true);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!turn.streaming) {
+      setNow(Date.now());
+      return;
+    }
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [turn.streaming]);
+
+  const toggleMaximized = (next: boolean) => {
+    unfolded[turn.id] = next;
+    setMaximized(next);
+  };
+
+  const elapsedSec = useMemo(() => {
+    const start = turn.startedAt ?? now;
+    const end = turn.streaming ? now : (turn.endedAt ?? now);
+    return Math.max(1, Math.round((end - start) / 1000));
+  }, [turn.startedAt, turn.endedAt, turn.streaming, now]);
+
+  const enrichedSteps = useMemo(() => {
+    return turn.steps.map((step, index) => {
+      const rawTarget = stepTarget(step);
+      const fullPath = step.filePath || (OPENS_A_FILE.has(step.name) ? resolvePath(root, rawTarget) : "");
+      const fileName = fullPath ? basename(fullPath) : basename(rawTarget) || rawTarget;
+      let actionLabel = step.name;
+      let actionKind: "edited" | "created" | "analyzed" | "other" = "other";
+
+      if (step.name === "read_file" || step.name === "open_file") {
+        actionLabel = step.done ? t("Analyzed") : t("Analyzing");
+        actionKind = "analyzed";
+      } else if (step.name === "write_file") {
+        if (step.existed === false) {
+          actionLabel = step.done ? t("Created") : t("Creating");
+          actionKind = "created";
+        } else {
+          actionLabel = step.done ? t("Edited") : t("Editing");
+          actionKind = "edited";
+        }
+      } else if (step.name === "edit_file") {
+        actionLabel = step.done ? t("Edited") : t("Editing");
+        actionKind = "edited";
+      } else if (step.name === "search" || step.name === "find_relevant") {
+        actionLabel = step.done ? t("Searched") : t("Searching");
+      } else if (step.name === "list_dir" || step.name === "create_dir") {
+        actionLabel = step.done ? t("Explored directory") : t("Exploring directory");
+      } else if (step.name === "run_command" || step.name === "git") {
+        actionLabel = step.done ? t("Ran command") : t("Running command");
+      }
+
+      let added = 0;
+      let removed = 0;
+      if ((actionKind === "edited" || actionKind === "created") && step.newContent !== undefined) {
+        const counts = diffCounts(lineDiff(step.oldContent ?? "", step.newContent));
+        added = counts.added;
+        removed = counts.removed;
+      }
+
+      const stepSec =
+        step.startedAt && step.endedAt
+          ? Math.max(0.1, Math.round((step.endedAt - step.startedAt) / 100) / 10)
+          : null;
+
+      return {
+        key: `${turn.id}-step-${index}`,
+        step,
+        rawTarget,
+        fullPath,
+        fileName,
+        actionLabel,
+        actionKind,
+        added,
+        removed,
+        stepSec,
+      };
+    });
+  }, [turn.steps, turn.id, root, t]);
+
+  const handleStepClick = async (item: (typeof enrichedSteps)[number]) => {
+    if (!item.fullPath) return;
+    if (item.step.newContent !== undefined) {
+      onInspectFile({
+        key: item.key,
+        path: item.fullPath,
+        relativePath: item.rawTarget || basename(item.fullPath),
+        action: item.actionKind === "other" ? "analyzed" : item.actionKind,
+        oldContent: item.step.oldContent ?? "",
+        newContent: item.step.newContent,
+      });
+      return;
+    }
+    const read = await bridge.readFile(item.fullPath);
+    if (!read || read.error || read.content == null) {
+      onFailure(t("{name} could not be opened.", { name: item.fileName }));
+      return;
+    }
+    onInspectFile({
+      key: item.key,
+      path: item.fullPath,
+      relativePath: item.rawTarget || basename(item.fullPath),
+      action: item.actionKind === "other" ? "analyzed" : item.actionKind,
+      oldContent: item.step.oldContent ?? "",
+      newContent: read.content,
+    });
+  };
+
+  const activeStep = enrichedSteps.find((s) => !s.step.done);
+  const filePills = enrichedSteps.filter((s) => s.fullPath && s.actionKind !== "other");
+  const lastStep = enrichedSteps[enrichedSteps.length - 1];
+
+  const headerTitle = turn.streaming
+    ? activeStep
+      ? `${activeStep.actionLabel} ${activeStep.fileName}… (${elapsedSec}s)`
+      : lastStep
+        ? `${lastStep.actionLabel} ${lastStep.fileName}`
+        : ""
+    : lastStep
+      ? `${lastStep.actionLabel} ${lastStep.fileName}`
+      : "";
+
+  return (
+    <div className="my-1.5 overflow-hidden rounded-xl border border-line/70 bg-panel/50 shadow-sm transition-all duration-150">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 text-[12px] text-fg-muted hover:bg-hover/60">
+        <button
+          type="button"
+          onClick={() => toggleMaximized(!maximized)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          {turn.streaming ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
+          ) : (
+            <Check className="size-3.5 shrink-0 text-emerald-400" strokeWidth={2} />
+          )}
+          <span className="truncate font-medium text-fg">{headerTitle}</span>
+          {enrichedSteps.length > 0 && (
+            <span className="shrink-0 rounded-full bg-canvas/80 px-2 py-0.5 font-mono text-[10px] text-fg-faint border border-line/50">
+              {enrichedSteps.length}
+            </span>
+          )}
+        </button>
+
+        {!maximized && filePills.length > 0 && (
+          <div className="hidden sm:flex items-center gap-1 overflow-hidden max-w-[340px]">
+            {filePills.slice(-3).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => void handleStepClick(item)}
+                className={cn(
+                  "flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors",
+                  activeInspectKey === item.key
+                    ? "border-accent bg-accent/15 text-accent"
+                    : "border-line/60 bg-canvas/80 text-fg-dim hover:border-accent/50 hover:text-fg",
+                )}
+              >
+                <span className="font-sans font-medium text-fg-faint">{item.actionLabel}</span>
+                <span className="truncate max-w-[90px]">{item.fileName}</span>
+                {(item.added > 0 || item.removed > 0) && (
+                  <span className="text-emerald-400">+{item.added}</span>
+                )}
+                {item.removed > 0 && (
+                  <span className="text-rose-400">−{item.removed}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => toggleMaximized(!maximized)}
+          title={maximized ? t("Minimize stream") : t("Maximize stream")}
+          aria-label={maximized ? t("Minimize stream") : t("Maximize stream")}
+          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-fg-faint transition-colors hover:bg-hover hover:text-fg"
+        >
+          {maximized ? (
+            <Minimize2 className="size-3.5" strokeWidth={1.75} />
+          ) : (
+            <Maximize2 className="size-3.5" strokeWidth={1.75} />
+          )}
+        </button>
+      </div>
+
+      {maximized && (
+        <div className="flex flex-col gap-1 border-t border-line/40 bg-canvas/35 px-3 py-2.5">
+          <div className="relative flex flex-col gap-1.5 pl-2 before:absolute before:bottom-2 before:left-[13px] before:top-2 before:w-px before:bg-line/60">
+            {enrichedSteps.map((item) => {
+              const isFileAction = Boolean(item.fullPath);
+              const isSelected = activeInspectKey === item.key;
+              const StepIcon =
+                item.actionKind === "edited" || item.actionKind === "created"
+                  ? FileDiff
+                  : item.actionKind === "analyzed"
+                    ? FileCode
+                    : item.step.name === "search" || item.step.name === "find_relevant"
+                      ? Search
+                      : item.step.name === "list_dir" || item.step.name === "create_dir"
+                        ? FolderOpen
+                        : Terminal;
+
+              const rowContent = (
+                <div className="flex w-full items-center gap-2 px-2 py-1 text-[12px]">
+                  <span className="z-10 flex size-4 shrink-0 items-center justify-center rounded-full bg-panel ring-2 ring-canvas">
+                    {!item.step.done ? (
+                      <Loader2 className="size-3 animate-spin text-accent" />
+                    ) : (
+                      <StepIcon
+                        className={cn(
+                          "size-3",
+                          item.actionKind === "edited" || item.actionKind === "created"
+                            ? "text-emerald-400"
+                            : item.actionKind === "analyzed"
+                              ? "text-sky-400"
+                              : "text-fg-faint",
+                        )}
+                        strokeWidth={2}
+                      />
+                    )}
+                  </span>
+
+                  <span
+                    className={cn(
+                      "shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border",
+                      item.actionKind === "edited" || item.actionKind === "created"
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                        : item.actionKind === "analyzed"
+                          ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                          : "bg-panel text-fg-dim border-line/60",
+                    )}
+                  >
+                    {item.actionLabel}
+                  </span>
+
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate font-mono text-[11.5px]",
+                      isFileAction ? "font-medium text-fg group-hover/step:text-accent" : "text-fg-dim",
+                    )}
+                    title={item.fullPath || item.rawTarget}
+                  >
+                    {item.fileName || item.rawTarget}
+                  </span>
+
+                  {(item.added > 0 || item.removed > 0) && (
+                    <div className="flex shrink-0 items-center gap-1 font-mono text-[10px]">
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-semibold text-emerald-400">
+                        +{item.added}
+                      </span>
+                      <span className="rounded bg-rose-500/15 px-1.5 py-0.5 font-semibold text-rose-400">
+                        −{item.removed}
+                      </span>
+                    </div>
+                  )}
+
+                  {item.stepSec !== null && (
+                    <span className="shrink-0 font-mono text-[10px] text-fg-faint tabular-nums">
+                      {item.stepSec}s
+                    </span>
+                  )}
+                </div>
+              );
+
+              return isFileAction ? (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => void handleStepClick(item)}
+                  className={cn(
+                    "group/step flex w-full items-center rounded-lg border text-left transition-all duration-100",
+                    isSelected
+                      ? "border-accent/60 bg-accent/10 shadow-sm"
+                      : "border-transparent hover:border-line/70 hover:bg-hover",
+                  )}
+                >
+                  {rowContent}
+                </button>
+              ) : (
+                <div key={item.key} className="flex w-full items-center rounded-lg">
+                  {rowContent}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const Turn = memo(function Turn({
   turn,
   divider,
   last,
+  activeInspectKey,
+  onInspectFile,
   onFailure,
   onRegenerate,
+  onEdit,
 }: {
   turn: AiTurn;
   divider: boolean;
   last: boolean;
+  activeInspectKey: string;
+  onInspectFile: (target: InspectorTarget) => void;
   onFailure: (message: string) => void;
   onRegenerate: () => void;
+  onEdit?: (text: string) => void;
 }) {
   const t = useT();
-  const [openThinking, setOpenThinking] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const shown = turn.text;
-
-  const reasoning = useMemo(
-    () => (openThinking ? plainText(turn.thinking) : ""),
-    [turn.thinking, openThinking],
-  );
 
   const copy = async () => {
     if (await copyText(shown)) setCopied(true);
@@ -306,100 +996,144 @@ const Turn = memo(function Turn({
     return (
       <div
         {...{ [QUESTION]: "" }}
-        className={cn("border-l-2 border-accent/60 py-1 pl-3", divider && "mt-3")}
+        className={cn(
+          "group/user relative ml-auto flex max-w-[80%] items-center justify-end gap-1.5 self-end",
+          divider && "mt-2",
+        )}
       >
-        <p className={cn("whitespace-pre-wrap", BODY)}>{turn.text}</p>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={() => onEdit(turn.text)}
+            title={t("Edit this message")}
+            aria-label={t("Edit this message")}
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-fg-faint opacity-0 transition-all duration-100 hover:bg-hover hover:text-fg group-hover/user:opacity-100"
+          >
+            <Pencil className="size-3" strokeWidth={1.75} />
+          </button>
+        )}
+        <div className="rounded-xl border border-line/70 bg-panel/85 px-3 py-1.5 shadow-sm">
+          <p className={cn("whitespace-pre-wrap text-left text-fg", BODY)}>{turn.text}</p>
+        </div>
       </div>
     );
   }
 
+  const hasThinking = Boolean(turn.thinking && turn.thinking.trim().length > 0);
+  const showStream = Boolean(turn.steps.length > 0);
+  const isWaiting = Boolean(turn.streaming && !shown && turn.steps.length === 0);
+
+  const thoughtSec = useMemo(() => {
+    if (!turn.startedAt || turn.streaming) return 0;
+    const end = turn.endedAt ?? Date.now();
+    return Math.max(1, Math.round((end - turn.startedAt) / 1000));
+  }, [turn.startedAt, turn.endedAt, turn.streaming]);
+
+  const [showReasoning, setShowReasoning] = useState(false);
+  const reasoning = useMemo(
+    () => (hasThinking && turn.thinking ? plainText(turn.thinking) : ""),
+    [turn.thinking, hasThinking],
+  );
+
   return (
-    <div className="group/turn relative py-1">
-      {
-}
-      {(shown || (last && !turn.streaming)) && (
-        <div className="absolute right-0 top-0 flex items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:opacity-100 group-hover/turn:opacity-100">
-          {last && !turn.streaming && (
-            <button
-              type="button"
-              onClick={onRegenerate}
-              title={t("Regenerate the answer")}
-              aria-label={t("Regenerate the answer")}
-              className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-            >
-              <RefreshCw className="size-3.5" strokeWidth={1.75} />
-            </button>
-          )}
+    <div className="group/turn relative mr-auto flex w-full flex-col gap-2 self-start py-1 text-left">
+      {showStream && (
+        <AgentActivityStream
+          turn={turn}
+          activeInspectKey={activeInspectKey}
+          onInspectFile={onInspectFile}
+          onFailure={onFailure}
+        />
+      )}
+
+      {isWaiting && (
+        <div className="flex items-center gap-1.5 py-2 px-1 select-none" aria-label="Thinking">
+          <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
+          <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
+          <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
+        </div>
+      )}
+
+      {shown && (
+        <div className={cn("min-w-0", BODY)}>
+          <MessageBody text={shown} />
+          {turn.streaming && <span className="wide-caret inline-block ml-1" aria-hidden="true" />}
+        </div>
+      )}
+
+      {!turn.streaming && (shown || last || (turn.usage && turn.usage.total > 0) || thoughtSec > 0) && (
+        <div className="flex items-center gap-1.5 pt-0.5">
           {shown && (
             <button
               type="button"
               onClick={() => void copy()}
               title={copied ? t("Copied") : t("Copy the answer")}
               aria-label={copied ? t("Copied") : t("Copy the answer")}
-              className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
             >
               {copied ? (
-                <Check className="size-3.5 text-emerald-400" strokeWidth={2} />
+                <>
+                  <Check className="size-3 text-emerald-400" strokeWidth={2} />
+                  <span className="text-emerald-400">{t("Copied")}</span>
+                </>
               ) : (
-                <Copy className="size-3.5" strokeWidth={1.75} />
+                <>
+                  <Copy className="size-3" strokeWidth={1.75} />
+                  <span className="hidden sm:inline">{t("Copy")}</span>
+                </>
               )}
             </button>
           )}
-        </div>
-      )}
-
-      {turn.steps.length > 0 && (
-        <Steps
-          steps={turn.steps}
-          streaming={turn.streaming}
-          turnId={turn.id}
-          onFailure={onFailure}
-        />
-      )}
-
-      {turn.thinking && (
-        <>
-          <button
-            type="button"
-            onClick={() => setOpenThinking((was) => !was)}
-            className={cn("mb-1 flex items-center gap-1 hover:text-fg-bright", BODY)}
-          >
-            {openThinking ? (
-              <ChevronDown className="size-3.5" strokeWidth={2} />
-            ) : (
-              <ChevronRight className="size-3.5" strokeWidth={2} />
-            )}
-            {t("Reasoning")}
-          </button>
-          {openThinking && (
-            <p className={cn("mb-2 whitespace-pre-wrap border-l border-line pl-3", BODY)}>
-              {reasoning}
-            </p>
+          {last && (
+            <button
+              type="button"
+              onClick={onRegenerate}
+              title={t("Regenerate the answer")}
+              aria-label={t("Regenerate the answer")}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+            >
+              <RefreshCw className="size-3" strokeWidth={1.75} />
+              <span className="hidden sm:inline">{t("Regenerate")}</span>
+            </button>
           )}
-        </>
-      )}
-
-      {shown && (
-        <div className={cn("min-w-0", BODY)}>
-          <MessageBody text={shown} />
-          {turn.streaming && <span className="wide-caret" aria-hidden="true" />}
+          <div className="ml-auto flex items-center gap-1.5">
+            {thoughtSec > 0 && (
+              hasThinking ? (
+                <button
+                  type="button"
+                  onClick={() => setShowReasoning((v) => !v)}
+                  className="flex items-center gap-1 rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-fg-faint border border-line/50 hover:text-fg hover:border-line transition-colors cursor-pointer"
+                >
+                  <span>{t("Thought for {sec}s", { sec: thoughtSec })}</span>
+                  <ChevronDown className={cn("size-2.5 transition-transform", showReasoning && "rotate-180")} strokeWidth={2} />
+                </button>
+              ) : (
+                <span className="rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-fg-faint border border-line/50">
+                  {t("Thought for {sec}s", { sec: thoughtSec })}
+                </span>
+              )
+            )}
+            {turn.usage && turn.usage.total > 0 && (
+              <span className="rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-fg-faint border border-line/50">
+                {t("{count} tokens", { count: tokens(turn.usage.total) })}
+              </span>
+            )}
+          </div>
         </div>
       )}
-      {turn.streaming && !shown && !turn.steps.length && (
-        <p className={cn(BODY, "text-fg-faint")}>
-          {t("Thinking…")}
-          <span className="wide-caret" aria-hidden="true" />
-        </p>
+
+      {showReasoning && reasoning && (
+        <div className="rounded-xl border border-line/50 bg-panel/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-fg-dim whitespace-pre-wrap max-h-52 overflow-auto">
+          {reasoning}
+        </div>
       )}
-      {
-}
-      {!turn.streaming && turn.usage && turn.usage.total > 0 && (
-        <p className={cn("pt-1", BODY, "text-fg-faint")}>
-          {t("{count} tokens", { count: tokens(turn.usage.total) })}
-        </p>
+
+      {turn.error && (
+        <div className="flex items-center gap-2 rounded-lg border border-status-error/30 bg-status-error/10 p-3 text-[12px] text-status-error">
+          <AlertCircle className="size-4 shrink-0" />
+          <span>{t(turn.error)}</span>
+        </div>
       )}
-      {}
-      {turn.error && <p className={cn("pt-1", BODY, "text-status-error")}>{t(turn.error)}</p>}
     </div>
   );
 });
@@ -430,8 +1164,8 @@ function AttachButton({ session }: { session: string }) {
         title={t("Attach a file as context")}
         aria-label={t("Attach a file as context")}
         className={cn(
-          "flex size-6 items-center justify-center rounded-md border border-line transition-colors duration-100 hover:bg-hover",
-          open ? "text-fg" : "text-fg-faint hover:text-fg",
+          "flex size-7 items-center justify-center rounded-lg border border-line/70 transition-colors duration-100 hover:bg-hover",
+          open ? "text-fg bg-hover" : "text-fg-faint hover:text-fg",
         )}
       >
         <AtSign className="size-3.5" strokeWidth={1.75} />
@@ -439,18 +1173,18 @@ function AttachButton({ session }: { session: string }) {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-50 mb-1 w-[min(360px,80vw)] overflow-hidden rounded-md border border-line bg-panel shadow-xl">
+          <div className="absolute bottom-full left-0 z-50 mb-1 w-[min(360px,80vw)] overflow-hidden rounded-xl border border-line bg-panel shadow-2xl">
             <input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t("Attach a file…")}
               spellCheck={false}
-              className="w-full border-b border-line bg-transparent px-2 py-1.5 text-[12px] text-fg outline-none placeholder:text-fg-faint"
+              className="w-full border-b border-line bg-transparent px-3 py-2 text-[12px] text-fg outline-none placeholder:text-fg-faint"
             />
             <div className="max-h-48 overflow-auto py-1">
               {matches.length === 0 ? (
-                <p className="px-2 py-2 text-[11px] text-fg-faint">{root ? t("No files match.") : t("Open a folder first.")}</p>
+                <p className="px-3 py-2 text-[11px] text-fg-faint">{root ? t("No files match.") : t("Open a folder first.")}</p>
               ) : (
                 matches.map((file) => (
                   <button
@@ -460,7 +1194,7 @@ function AttachButton({ session }: { session: string }) {
                       useAi.getState().attach(session, file.path);
                       setOpen(false);
                     }}
-                    className="block w-full truncate px-2 py-1 text-left text-[12px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+                    className="block w-full truncate px-3 py-1.5 text-left text-[12px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
                     title={file.relativePath}
                   >
                     {file.relativePath}
@@ -474,6 +1208,117 @@ function AttachButton({ session }: { session: string }) {
     </div>
   );
 }
+
+const EFFORT_OPTIONS: { value: "fast" | "thinking"; label: string; desc: string }[] = [
+  { value: "fast", label: "Fast", desc: "Quick, concise answers" },
+  { value: "thinking", label: "Thinking", desc: "Deep, thorough analysis" },
+];
+
+function EffortToggle() {
+  const t = useT();
+  const effort = useAi((state) => state.effort);
+  const setEffort = useAi((state) => state.setEffort);
+  const [open, setOpen] = useState(false);
+
+  const current = EFFORT_OPTIONS.find((o) => o.value === effort) ?? EFFORT_OPTIONS[0];
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={t("Response effort level")}
+        aria-label={t("Response effort level")}
+        className={cn(
+          "flex items-center gap-1 rounded-lg border border-line/70 px-2.5 py-1 text-[11px] transition-colors duration-100 hover:bg-hover",
+          open ? "text-fg bg-hover" : "text-fg-faint hover:text-fg",
+        )}
+      >
+        <span>{t(current.label)}</span>
+        <ChevronDown className="size-3 shrink-0" strokeWidth={2} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 z-50 mb-1 w-44 overflow-hidden rounded-xl border border-line bg-panel shadow-2xl">
+            {EFFORT_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => { setEffort(opt.value); setOpen(false); }}
+                className={cn(
+                  "flex w-full flex-col px-3 py-2 text-left transition-colors duration-100 hover:bg-hover",
+                  effort === opt.value ? "text-fg bg-hover" : "text-fg-dim",
+                )}
+              >
+                <span className="text-[12px] font-medium">{t(opt.label)}</span>
+                <span className="text-[10px] text-fg-faint">{t(opt.desc)}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function useSpeechInput(onResult: (text: string) => void) {
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  const supported = typeof window !== "undefined" &&
+    ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+
+  const toggle = useCallback(() => {
+    if (!supported) return;
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    const win = window as any;
+    const SR = win.SpeechRecognition || win.webkitSpeechRecognition;
+    const r = new SR();
+    r.continuous = false;
+    r.interimResults = false;
+    r.onresult = (event: any) => {
+      const text = event.results?.[0]?.[0]?.transcript ?? "";
+      if (text.trim()) onResult(text.trim());
+      setListening(false);
+    };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
+    recognitionRef.current = r;
+    r.start();
+    setListening(true);
+  }, [listening, onResult, supported]);
+
+  return { listening, toggle, supported };
+}
+
+function EmptyChat() {
+  const t = useT();
+
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center py-8 text-center animate-in fade-in duration-300">
+      <img
+        src={wideLogo}
+        alt=""
+        draggable={false}
+        className="mb-4 size-48 object-contain select-none"
+      />
+      <h2 className="text-[17px] font-semibold text-fg tracking-tight">
+        {t("How can I help you today?")}
+      </h2>
+    </div>
+  );
+}
+
+const DEFAULT_AI_INSTRUCTIONS = [
+  "Write concise, maintainable code.",
+  "Follow existing patterns and conventions in this project.",
+  "Apply code changes directly to project files instead of only printing snippets in chat.",
+].join("\n");
 
 export function AiChatView({ id }: { id: string }) {
   const t = useT();
@@ -489,6 +1334,11 @@ export function AiChatView({ id }: { id: string }) {
   const store = keptFor(id);
   const [draft, setDraft] = useState(store.draft);
 
+  const onSpeechResult = useCallback((text: string) => {
+    setDraft((current) => current ? `${current} ${text}` : text);
+  }, []);
+  const { listening, toggle: toggleSpeech, supported: speechSupported } = useSpeechInput(onSpeechResult);
+
   const stuck = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
 
@@ -499,6 +1349,10 @@ export function AiChatView({ id }: { id: string }) {
     return match ? SLASH_COMMANDS.filter((command) => command.name.startsWith(match[1].toLowerCase())) : [];
   }, [draft]);
   const slashOpen = slashMatches.length > 0 && !slashHidden;
+
+  useEffect(() => {
+    void useAi.getState().load();
+  }, []);
   useEffect(() => {
     setSlashIndex(0);
     setSlashHidden(false);
@@ -507,6 +1361,62 @@ export function AiChatView({ id }: { id: string }) {
     setDraft(command.open ? command.prompt : `${command.prompt} `);
     composer.current?.focus();
   };
+
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [instructionsText, setInstructionsText] = useState("");
+  const [instructionsPath, setInstructionsPath] = useState("");
+  const [instructionsBusy, setInstructionsBusy] = useState(false);
+
+  const openInstructions = useCallback(async () => {
+    if (!root) {
+      toast.error(t("Open a folder first."));
+      return;
+    }
+    const sep = root.includes("\\") ? "\\" : "/";
+    const fallbackTarget = `${root.replace(/[\\/]+$/, "")}${sep}.wide${sep}ai-instructions.md`;
+    setInstructionsPath(fallbackTarget);
+    setInstructionsOpen(true);
+    setInstructionsBusy(true);
+    try {
+      const reply = await bridge.aiInstructionsGet(root);
+      if (reply?.ok) {
+        if (reply.path) setInstructionsPath(reply.path);
+        const content = typeof reply.content === "string" && reply.content.trim()
+          ? reply.content
+          : DEFAULT_AI_INSTRUCTIONS;
+        setInstructionsText(content);
+      } else {
+        setInstructionsText(DEFAULT_AI_INSTRUCTIONS);
+      }
+    } catch {
+      setInstructionsText(DEFAULT_AI_INSTRUCTIONS);
+    } finally {
+      setInstructionsBusy(false);
+    }
+  }, [root, t]);
+
+  const saveInstructions = useCallback(async (openInEditorAfter = false) => {
+    if (!root) return;
+    setInstructionsBusy(true);
+    try {
+      const saved = await bridge.aiInstructionsSave(root, instructionsText);
+      if (!saved?.ok) {
+        toast.error(t(saved?.error ?? "Could not save instructions."));
+        return;
+      }
+      forgetProjectInstructions(root);
+      void useWorkspace.getState().refresh();
+      const targetPath = saved.path || instructionsPath;
+      setInstructionsOpen(false);
+      if (openInEditorAfter && targetPath) {
+        await useEditor.getState().openFile(targetPath);
+      } else {
+        toast.success(t("Saved"));
+      }
+    } finally {
+      setInstructionsBusy(false);
+    }
+  }, [root, instructionsText, instructionsPath, t]);
 
   const images = useAi((state) => state.images[id] ?? NO_IMAGES);
   const providerSupportsImages = useAi((state) => {
@@ -628,7 +1538,6 @@ export function AiChatView({ id }: { id: string }) {
     const element = composer.current;
     if (!element) return;
     element.style.height = "auto";
-
     const chrome = element.offsetHeight - element.clientHeight;
     element.style.height = `${Math.min(element.scrollHeight + chrome, 240)}px`;
   }, [draft]);
@@ -653,9 +1562,7 @@ export function AiChatView({ id }: { id: string }) {
 
   const turns = chat?.turns;
   useEffect(() => {
-
     if (!stuck.current) {
-
       setAtBottom(false);
       return;
     }
@@ -768,15 +1675,19 @@ export function AiChatView({ id }: { id: string }) {
     stuck.current = true;
     setAtBottom(true);
     void useAi.getState().ask(id, text);
-
     composer.current?.focus();
   };
 
+  const [inspectedFile, setInspectedFile] = useState<InspectorTarget | null>(null);
+
+  const handleInspectFile = useCallback((target: InspectorTarget) => {
+    setInspectedFile((current) => (current?.key === target.key ? null : target));
+  }, []);
+
   return (
     <div
-
       tabIndex={-1}
-      className="wide-enter-fade flex h-full flex-col bg-canvas outline-none"
+      className="wide-enter-fade flex h-full bg-canvas outline-none overflow-hidden"
       onWheel={() => {
         at.current = null;
       }}
@@ -784,9 +1695,19 @@ export function AiChatView({ id }: { id: string }) {
         at.current = null;
       }}
       onKeyDown={(event) => {
+        if (event.key === "Escape" && instructionsOpen) {
+          event.preventDefault();
+          setInstructionsOpen(false);
+          return;
+        }
         if (event.key === "Escape" && active && !stopping) {
           event.preventDefault();
           void useAi.getState().stop(id);
+          return;
+        }
+        if (event.key === "Escape" && !active && inspectedFile) {
+          event.preventDefault();
+          setInspectedFile(null);
           return;
         }
         if (!event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -799,289 +1720,396 @@ export function AiChatView({ id }: { id: string }) {
         }
       }}
     >
-      <div className="relative min-h-0 flex-1">
-        <div ref={scroller} onScroll={onScroll} className="h-full overflow-auto">
-          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-6 py-5">
-            {!chat?.loaded ? null : chat.turns.length === 0 ? (
-              <p className={cn(BODY, "text-fg-faint")}>
-                {!root
-                  ? t("Open a folder first.")
-                  : ready
-                    ? t("Ask about the code. The assistant can read the project and change files.")
-                    : t("No model is set up yet.")}
-              </p>
-            ) : (
-              chat.turns.map((turn, index) => (
-                <Turn
-                  key={turn.id}
-                  turn={turn}
-                  divider={turn.role === "user" && index > 0}
-                  last={turn.role === "assistant" && index === chat.turns.length - 1 && !active}
-                  onFailure={report}
-                  onRegenerate={() => void useAi.getState().regenerate(id)}
-                />
-              ))
-            )}
-          </div>
-        </div>
-
-        {
-
-}
-        {!atBottom && (
-          <button
-            type="button"
-            onClick={toBottom}
-            className="wide-enter-fade absolute bottom-3 right-6 flex items-center gap-1.5 rounded-full border border-line bg-panel px-3 py-1.5 text-[11px] text-fg-dim shadow-lg transition-colors duration-100 hover:bg-hover hover:text-fg"
-          >
-            <ArrowDown className="size-3" strokeWidth={2} />
-            {active ? t("New text") : t("Latest")}
-          </button>
-        )}
-      </div>
-
-      {error && (
-        <button
-          type="button"
-          onClick={() =>
-            useAi.setState((state) => ({
-              chats: state.chats[id]
-                ? { ...state.chats, [id]: { ...state.chats[id], error: "" } }
-                : state.chats,
-            }))
-          }
-          className="wide-enter-fade shrink-0 border-t border-line px-6 py-1.5 text-left text-[13px] text-status-error"
-        >
-          {t(error)}
-        </button>
-      )}
-
-      <div className="shrink-0 border-t border-line px-6 py-3">
-        <div className="relative mx-auto w-full max-w-[760px]">
-          {mentionOpen && (
-            <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-[min(380px,90%)] overflow-auto rounded-md border border-line bg-panel py-1 shadow-xl">
-              {mentionMatches.map((file, index) => (
-                <button
-                  key={file.path}
-                  type="button"
-                  ref={index === mentionIndex ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
-                  onMouseEnter={() => setMentionIndex(index)}
-                  onClick={() => pickMention(file)}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors duration-100",
-                    index === mentionIndex ? "bg-hover" : "hover:bg-hover",
-                  )}
-                  title={file.relativePath}
-                >
-                  <AtSign className="size-3 shrink-0 text-fg-faint" strokeWidth={1.75} />
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-fg-dim">{file.relativePath}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {slashOpen && (
-            <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-[min(380px,90%)] overflow-auto rounded-md border border-line bg-panel py-1 shadow-xl">
-              {slashMatches.map((command, index) => (
-                <button
-                  key={command.name}
-                  type="button"
-                  ref={index === slashIndex ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
-                  onMouseEnter={() => setSlashIndex(index)}
-                  onClick={() => pickSlash(command)}
-                  className={cn(
-                    "flex w-full items-baseline gap-2 px-2 py-1.5 text-left transition-colors duration-100",
-                    index === slashIndex ? "bg-hover" : "hover:bg-hover",
-                  )}
-                >
-                  <span className="shrink-0 font-mono text-[11px] text-accent">/{command.name}</span>
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-fg-dim">{t(command.label)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {context && (
-            <p className="pb-1.5 text-[11px] text-fg-faint">
-              {t("Context: {name}", { name: basename(context) })}
-            </p>
-          )}
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1 pb-1.5">
-              {attachments.map((path) => (
-                <span key={path} className="flex items-center gap-1 rounded-sm bg-panel px-1.5 py-0.5 text-[11px] text-fg-dim" title={path}>
-                  <AtSign className="size-3 shrink-0 text-fg-faint" strokeWidth={1.75} />
-                  <span className="max-w-[160px] truncate">{basename(path)}</span>
-                  <button type="button" onClick={() => useAi.getState().detach(id, path)} className="text-fg-faint hover:text-fg" aria-label={t("Remove")}>
-                    <X className="size-3" strokeWidth={2} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          {images.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pb-1.5">
-              {images.map((image) => (
-                <span key={image.id} className="group/img relative block" title={image.name}>
-                  <img
-                    src={`data:${image.mime};base64,${image.data}`}
-                    alt={image.name}
-                    className="block size-12 rounded-sm border border-line object-cover"
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        <div className="relative min-h-0 flex-1">
+          <div ref={scroller} onScroll={onScroll} className="h-full overflow-auto">
+            <div className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-6 py-5">
+              {!chat?.loaded ? null : chat.turns.length === 0 ? (
+                <EmptyChat />
+              ) : (
+                chat.turns.map((turn, index) => (
+                  <Turn
+                    key={turn.id}
+                    turn={turn}
+                    divider={turn.role === "user" && index > 0}
+                    last={turn.role === "assistant" && index === chat.turns.length - 1 && !active}
+                    activeInspectKey={inspectedFile?.key ?? ""}
+                    onInspectFile={handleInspectFile}
+                    onFailure={report}
+                    onRegenerate={() => void useAi.getState().regenerate(id)}
+                    onEdit={turn.role === "user" && !active ? (text) => { setDraft(text); composer.current?.focus(); } : undefined}
                   />
-                  <button
-                    type="button"
-                    onClick={() => useAi.getState().detachImage(id, image.id)}
-                    aria-label={t("Remove")}
-                    className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full border border-line bg-panel text-fg-faint opacity-0 transition-opacity duration-100 hover:text-fg group-hover/img:opacity-100"
-                  >
-                    <X className="size-2.5" strokeWidth={2.5} />
-                  </button>
-                </span>
-              ))}
+                ))
+              )}
             </div>
-          )}
-          <textarea
-            ref={composer}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onPaste={onPasteImages}
-            onKeyDown={(event) => {
-              if (mentionOpen) {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setMentionIndex((index) => (index + 1) % mentionMatches.length);
-                  return;
-                }
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setMentionIndex((index) => (index - 1 + mentionMatches.length) % mentionMatches.length);
-                  return;
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setDraft((current) => current.replace(/(^|\s)@([^\s@]*)$/, "$1"));
-                  return;
-                }
-                if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
-                  event.preventDefault();
-                  pickMention(mentionMatches[mentionIndex]);
-                  return;
-                }
-              }
-              if (slashOpen) {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setSlashIndex((index) => (index + 1) % slashMatches.length);
-                  return;
-                }
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setSlashIndex((index) => (index - 1 + slashMatches.length) % slashMatches.length);
-                  return;
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setSlashHidden(true);
-                  return;
-                }
-                if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
-                  event.preventDefault();
-                  pickSlash(slashMatches[slashIndex]);
-                  return;
-                }
-              }
-              if (event.key !== "Enter" || event.shiftKey) return;
+          </div>
 
-              if (event.nativeEvent.isComposing) return;
-
-              if (active) return;
-              event.preventDefault();
-              submit();
-            }}
-            placeholder={ready ? t("Ask about the code…") : t("Not set up yet")}
-            rows={1}
-            spellCheck={false}
-            disabled={!ready || !root}
-            className={cn(
-              "w-full resize-none overflow-auto rounded-md border border-line bg-panel px-3 py-2 outline-none",
-              "transition-colors duration-100 focus:border-accent disabled:opacity-50 placeholder:text-fg-faint",
-              BODY,
-            )}
-          />
-          {
-
-}
-          <div className="flex items-center gap-2 pt-2">
-            <AttachButton session={id} />
+          {!atBottom && (
             <button
               type="button"
-              onClick={() => void pickImage()}
-              title={t("Attach an image")}
-              aria-label={t("Attach an image")}
-              className={cn(
-                "flex size-6 items-center justify-center rounded-md border border-line transition-colors duration-100 hover:bg-hover",
-                "text-fg-faint hover:text-fg",
-              )}
+              onClick={toBottom}
+              className="wide-enter-fade absolute bottom-4 right-8 flex items-center gap-1.5 rounded-full border border-line bg-panel px-3.5 py-1.5 text-[11px] text-fg-dim shadow-xl transition-all duration-100 hover:bg-hover hover:text-fg hover:scale-105"
             >
-              <ImagePlus className="size-3.5" strokeWidth={1.75} />
+              <ArrowDown className="size-3" strokeWidth={2} />
+              {active ? t("New text") : t("Latest")}
             </button>
-            <ModelPicker />
-            {contextTokens > 0 && (
-              <span
-                className={cn("shrink-0 text-[10px] tabular-nums", contextTokens > 120000 ? "text-amber-400" : "text-fg-faint")}
-                title={t("Tokens in the current context window")}
-              >
-                {t("{count} ctx", { count: tokens(contextTokens) })}
-              </span>
+          )}
+        </div>
+
+        {error && (
+          <button
+            type="button"
+            onClick={() =>
+              useAi.setState((state) => ({
+                chats: state.chats[id]
+                  ? { ...state.chats, [id]: { ...state.chats[id], error: "" } }
+                  : state.chats,
+              }))
+            }
+            className="wide-enter-fade shrink-0 border-t border-line px-6 py-2 text-left text-[12px] text-status-error bg-status-error/5 hover:bg-status-error/10 transition-colors"
+          >
+            {t(error)}
+          </button>
+        )}
+
+        <div className="shrink-0 border-t border-line px-6 py-4">
+          <div className="relative mx-auto w-full max-w-[760px]">
+            {mentionOpen && (
+              <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-[min(380px,90%)] overflow-auto rounded-xl border border-line bg-panel py-1 shadow-2xl">
+                {mentionMatches.map((file, index) => (
+                  <button
+                    key={file.path}
+                    type="button"
+                    ref={index === mentionIndex ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
+                    onMouseEnter={() => setMentionIndex(index)}
+                    onClick={() => pickMention(file)}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors duration-100",
+                      index === mentionIndex ? "bg-hover" : "hover:bg-hover",
+                    )}
+                    title={file.relativePath}
+                  >
+                    <AtSign className="size-3.5 shrink-0 text-accent" strokeWidth={1.75} />
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{file.relativePath}</span>
+                  </button>
+                ))}
+              </div>
             )}
-            <span className="flex-1" />
-            {
+            {slashOpen && (
+              <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-[min(380px,90%)] overflow-auto rounded-xl border border-line bg-panel py-1 shadow-2xl">
+                {slashMatches.map((command, index) => (
+                  <button
+                    key={command.name}
+                    type="button"
+                    ref={index === slashIndex ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
+                    onMouseEnter={() => setSlashIndex(index)}
+                    onClick={() => pickSlash(command)}
+                    className={cn(
+                      "flex w-full items-baseline gap-2.5 px-3 py-2 text-left transition-colors duration-100",
+                      index === slashIndex ? "bg-hover" : "hover:bg-hover",
+                    )}
+                  >
+                    <span className="shrink-0 font-mono text-[11px] font-semibold text-accent">/{command.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-fg-dim">{t(command.label)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => void useAi.getState().stop(id)}
-                title={t("Stop")}
-                aria-label={t("Stop")}
-                data-stop=""
-                aria-disabled={stopping}
-                tabIndex={active && !stopping ? 0 : -1}
-                aria-hidden={!active}
+            <div className="relative rounded-2xl border border-line bg-panel/95 shadow-lg backdrop-blur-sm transition-all duration-150 focus-within:border-accent/80 focus-within:ring-1 focus-within:ring-accent/20 p-2.5">
+              {context && (
+                <div className="flex items-center gap-1.5 pb-2 px-1">
+                  <span className="flex items-center gap-1.5 rounded-md bg-canvas px-2 py-0.5 text-[11px] text-fg-dim border border-line/60">
+                    <FileCode className="size-3 text-accent shrink-0" strokeWidth={1.75} />
+                    <span className="max-w-[200px] truncate">{basename(context)}</span>
+                  </span>
+                </div>
+              )}
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap gap-1 pb-2 px-1">
+                  {attachments.map((path) => (
+                    <span key={path} className="flex items-center gap-1 rounded-md bg-canvas px-2 py-0.5 text-[11px] text-fg-dim border border-line/60" title={path}>
+                      <AtSign className="size-3 shrink-0 text-accent" strokeWidth={1.75} />
+                      <span className="max-w-[160px] truncate">{basename(path)}</span>
+                      <button type="button" onClick={() => useAi.getState().detach(id, path)} className="text-fg-faint hover:text-fg ml-0.5" aria-label={t("Remove")}>
+                        <X className="size-3" strokeWidth={2} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {images.length > 0 && (
+                <div className="flex flex-wrap gap-2 pb-2 px-1">
+                  {images.map((image) => (
+                    <span key={image.id} className="group/img relative block" title={image.name}>
+                      <img
+                        src={`data:${image.mime};base64,${image.data}`}
+                        alt={image.name}
+                        className="block size-14 rounded-lg border border-line object-cover shadow-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => useAi.getState().detachImage(id, image.id)}
+                        aria-label={t("Remove")}
+                        className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border border-line bg-panel text-fg-faint opacity-0 transition-opacity duration-100 hover:text-fg group-hover/img:opacity-100 shadow"
+                      >
+                        <X className="size-2.5" strokeWidth={2.5} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <textarea
+                ref={composer}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onPaste={onPasteImages}
+                onKeyDown={(event) => {
+                  if (mentionOpen) {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setMentionIndex((index) => (index + 1) % mentionMatches.length);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setMentionIndex((index) => (index - 1 + mentionMatches.length) % mentionMatches.length);
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setDraft((current) => current.replace(/(^|\s)@([^\s@]*)$/, "$1"));
+                      return;
+                    }
+                    if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
+                      event.preventDefault();
+                      pickMention(mentionMatches[mentionIndex]);
+                      return;
+                    }
+                  }
+                  if (slashOpen) {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setSlashIndex((index) => (index + 1) % slashMatches.length);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setSlashIndex((index) => (index - 1 + slashMatches.length) % slashMatches.length);
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSlashHidden(true);
+                      return;
+                    }
+                    if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
+                      event.preventDefault();
+                      pickSlash(slashMatches[slashIndex]);
+                      return;
+                    }
+                  }
+                  if (event.key !== "Enter" || event.shiftKey) return;
+                  if (event.nativeEvent.isComposing) return;
+                  if (active) return;
+                  event.preventDefault();
+                  submit();
+                }}
+                placeholder={ready ? t("Ask anything…") : t("Not set up yet")}
+                rows={1}
+                spellCheck={false}
+                disabled={!ready || !root}
                 className={cn(
-                  "absolute inset-0 flex items-center justify-center gap-1.5 rounded-md border border-line px-3 py-1 text-[11px] text-fg-dim",
-                  "transition-opacity duration-100 hover:bg-hover hover:text-fg",
-                  active ? "opacity-100" : "pointer-events-none opacity-0",
-                  stopping && "opacity-60",
+                  "w-full resize-none overflow-auto bg-transparent px-2.5 py-1.5 outline-none",
+                  "disabled:opacity-50 placeholder:text-fg-faint",
+                  BODY,
                 )}
-              >
-                <Square className="size-3" strokeWidth={2} fill="currentColor" />
-                {stopping ? t("Stopping…") : t("Stop")}
-              </button>
-              <button
-                type="button"
-                onClick={submit}
+              />
 
-                disabled={!draft.trim() || !ready || !root || !loaded}
-                title={t("Send")}
-                aria-label={t("Send")}
-                tabIndex={active ? -1 : 0}
-                aria-hidden={Boolean(active)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-[11px] text-accent",
-                  "transition-opacity duration-100 hover:bg-accent hover:text-bg",
-                  "disabled:hover:bg-transparent disabled:hover:text-accent",
-
-                  active
-                    ? "pointer-events-none opacity-0 disabled:opacity-0"
-                    : "disabled:opacity-40",
+              <div className="flex items-center gap-1.5 pt-2 border-t border-line/50">
+                <AttachButton session={id} />
+                <button
+                  type="button"
+                  onClick={() => void pickImage()}
+                  title={t("Attach an image")}
+                  aria-label={t("Attach an image")}
+                  className="flex size-7 items-center justify-center rounded-lg border border-line/70 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+                >
+                  <ImagePlus className="size-3.5" strokeWidth={1.75} />
+                </button>
+                <ModelPicker />
+                {speechSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleSpeech}
+                    title={listening ? t("Stop listening") : t("Speak your message")}
+                    aria-label={listening ? t("Stop listening") : t("Speak your message")}
+                    className={cn(
+                      "flex size-7 items-center justify-center rounded-lg border border-line/70 transition-colors duration-100 hover:bg-hover",
+                      listening ? "border-accent text-accent" : "text-fg-faint hover:text-fg",
+                    )}
+                  >
+                    {listening ? <MicOff className="size-3.5" strokeWidth={1.75} /> : <Mic className="size-3.5" strokeWidth={1.75} />}
+                  </button>
                 )}
-              >
-                <Send className="size-3" strokeWidth={1.75} />
-                {t("Send")}
-              </button>
+                {contextTokens > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void useAi.getState().compactChat(id)}
+                    className={cn(
+                      "shrink-0 rounded-md border border-line/60 px-2 py-1 text-[10px] tabular-nums transition-colors duration-100 hover:bg-hover",
+                      contextTokens > 120000 ? "text-amber-400" : "text-fg-faint hover:text-fg"
+                    )}
+                    title={t("Tokens in context window. Click to compact / summarize history.")}
+                  >
+                    {t("{count} ctx", { count: tokens(contextTokens) })}
+                  </button>
+                )}
+                {(chat?.turns?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void exportConversation()}
+                    title={t("Export conversation as Markdown")}
+                    aria-label={t("Export conversation as Markdown")}
+                    className="flex size-7 items-center justify-center rounded-lg border border-line/70 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+                  >
+                    <Download className="size-3.5" strokeWidth={1.75} />
+                  </button>
+                )}
+                {root && (
+                  <button
+                    type="button"
+                    onClick={() => void openInstructions()}
+                    title={t("Project AI Instructions (.wide/ai-instructions.md)")}
+                    aria-label={t("Project AI Instructions")}
+                    className="flex size-7 items-center justify-center rounded-lg border border-line/70 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+                  >
+                    <Settings2 className="size-3.5" strokeWidth={1.75} />
+                  </button>
+                )}
+                <span className="flex-1" />
+                <EffortToggle />
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => void useAi.getState().stop(id)}
+                    title={t("Stop")}
+                    aria-label={t("Stop")}
+                    data-stop=""
+                    aria-disabled={stopping}
+                    tabIndex={active && !stopping ? 0 : -1}
+                    aria-hidden={!active}
+                    className={cn(
+                      "absolute inset-0 flex items-center justify-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] text-fg-dim",
+                      "transition-opacity duration-100 hover:bg-hover hover:text-fg",
+                      active ? "opacity-100" : "pointer-events-none opacity-0",
+                      stopping && "opacity-60",
+                    )}
+                  >
+                    <Square className="size-3" strokeWidth={2} fill="currentColor" />
+                    {stopping ? t("Stopping…") : t("Stop")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={!draft.trim() || !ready || !root || !loaded}
+                    title={t("Send")}
+                    aria-label={t("Send")}
+                    tabIndex={active ? -1 : 0}
+                    aria-hidden={Boolean(active)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-1.5 text-[12px] font-medium text-bg shadow-sm",
+                      "transition-all duration-100 hover:brightness-110 active:scale-95",
+                      "disabled:hover:bg-accent disabled:opacity-40 disabled:pointer-events-none",
+                      active ? "pointer-events-none opacity-0" : "",
+                    )}
+                  >
+                    <Send className="size-3" strokeWidth={2} />
+                    <span>{t("Send")}</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      {instructionsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+          onClick={() => setInstructionsOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-line px-4 py-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Settings2 className="size-4 shrink-0 text-accent" strokeWidth={1.75} />
+                <span className="truncate text-[13px] font-semibold text-fg">{t("Project AI Instructions")}</span>
+                <span className="rounded bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-fg-faint border border-line/60">
+                  .wide/ai-instructions.md
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInstructionsOpen(false)}
+                className="flex size-6 items-center justify-center rounded-md text-fg-faint transition-colors hover:bg-hover hover:text-fg"
+                aria-label={t("Close")}
+              >
+                <X className="size-3.5" strokeWidth={2} />
+              </button>
+            </div>
+            <div className="flex flex-col gap-3 p-4">
+              <p className="text-[12px] text-fg-dim">
+                {t("Instructions in this file are automatically included in the system prompt for all AI requests.")}
+              </p>
+              <textarea
+                value={instructionsText}
+                onChange={(event) => setInstructionsText(event.target.value)}
+                rows={10}
+                spellCheck={false}
+                disabled={instructionsBusy}
+                className="w-full resize-y rounded-xl border border-line bg-canvas p-3 font-mono text-[12px] leading-relaxed text-fg outline-none focus:border-accent/80 disabled:opacity-50"
+              />
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={instructionsBusy}
+                  onClick={() => void saveInstructions(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg disabled:opacity-50"
+                >
+                  <ExternalLink className="size-3.5" strokeWidth={1.75} />
+                  <span>{t("Open in editor")}</span>
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={instructionsBusy}
+                    onClick={() => setInstructionsOpen(false)}
+                    className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-fg-dim transition-colors hover:bg-hover hover:text-fg disabled:opacity-50"
+                  >
+                    {t("Cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={instructionsBusy}
+                    onClick={() => void saveInstructions(false)}
+                    className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[12px] font-medium text-bg transition-all hover:brightness-110 disabled:opacity-50"
+                  >
+                    {t("Save")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {inspectedFile && (
+        <DiffSlidePanel target={inspectedFile} onClose={() => setInspectedFile(null)} />
+      )}
     </div>
   );
 }

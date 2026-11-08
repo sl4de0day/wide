@@ -4,6 +4,8 @@ const AI_CONFIG_FILE = () =>
   node_path.join(electron.app.getPath("userData"), "ai-config.json");
 const AI_KEYS_FILE = () =>
   node_path.join(electron.app.getPath("userData"), "ai-keys.bin");
+const AI_KEYS_BACKUP_FILE = () =>
+  node_path.join(electron.app.getPath("userData"), "ai-keys.json");
 const AI_SESSION_DIR = () =>
   node_path.join(electron.app.getPath("userData"), "ai-sessions");
 
@@ -76,6 +78,15 @@ async function readAiKeys() {
       aiKeysUnreadable = true;
       console.warn("[ai] The saved keys could not be read:", error.message);
     }
+    try {
+      const backupText = await promises.readFile(AI_KEYS_BACKUP_FILE(), "utf8");
+      aiKeyCache = JSON.parse(backupText);
+      aiKeysUnreadable = false;
+    } catch {
+      aiKeyCache = {};
+    }
+  }
+  if (!aiKeyCache || typeof aiKeyCache !== "object") {
     aiKeyCache = {};
   }
   if (rewrite) await writeAiKeys(aiKeyCache);
@@ -106,6 +117,11 @@ async function writeAiKeys(keys) {
   if (aiKeysUnreadable) {
     aiKeysUnreadable = false;
     await preserveUnreadable(AI_KEYS_FILE());
+  }
+  try {
+    await writeFileAtomic(AI_KEYS_BACKUP_FILE(), JSON.stringify(keys, null, 2), "utf8");
+  } catch (error) {
+    console.warn("[ai] Backup keys could not be saved:", error.message);
   }
   try {
     await writeFileAtomic(AI_KEYS_FILE(), electron.safeStorage.encryptString(JSON.stringify(keys)));

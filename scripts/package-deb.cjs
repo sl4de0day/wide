@@ -8,7 +8,7 @@ const cp = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const SOURCE_DIR = path.join(DIST, 'wide-linux-x64');
-const VERSION = require(path.join(ROOT, 'package.json')).version || '1.220926';
+const VERSION = require(path.join(ROOT, 'package.json')).version || '1.481126';
 const DEB_NAME = `wide-ide_${VERSION}_amd64.deb`;
 const DEB_OUT = path.join(DIST, DEB_NAME);
 

@@ -119,18 +119,34 @@ function expandCount(text) {
 async function huggingFaceFiles(id) {
   const body = await catalogGet(HF_HOST, `/api/models/${id}/tree/main`);
   const entries = JSON.parse(body);
-  const files = [];
+  const rawFiles = [];
+  const singleQuants = new Set();
   for (const entry of Array.isArray(entries) ? entries : []) {
     const path = entry.path ?? "";
     if (!path.toLowerCase().endsWith(".gguf")) continue;
     const part = splitPart(path);
-
-    if (part && part.index !== 1) continue;
-    files.push({
+    const quant = quantOf(path);
+    if (!part && quant) singleQuants.add(quant);
+    rawFiles.push({
       path,
       size: entry.lfs?.size ?? entry.size ?? 0,
-      quant: quantOf(path),
+      quant,
       split: part ? part.total : 0,
+      partIndex: part ? part.index : 0,
+    });
+  }
+
+  const files = [];
+  for (const file of rawFiles) {
+    if (file.split > 0) {
+      if (file.quant && singleQuants.has(file.quant)) continue;
+      if (file.partIndex !== 1) continue;
+    }
+    files.push({
+      path: file.path,
+      size: file.size,
+      quant: file.quant,
+      split: file.split,
     });
   }
 
@@ -193,7 +209,7 @@ function registerAiCatalogHandlers() {
             ...file,
             ...aiFitFor(file.size, hardware),
 
-            reference: `hf.co/${id}:${file.quant || file.path}`,
+            reference: `hf.co/${id}:${file.path}`,
           })),
         };
       }
@@ -202,7 +218,7 @@ function registerAiCatalogHandlers() {
       const hardware = await aiHardware();
       const files = [];
       const seen = new Set();
-      const rowPattern = /href="\/library\/([^"]+:[^"]+)"[\s\S]{0,600}?([\d.]+)(MB|GB|TB)/gi;
+      const rowPattern = /href="\/library\/([^"]+:[^"]+)"[\s\S]{0,1500}?([\d.]+)\s*(MB|GB|TB)/gi;
       let match;
       while ((match = rowPattern.exec(body)) !== null) {
         const reference = match[1];

@@ -1,8 +1,11 @@
-import { ArrowDown, Braces, Wand2, X } from "lucide-react";
+import { ArrowDown, Braces, Check, Copy, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { HASH_TRANSFORMS, TRANSFORMS, decodeJwt, smartDecode, type AsyncTransform } from "@/lib/codec";
 import { useT } from "@/lib/i18n";
+import { copyText } from "@/lib/utils";
+import { replaceSelectedText } from "@/editor/activeView";
+import { toast } from "@/stores/toast";
 import { useDecoder } from "@/stores/decoder";
 
 export function DecoderOverlay() {
@@ -50,7 +53,7 @@ export function DecoderOverlay() {
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={() => useDecoder.getState().close()} />
       <div className="wide-enter-fade fixed left-1/2 top-16 z-50 flex max-h-[80vh] w-[min(680px,92vw)] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
           <Braces className="size-4 shrink-0 text-fg-faint" strokeWidth={1.75} />
           <span className="flex-1 text-[12px] font-medium text-fg">{t("Decoder")}</span>
           <button
@@ -124,6 +127,33 @@ export function DecoderOverlay() {
                 >
                   <ArrowDown className="size-3" strokeWidth={1.75} />
                   {t("Use as input")}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (await copyText(output)) {
+                      toast.success(t("Output copied"));
+                    }
+                  }}
+                  className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+                >
+                  <Copy className="size-3" strokeWidth={1.75} />
+                  {t("Copy")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (replaceSelectedText(output)) {
+                      toast.success(t("Replaced selection in editor"));
+                      useDecoder.getState().close();
+                    } else {
+                      toast.info(t("No active editor selection to replace"));
+                    }
+                  }}
+                  className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-accent transition-colors duration-100 hover:bg-accent/10"
+                >
+                  <Check className="size-3" strokeWidth={2} />
+                  {t("Replace in Editor")}
                 </button>
               </div>
               <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-sm border border-line bg-canvas px-2 py-1.5 font-mono text-[12px] text-fg">

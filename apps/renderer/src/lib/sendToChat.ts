@@ -30,3 +30,23 @@ export async function sendSelectionToChat(prefix = ""): Promise<void> {
   const body = `${where}\`\`\`${language}\n${code}\n\`\`\``;
   useAi.getState().setPendingDraft(id, prefix ? `${prefix}\n\n${body}` : body);
 }
+
+export async function sendPromptToChat(prompt: string, autoSend = false): Promise<void> {
+  const text = prompt.trim();
+  if (!text) return;
+  const editor = useEditor.getState();
+  const existing = editor.tabs.find((tab) => tab.path.startsWith(AI_CHAT_PATH));
+  let id = existing ? existing.path.slice(AI_CHAT_PATH.length) : "";
+  if (id) {
+    editor.openAiChat(id, existing?.name ?? t("New conversation"));
+  } else {
+    id = await useAi.getState().newSession();
+    if (!id) return;
+    useEditor.getState().openAiChat(id, t("New conversation"));
+  }
+  if (autoSend) {
+    void useAi.getState().ask(id, text);
+  } else {
+    useAi.getState().setPendingDraft(id, text);
+  }
+}

@@ -93,7 +93,7 @@ export function AiEditsOverlay() {
     <>
       <div className="fixed inset-0 z-40 bg-black/30" />
       <div className="wide-enter-fade fixed left-1/2 top-16 z-50 flex max-h-[80vh] w-[min(720px,94vw)] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
           <Check className="size-4 shrink-0 text-fg-faint" strokeWidth={1.75} />
           <span className="flex-1 text-[12px] font-medium text-fg">
             {t("{count} proposed edits", { count: pending.length })}

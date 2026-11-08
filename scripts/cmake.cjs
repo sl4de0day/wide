@@ -23,7 +23,7 @@ function findCMake() {
   ].filter(Boolean);
   const editions = ['BuildTools', 'Community', 'Professional', 'Enterprise'];
   for (const base of bases) {
-    for (const year of ['2025', '2022', '2019']) {
+    for (const year of ['18', '2026', '2025', '2022', '2019']) {
       for (const edition of editions) {
         const candidate = path.join(
           base, 'Microsoft Visual Studio', year, edition,

@@ -1,4 +1,4 @@
-import { CircleAlert, Copy, FileDown, Network, RefreshCw, ShieldCheck, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { CircleAlert, Copy, FileDown, Network, RefreshCw, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { Diagnostic, ProjectScanFinding } from "@/lib/bridge";
@@ -11,6 +11,7 @@ import { useEditor } from "@/stores/editor";
 import { SecurityRulesModal } from "@/components/SecurityRulesModal";
 import { useProjectScan } from "@/stores/projectScan";
 import { useWorkspace } from "@/stores/workspace";
+import { sendPromptToChat } from "@/lib/sendToChat";
 
 type Tab = "problems" | "vulnerabilities";
 
@@ -237,6 +238,14 @@ export function ProblemsPanel() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => void sendPromptToChat(`Explain this security finding in ${basename(finding.file)} (line ${finding.line}) and explain how to fix it:\n\n${finding.message}\nRule: ${finding.ruleId || ""}`)}
+                          title={t("Ask AI to explain and fix")}
+                          className="mr-1 mt-1 shrink-0 rounded-sm p-0.5 text-accent opacity-0 transition-opacity duration-100 hover:bg-hover group-hover/row:opacity-100"
+                        >
+                          <Sparkles className="size-3" strokeWidth={1.75} />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => copy(`${finding.file}:${finding.line}\n${finding.message}`)}
                           title={t("Copy")}
                           className="mr-2 mt-1 shrink-0 rounded-sm p-0.5 text-fg-faint opacity-0 transition-opacity duration-100 hover:text-fg group-hover/row:opacity-100"
@@ -263,19 +272,28 @@ export function ProblemsPanel() {
               <p className="px-3 pb-1 text-[11px] text-fg-faint">{tsScanning ? t("Scanning…") : t("No type errors in the project.")}</p>
             ) : (
               projectProblems.slice(0, 500).map((problem, index) => (
-                <button
-                  key={`${problem.file}:${problem.line}:${index}`}
-                  type="button"
-                  onClick={() => void useEditor.getState().revealAt(problem.file, problem.line, problem.column)}
-                  title={`${problem.file}:${problem.line}`}
-                  className="flex w-full items-start gap-2 px-3 py-0.5 text-left text-[11px] hover:bg-hover"
-                >
-                  {problem.severity === "error" ? <CircleAlert className="mt-0.5 size-3 shrink-0 text-status-error" strokeWidth={1.75} /> : <TriangleAlert className="mt-0.5 size-3 shrink-0 text-amber-400" strokeWidth={1.75} />}
-                  <span className="min-w-0 flex-1">
-                    <span className="text-fg">{problem.message.split("\n")[0]}</span>
-                    <span className="text-fg-faint"> — {basename(problem.file)}:{problem.line}</span>
-                  </span>
-                </button>
+                <div key={`${problem.file}:${problem.line}:${index}`} className="group/row flex items-start hover:bg-hover">
+                  <button
+                    type="button"
+                    onClick={() => void useEditor.getState().revealAt(problem.file, problem.line, problem.column)}
+                    title={`${problem.file}:${problem.line}`}
+                    className="flex min-w-0 flex-1 items-start gap-2 px-3 py-0.5 text-left text-[11px]"
+                  >
+                    {problem.severity === "error" ? <CircleAlert className="mt-0.5 size-3 shrink-0 text-status-error" strokeWidth={1.75} /> : <TriangleAlert className="mt-0.5 size-3 shrink-0 text-amber-400" strokeWidth={1.75} />}
+                    <span className="min-w-0 flex-1">
+                      <span className="text-fg">{problem.message.split("\n")[0]}</span>
+                      <span className="text-fg-faint"> — {basename(problem.file)}:{problem.line}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void sendPromptToChat(`Explain this TypeScript error in ${basename(problem.file)} (line ${problem.line}) and suggest a fix:\n\n${problem.message}`)}
+                    title={t("Ask AI to explain and fix")}
+                    className="mr-2 mt-0.5 shrink-0 rounded-sm p-0.5 text-accent opacity-0 transition-opacity duration-100 hover:bg-hover group-hover/row:opacity-100"
+                  >
+                    <Sparkles className="size-3" strokeWidth={1.75} />
+                  </button>
+                </div>
               ))
             )}
           </div>
@@ -311,6 +329,14 @@ export function ProblemsPanel() {
                         strokeWidth={2}
                       />
                       <span className="min-w-0 flex-1 truncate text-fg-dim">{diagnostic.message.split("\n")[0]}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void sendPromptToChat(`Explain this issue in ${basename(path)} (line ${lineFor(path, diagnostic.from)}) and suggest a fix:\n\n${diagnostic.message}`)}
+                      title={t("Ask AI to explain and fix")}
+                      className="mr-1 mt-1 shrink-0 rounded-sm p-0.5 text-accent opacity-0 transition-opacity duration-100 hover:bg-hover group-hover/row:opacity-100"
+                    >
+                      <Sparkles className="size-3" strokeWidth={1.75} />
                     </button>
                     <button
                       type="button"

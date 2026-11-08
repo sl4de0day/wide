@@ -8,6 +8,143 @@ const AI_HOSTS = {
   claude: "api.anthropic.com",
 };
 
+const aiCloudTelemetry = {
+  claude: {
+    requestsLimit: 50,
+    requestsRemaining: 50,
+    tokensLimit: 80000,
+    tokensRemaining: 80000,
+    requestsUsed: 0,
+    tokensUsed: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    resetAt: "",
+    lastLatencyMs: 0,
+    lastStatus: "ready",
+    updatedAt: 0,
+  },
+  deepseek: {
+    requestsLimit: 60,
+    requestsRemaining: 60,
+    tokensLimit: 120000,
+    tokensRemaining: 120000,
+    requestsUsed: 0,
+    tokensUsed: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    resetAt: "",
+    lastLatencyMs: 0,
+    lastStatus: "ready",
+    updatedAt: 0,
+  },
+  gemini: {
+    requestsLimit: 60,
+    requestsRemaining: 60,
+    tokensLimit: 100000,
+    tokensRemaining: 100000,
+    requestsUsed: 0,
+    tokensUsed: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    resetAt: "",
+    lastLatencyMs: 0,
+    lastStatus: "ready",
+    updatedAt: 0,
+  },
+  "claude-code": {
+    requestsLimit: 50,
+    requestsRemaining: 50,
+    tokensLimit: 100000,
+    tokensRemaining: 100000,
+    requestsUsed: 0,
+    tokensUsed: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    resetAt: "",
+    lastLatencyMs: 0,
+    lastStatus: "ready",
+    updatedAt: 0,
+  },
+};
+
+function aiRecordCloudHeaders(provider, headers, statusCode, latencyMs = 0) {
+  const slot = aiCloudTelemetry[provider];
+  if (!slot) return;
+  const h = headers || {};
+  slot.requestsUsed += 1;
+  slot.updatedAt = Date.now();
+  if (latencyMs > 0) slot.lastLatencyMs = Math.round(latencyMs);
+  slot.lastStatus = statusCode === 429 ? "rate_limited" : statusCode === 200 ? "ok" : "error";
+
+  const reqLim = Number(
+    h["anthropic-ratelimit-requests-limit"] ??
+      h["x-ratelimit-limit-requests"] ??
+      h["x-ratelimit-requests-limit"] ??
+      0
+  );
+  const reqRem = Number(
+    h["anthropic-ratelimit-requests-remaining"] ??
+      h["x-ratelimit-remaining-requests"] ??
+      h["x-ratelimit-requests-remaining"] ??
+      -1
+  );
+  const tokLim = Number(
+    h["anthropic-ratelimit-tokens-limit"] ??
+      h["x-ratelimit-limit-tokens"] ??
+      h["x-ratelimit-tokens-limit"] ??
+      0
+  );
+  const tokRem = Number(
+    h["anthropic-ratelimit-tokens-remaining"] ??
+      h["x-ratelimit-remaining-tokens"] ??
+      h["x-ratelimit-tokens-remaining"] ??
+      -1
+  );
+  const reset = String(
+    h["anthropic-ratelimit-requests-reset"] ??
+      h["anthropic-ratelimit-tokens-reset"] ??
+      h["x-ratelimit-reset-requests"] ??
+      h["retry-after"] ??
+      ""
+  );
+
+  if (reqLim > 0) slot.requestsLimit = reqLim;
+  if (reqRem >= 0 && !Number.isNaN(reqRem)) {
+    slot.requestsRemaining = reqRem;
+  } else {
+    slot.requestsRemaining = Math.max(0, slot.requestsLimit - (slot.requestsUsed % Math.max(1, slot.requestsLimit)));
+  }
+  if (tokLim > 0) slot.tokensLimit = tokLim;
+  if (tokRem >= 0 && !Number.isNaN(tokRem)) {
+    slot.tokensRemaining = tokRem;
+  }
+  if (reset) slot.resetAt = reset;
+}
+
+function aiRecordCloudUsage(provider, input = 0, output = 0) {
+  const slot = aiCloudTelemetry[provider];
+  if (!slot) return;
+  const inTok = Math.max(0, Number(input) || 0);
+  const outTok = Math.max(0, Number(output) || 0);
+  const total = inTok + outTok;
+  slot.inputTokens += inTok;
+  slot.outputTokens += outTok;
+  slot.tokensUsed += total;
+  slot.updatedAt = Date.now();
+  if (slot.tokensRemaining > 0 && total > 0) {
+    slot.tokensRemaining = Math.max(0, slot.tokensRemaining - total);
+  }
+}
+
+function aiGetCloudTelemetry() {
+  return {
+    claude: { ...aiCloudTelemetry.claude },
+    deepseek: { ...aiCloudTelemetry.deepseek },
+    gemini: { ...aiCloudTelemetry.gemini },
+    "claude-code": { ...aiCloudTelemetry["claude-code"] },
+  };
+}
+
 function aiRequest({ host, path: requestPath, headers, body, signal }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -78,15 +215,23 @@ async function aiErrorBody(response) {
   }
 }
 
-async function* aiStreamDeepSeek({ key, model, system, messages, tools, signal }) {
+async function* aiStreamDeepSeek({ key, model, system, messages, tools, effort = "fast", signal }) {
+  const isThinking = effort === "thinking";
+  const selectedModel = model || "deepseek-v4-pro";
+  const isReasoner = /reasoner|r1/i.test(selectedModel);
   const body = {
-    model: model || "deepseek-v4-pro",
+    model: selectedModel,
     messages: system ? [{ role: "system", content: system }, ...messages] : messages,
+    max_tokens: isThinking ? 8192 : 4096,
     stream: true,
     stream_options: { include_usage: true },
   };
+  if (!isReasoner) {
+    body.temperature = isThinking ? 0.6 : 0.2;
+  }
   if (tools?.length) body.tools = tools;
 
+  const startedAt = Date.now();
   const response = await aiRequest({
     host: AI_HOSTS.deepseek,
     path: "/chat/completions",
@@ -94,6 +239,7 @@ async function* aiStreamDeepSeek({ key, model, system, messages, tools, signal }
     body,
     signal,
   });
+  aiRecordCloudHeaders("deepseek", response.headers, response.statusCode, Date.now() - startedAt);
   if (response.statusCode !== 200) {
     yield { type: "error", message: await aiErrorBody(response) };
     return;
@@ -126,11 +272,14 @@ async function* aiStreamDeepSeek({ key, model, system, messages, tools, signal }
     }
 
     if (event.usage) {
+      const inTok = event.usage.prompt_tokens ?? 0;
+      const outTok = event.usage.completion_tokens ?? 0;
+      aiRecordCloudUsage("deepseek", inTok, outTok);
       yield {
         type: "usage",
-        input: event.usage.prompt_tokens ?? 0,
-        output: event.usage.completion_tokens ?? 0,
-        total: event.usage.total_tokens ?? 0,
+        input: inTok,
+        output: outTok,
+        total: event.usage.total_tokens ?? inTok + outTok,
       };
     }
   }
@@ -140,16 +289,19 @@ async function* aiStreamDeepSeek({ key, model, system, messages, tools, signal }
   }
 }
 
-async function* aiStreamClaude({ key, model, system, messages, tools, signal }) {
+async function* aiStreamClaude({ key, model, system, messages, tools, effort = "fast", signal }) {
+  const isThinking = effort === "thinking";
   const body = {
     model: model || "claude-sonnet-4-5",
-    max_tokens: 8192,
+    max_tokens: isThinking ? 12288 : 4096,
+    temperature: isThinking ? 0.5 : 0.2,
     messages,
     stream: true,
   };
   if (system) body.system = system;
   if (tools?.length) body.tools = tools;
 
+  const startedAt = Date.now();
   const response = await aiRequest({
     host: AI_HOSTS.claude,
     path: "/v1/messages",
@@ -157,6 +309,7 @@ async function* aiStreamClaude({ key, model, system, messages, tools, signal }) 
     body,
     signal,
   });
+  aiRecordCloudHeaders("claude", response.headers, response.statusCode, Date.now() - startedAt);
   if (response.statusCode !== 200) {
     yield { type: "error", message: await aiErrorBody(response) };
     return;
@@ -198,6 +351,7 @@ async function* aiStreamClaude({ key, model, system, messages, tools, signal }) 
       }
     } else if (event.type === "message_delta") {
       const output = event.usage?.output_tokens ?? 0;
+      aiRecordCloudUsage("claude", inputTokens, output);
       yield { type: "usage", input: inputTokens, output, total: inputTokens + output };
     } else if (event.type === "error") {
       yield { type: "error", message: event.error?.message ?? "The provider reported an error." };
@@ -205,7 +359,7 @@ async function* aiStreamClaude({ key, model, system, messages, tools, signal }) 
   }
 }
 
-async function* aiStreamGemini({ key, model, system, steps, tools, signal }) {
+async function* aiStreamGemini({ key, model, system, steps, tools, effort = "fast", signal }) {
   const body = {
     model: model || "gemini-3.7-flash",
     input: steps,
@@ -214,7 +368,9 @@ async function* aiStreamGemini({ key, model, system, steps, tools, signal }) {
   };
   if (system) body.system_instruction = system;
   if (tools?.length) body.tools = tools;
+  void effort;
 
+  const startedAt = Date.now();
   const response = await aiRequest({
     host: AI_HOSTS.gemini,
     path: "/v1beta/interactions?alt=sse",
@@ -222,6 +378,7 @@ async function* aiStreamGemini({ key, model, system, steps, tools, signal }) {
     body,
     signal,
   });
+  aiRecordCloudHeaders("gemini", response.headers, response.statusCode, Date.now() - startedAt);
   if (response.statusCode !== 200) {
     yield { type: "error", message: await aiErrorBody(response) };
     return;
@@ -259,12 +416,14 @@ async function* aiStreamGemini({ key, model, system, steps, tools, signal }) {
       if (call) yield* aiToolUse(call);
     } else if (event.event_type === "interaction.completed") {
       const usage = event.interaction?.usage ?? {};
+      const inTok = usage.total_input_tokens ?? 0;
+      const outTok = usage.total_output_tokens ?? 0;
+      aiRecordCloudUsage("gemini", inTok, outTok);
       yield {
         type: "usage",
-        input: usage.total_input_tokens ?? 0,
-        output: usage.total_output_tokens ?? 0,
-
-        total: usage.total_tokens ?? 0,
+        input: inTok,
+        output: outTok,
+        total: usage.total_tokens ?? inTok + outTok,
       };
       break;
     }
@@ -291,6 +450,7 @@ async function aiVerifyKey(provider, key) {
   if (!key) return { ok: false, error: "No key." };
   try {
     if (provider === "claude") {
+      const startedAt = Date.now();
       const models = await new Promise((resolve, reject) => {
         const request = node_https.request(
           {
@@ -306,6 +466,7 @@ async function aiVerifyKey(provider, key) {
         request.on("error", reject);
         request.end();
       });
+      aiRecordCloudHeaders("claude", models.headers, models.statusCode, Date.now() - startedAt);
       if (models.statusCode !== 200) return { ok: false, error: await aiErrorBody(models) };
       let text = "";
       models.setEncoding("utf8");

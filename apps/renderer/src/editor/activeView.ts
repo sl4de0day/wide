@@ -34,3 +34,13 @@ export function selectedRange(): { from: number; to: number; startLine: number; 
     endLine: view.state.doc.lineAt(selection.to).number,
   };
 }
+
+export function replaceSelectedText(text: string): boolean {
+  const view = current;
+  if (!view) return false;
+  const selection = view.state.selection.main;
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: text },
+  });
+  return true;
+}

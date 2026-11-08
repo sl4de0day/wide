@@ -1,4 +1,5 @@
-import { CircleAlert, EyeOff, Radio, Server, ShieldAlert, TriangleAlert } from "lucide-react";
+import { Bell, CircleAlert, EyeOff, Radio, Server, ShieldAlert, TriangleAlert } from "lucide-react";
+import { useState } from "react";
 
 import { languageLabel } from "@/editor/languages";
 import { useT } from "@/lib/i18n";
@@ -10,7 +11,7 @@ import { useProxy } from "@/stores/proxy";
 import { useRemote } from "@/stores/remote";
 import { useSettings } from "@/stores/settings";
 import { useWorkspace } from "@/stores/workspace";
-import { toast } from "@/stores/toast";
+import { toast, useToast } from "@/stores/toast";
 
 function ProxyChip({ onOpenPanel }: { onOpenPanel: (id: string) => void }) {
   const running = useProxy((state) => state.running);
@@ -103,6 +104,87 @@ function RemoteChip() {
   );
 }
 
+function NotificationBell() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const history = useToast((state) => state.history);
+  const clear = useToast((state) => state.clearHistory);
+
+  return (
+    <div className="relative flex shrink-0 items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={t("Notifications ({count})", { count: history.length })}
+        aria-label={t("Notifications")}
+        className={cn(
+          "flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] transition-colors duration-100 hover:bg-hover",
+          open ? "text-fg bg-hover" : "text-fg-dim hover:text-fg"
+        )}
+      >
+        <Bell className="size-3" strokeWidth={1.75} />
+        {history.length > 0 && (
+          <span className="flex size-3.5 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-bg">
+            {history.length > 9 ? "9+" : history.length}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="wide-pop-up absolute bottom-full right-0 z-50 mb-1 flex max-h-80 w-80 flex-col overflow-hidden rounded-md border border-line bg-panel shadow-xl">
+            <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-dim">
+                {t("Notifications")}
+              </span>
+              {history.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clear}
+                  className="text-[10px] text-fg-faint transition-colors hover:text-fg"
+                >
+                  {t("Clear all")}
+                </button>
+              )}
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto divide-y divide-line/40">
+              {history.length === 0 ? (
+                <p className="px-3 py-6 text-center text-[11px] text-fg-faint">
+                  {t("No notifications")}
+                </p>
+              ) : (
+                history.map((item) => {
+                  const when = new Date(item.timestamp);
+                  const time = `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
+                  return (
+                    <div key={item.id} className="flex items-start gap-2 px-3 py-2 text-left">
+                      <span
+                        className={cn(
+                          "mt-1 size-1.5 shrink-0 rounded-full",
+                          item.kind === "error"
+                            ? "bg-status-error"
+                            : item.kind === "success"
+                            ? "bg-status-ok"
+                            : "bg-accent"
+                        )}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] leading-snug text-fg break-words">{item.message}</p>
+                        <span className="text-[9px] text-fg-faint">{time}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Breadcrumbs({
   path,
   root,
@@ -182,32 +264,41 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
     >
       <button
         type="button"
-        title={t("Problems: {errors} errors, {warnings} warnings · Vulnerabilities: {vulns}", {
+        title={t("Problems: {errors} errors, {warnings} warnings (Click to open Problems)", {
           errors,
           warnings,
-          vulns: vulnCount,
         })}
         onClick={() => onOpenPanel("problems")}
         className={cn(
-          "flex shrink-0 items-center gap-2 rounded-sm px-1 tabular-nums",
+          "flex shrink-0 items-center gap-2 rounded-sm px-1.5 py-0.5 tabular-nums text-[11px]",
           "transition-colors duration-100 hover:bg-hover",
         )}
       >
-        <span className={cn("flex items-center gap-1", errors > 0 && "text-status-error")}>
+        <span className={cn("flex items-center gap-1", errors > 0 && "text-status-error font-medium")}>
           <CircleAlert className="size-3" strokeWidth={2} />
           {errors}
         </span>
-        <span className={cn("flex items-center gap-1", warnings > 0 && "text-status-warn")}>
+        <span className={cn("flex items-center gap-1", warnings > 0 && "text-status-warn font-medium")}>
           <TriangleAlert className="size-3" strokeWidth={2} />
           {warnings}
         </span>
-        <span
-          className={cn("flex items-center gap-1 border-l border-line pl-2", vulnCount > 0 && "text-status-error")}
-          title={t("Vulnerabilities (open files and whole-project scan)")}
-        >
-          <ShieldAlert className="size-3" strokeWidth={2} />
-          {vulnCount}
-        </span>
+      </button>
+
+      <button
+        type="button"
+        title={t("Security Findings & Vulnerabilities: {vulns} detected (Click to open Findings panel)", {
+          vulns: vulnCount,
+        })}
+        onClick={() => onOpenPanel("findings")}
+        className={cn(
+          "flex shrink-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 tabular-nums text-[11px] font-medium transition-all duration-100",
+          vulnCount > 0
+            ? "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25"
+            : "text-fg-faint hover:text-fg-dim hover:bg-hover",
+        )}
+      >
+        <ShieldAlert className="size-3" strokeWidth={2} />
+        <span>Vulns: {vulnCount}</span>
       </button>
 
       {file ? (
@@ -221,6 +312,7 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
       <StreamerChip />
       <ProxyChip onOpenPanel={onOpenPanel} />
       <RemoteChip />
+      <NotificationBell />
 
       {file && (
         <>

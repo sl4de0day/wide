@@ -11,6 +11,7 @@ import {
   Tag,
   Archive,
   ArchiveRestore,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -22,6 +23,7 @@ import { providerById } from "@/lib/gitProviders";
 import { partition, statusLetter, useCodeberg } from "@/stores/codeberg";
 import { useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
+import { sendPromptToChat } from "@/lib/sendToChat";
 
 const LETTER_COLOUR: Record<string, string> = {
   M: "text-amber-400",
@@ -455,8 +457,28 @@ export function CodebergPanel({ builtin, providerId }: { builtin?: boolean; prov
           </div>
         )}
 
-        {}
+        {/* Commit form */}
         <div className="border-b border-line px-2 py-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wide text-fg-faint">{t("Commit message")}</span>
+            <button
+              type="button"
+              onClick={() => {
+                const targetFiles = staged.length > 0 ? staged : unstaged;
+                const paths = targetFiles.map((f) => f.path);
+                void sendPromptToChat(
+                  paths.length > 0
+                    ? `Write a conventional commit message for these changed files:\n${paths.join("\n")}\n\nFormat: <type>(<scope>): <summary>`
+                    : "Write a conventional commit message for the current git changes."
+                );
+              }}
+              title={t("Ask AI to generate a commit message")}
+              className="flex items-center gap-1 text-[10px] text-accent transition-colors duration-100 hover:text-accent-bright"
+            >
+              <Sparkles className="size-3" strokeWidth={1.75} />
+              <span>{t("AI Message")}</span>
+            </button>
+          </div>
           <textarea
             value={message}
             onChange={(event) => act().setMessage(event.target.value)}

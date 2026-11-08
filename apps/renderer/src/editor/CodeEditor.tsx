@@ -57,6 +57,8 @@ import { typescriptSupport } from "./features/typescript";
 import { tagEditing } from "./features/tags";
 import { jwtHover } from "./features/jwtHover";
 import { streamerMask } from "./features/streamerMask";
+import { selectionToolbar } from "./features/selectionToolbar";
+import { ScrollbarAnnotations } from "./features/ScrollbarAnnotations";
 import { languageFor } from "./languages";
 import { codeHighlight, editorTheme } from "./theme";
 import { useExtensions } from "@/stores/extensions";
@@ -127,6 +129,7 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
         inspections(extname(tab.path), tab.path),
         jwtHover(),
         streamerMask(),
+        selectionToolbar(),
         lspSupport(tab.path, useWorkspace.getState().root),
         httpRunner(extname(tab.path), (request) => {
 
@@ -327,5 +330,35 @@ export function CodeEditor({ tab }: { tab: FileTab }) {
     );
   }
 
-  return <div ref={holder} data-code-editor="true" className="h-full" />;
+  return (
+    <div className="relative h-full w-full overflow-hidden">
+      <div ref={holder} data-code-editor="true" className="h-full" />
+      <ScrollbarAnnotations
+        tabPath={tab.path}
+        contentLength={tab.content.length}
+        totalLines={view.current?.state.doc.lines ?? 1}
+        onJump={(pos) => {
+          const inst = view.current;
+          if (!inst) return;
+          const target = Math.min(Math.max(0, pos), inst.state.doc.length);
+          inst.dispatch({
+            selection: { anchor: target },
+            effects: EditorView.scrollIntoView(target, { y: "center" }),
+          });
+          inst.focus();
+        }}
+        onJumpLine={(line) => {
+          const inst = view.current;
+          if (!inst) return;
+          const lineCount = inst.state.doc.lines;
+          const docLine = inst.state.doc.line(Math.min(Math.max(1, line), lineCount));
+          inst.dispatch({
+            selection: { anchor: docLine.from },
+            effects: EditorView.scrollIntoView(docLine.from, { y: "center" }),
+          });
+          inst.focus();
+        }}
+      />
+    </div>
+  );
 }

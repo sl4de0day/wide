@@ -48,7 +48,7 @@ constexpr int kInitialHeight = 900;
 constexpr int kMinWidth = 720;
 constexpr int kMinHeight = 480;
 
-constexpr COLORREF kBackground = RGB(0x3b, 0x42, 0x52);
+constexpr COLORREF kBackground = RGB(0x3B, 0x42, 0x52);
 
 wil::com_ptr<ICoreWebView2Controller> g_controller;
 wil::com_ptr<ICoreWebView2> g_webview;
@@ -322,9 +322,10 @@ std::wstring ParseLaunchPath() {
   if (!argv) return L"";
   std::wstring found;
   for (int i = 1; i < argc; ++i) {
-    if (argv[i] && argv[i][0] != L'-' && argv[i][0] != L'/') {
-      found = argv[i];
-      break;
+    if (!argv[i]) continue;
+    std::wstring arg(argv[i]);
+    if (arg[0] != L'-' && arg[0] != L'/') {
+      found = arg;
     }
   }
   LocalFree(argv);
@@ -1167,8 +1168,9 @@ void InjectScript(const std::string& code) {
 std::wstring UserDataFolder() {
   std::wstring portable = PortableRoot();
   fs::path folder;
+  std::wstring leaf = L"WebView2";
   if (!portable.empty()) {
-    folder = fs::path(portable) / L"data" / L"WebView2";
+    folder = fs::path(portable) / L"data" / leaf;
   } else {
     PWSTR local = nullptr;
     std::wstring base;
@@ -1180,7 +1182,7 @@ std::wstring UserDataFolder() {
       GetTempPathW(MAX_PATH, tmp);
       base = tmp;
     }
-    folder = fs::path(base) / L"wide" / L"WebView2";
+    folder = fs::path(base) / L"wide" / leaf;
   }
   std::error_code ec;
   fs::create_directories(folder, ec);

@@ -159,12 +159,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
 }));
 
 export function applyTheme(): void {
-  const { theme, followSystemTheme } = useSettings.getState();
+  const { theme } = useSettings.getState();
   let activeTheme = theme;
-  if (followSystemTheme && typeof window !== "undefined") {
-    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    activeTheme = isDark ? (theme || "default") : BASE_THEME;
-  }
   if (activeTheme === BASE_THEME) delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = activeTheme;
 }

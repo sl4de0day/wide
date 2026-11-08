@@ -86,7 +86,7 @@ export function SymbolSearchOverlay() {
       {}
       <div className="fixed inset-0 z-40" onClick={() => useSymbolSearch.getState().close()} />
       <div className="wide-enter-fade fixed left-1/2 top-24 z-50 flex max-h-[60vh] w-[min(560px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
           <Search className="size-4 shrink-0 text-fg-faint" strokeWidth={1.75} />
           <input
             ref={inputRef}

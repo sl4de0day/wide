@@ -2,13 +2,16 @@ import { create } from "zustand";
 
 import {
   bridge,
+  type AiCloudProviderTelemetry,
   type AiConfig,
   type AiEvent,
   type AiHardware,
   type AiMessage,
   type AiModelFile,
+  type AiRunningLocalModel,
   type AiSearchResult,
   type AiSessionMeta,
+  type AiSystemResources,
   type Ok,
 } from "@/lib/bridge";
 import { t } from "@/lib/i18n";
@@ -16,6 +19,8 @@ import { basename } from "@/lib/utils";
 import { AI_CHAT_PATH, useEditor } from "./editor";
 import { applyAiEdit, useAiEdits } from "./aiEdits";
 import { useWorkspace } from "./workspace";
+import { useSettings } from "./settings";
+import { toast } from "./toast";
 
 export interface AiToolStep {
   kind: "tool";
@@ -23,19 +28,25 @@ export interface AiToolStep {
   input: unknown;
   result: string;
   done: boolean;
+  startedAt?: number;
+  endedAt?: number;
+  filePath?: string;
+  oldContent?: string;
+  newContent?: string;
+  existed?: boolean;
 }
 
 export interface AiTurn {
   id: string;
   role: "user" | "assistant";
-
   text: string;
-
   thinking: string;
   steps: AiToolStep[];
   error: string;
   usage: { input: number; output: number; total: number } | null;
   streaming: boolean;
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface AiChat {
@@ -83,6 +94,8 @@ const emptyChat = (id: string, root: string): AiChat => ({
   loaded: false,
 });
 
+export type AiEffort = "fast" | "thinking";
+
 interface AiState {
   config: AiConfig | null;
   keys: Record<string, boolean>;
@@ -92,13 +105,28 @@ interface AiState {
 
   chats: Record<string, AiChat>;
 
+  effort: AiEffort;
+  setEffort(effort: AiEffort): void;
+
   query: string;
   results: AiSearchResult[];
   searching: boolean;
   files: Record<string, AiModelFile[]>;
   expanded: string | null;
   recommended: { label: string; vendor: string; query: string; found: boolean; id?: string }[];
-  installed: { name: string; size: number; quantization: string; parameters: string }[];
+  installed: {
+    name: string;
+    size: number;
+    quantization: string;
+    parameters: string;
+    family?: string;
+    fit?: "gpu" | "cpu" | "no" | "unknown";
+    neededBytes?: number;
+    fitRatio?: number;
+  }[];
+  runningModels: AiRunningLocalModel[];
+  systemResources: AiSystemResources | null;
+  cloudTelemetry: Record<string, AiCloudProviderTelemetry>;
   ollama: { running: boolean; installed: boolean };
   pulls: Record<string, AiPullState>;
 
@@ -131,13 +159,18 @@ interface AiState {
   ask(sessionId: string, text: string): Promise<void>;
   regenerate(sessionId: string): Promise<void>;
   stop(sessionId: string): Promise<void>;
+  compactChat(sessionId: string): Promise<void>;
 
   setQuery(query: string): void;
   search(): Promise<void>;
   expand(id: string, source: string): Promise<void>;
   pull(reference: string): Promise<void>;
   refreshLocal(): Promise<void>;
+  refreshTelemetry(): Promise<void>;
   setupOllama(): Promise<void>;
+  ollamaStatusText: string;
+  ollamaError: string | null;
+  clearOllamaError(): void;
 }
 
 const root = () => useWorkspace.getState().root ?? "";
@@ -147,8 +180,17 @@ const instructionCache = new Map<string, string>();
 
 async function projectInstructions(projectRoot: string): Promise<string> {
   if (!projectRoot) return "";
-  const cached = instructionCache.get(projectRoot);
-  if (cached !== undefined) return cached;
+  try {
+    if (typeof bridge.aiInstructionsGet === "function") {
+      const reply = await bridge.aiInstructionsGet(projectRoot);
+      if (reply?.ok && typeof reply.content === "string") {
+        const trimmed = reply.content.trim();
+        instructionCache.set(projectRoot, trimmed);
+        return trimmed;
+      }
+    }
+  } catch {
+  }
   const separator = projectRoot.includes("\\") ? "\\" : "/";
   const base = projectRoot.replace(/[\\/]+$/, "");
   let found = "";
@@ -161,7 +203,6 @@ async function projectInstructions(projectRoot: string): Promise<string> {
         if (found) break;
       }
     } catch {
-
     }
   }
   instructionCache.set(projectRoot, found);
@@ -173,17 +214,34 @@ export function forgetProjectInstructions(projectRoot?: string): void {
   else instructionCache.clear();
 }
 
-function systemPrompt(instructions = ""): string {
+function systemPrompt(instructions = "", effort: AiEffort = "fast"): string {
   const workspace = useWorkspace.getState();
-
   const open = useEditor.getState().lastFilePath ?? "";
+  const language = useSettings.getState().language;
+
+  const LANGUAGE_NAMES: Record<string, string> = {
+    tr: "Turkish", es: "Spanish", de: "German", fr: "French",
+    it: "Italian", ja: "Japanese", ko: "Korean",
+  };
+  const langLine = language !== "en" && LANGUAGE_NAMES[language]
+    ? `Always respond in ${LANGUAGE_NAMES[language]}.`
+    : "";
+
+  const effortLine =
+    effort === "thinking"
+      ? "Effort level: THINKING. Think carefully and thoroughly before acting. Use tools to inspect the codebase, verify assumptions, write or edit project files directly, and provide a complete response."
+      : "Effort level: FAST. Act directly and efficiently. Immediately use your tools (write_file, edit_file, read_file, list_dir, search, run_command) to create or modify project files as requested, and keep your chat summary brief.";
+
   return [
-    "You are the assistant inside Wide, a code editor.",
-    workspace.root ? `The open project is at ${workspace.root}.` : "No project is open.",
-    open ? `The file the person is looking at is ${open}.` : "",
-    "Use the tools to look at the project rather than guessing or asking the person to paste code.",
-    "When you change a file, read it first: write_file replaces the whole file.",
-    "Be brief. Answer the question that was asked.",
+    "You are Wide Agent, an autonomous AI coding agent built directly into Wide IDE.",
+    workspace.root ? `The open project workspace is at ${workspace.root}.` : "No project is open.",
+    open ? `The file currently open in the editor is ${open}.` : "",
+    "You are an action-oriented coding agent, NOT a passive chatbot.",
+    "When the user asks you to write a script, create a file, implement code, fix a bug, or modify the project, DO NOT write the code in the chat window as a message. You MUST use write_file or edit_file to create or modify the actual files in the project workspace.",
+    "If the user asks to write a script or code without naming a file, choose a sensible filename in the project and call write_file to create it on disk.",
+    "When modifying an existing file, read it first with read_file, then apply the change with edit_file or write_file.",
+    effortLine,
+    langLine,
     instructions ? `\nProject instructions from .wide/ai-instructions (follow these):\n${instructions}` : "",
   ]
     .filter(Boolean)
@@ -249,6 +307,8 @@ export const useAi = create<AiState>((set, get) => ({
   hardware: null,
   sessions: [],
   chats: {},
+  effort: "fast" as AiEffort,
+  setEffort: (effort) => set({ effort }),
   query: "",
   results: [],
   searching: false,
@@ -256,7 +316,12 @@ export const useAi = create<AiState>((set, get) => ({
   expanded: null,
   recommended: [],
   installed: [],
-  ollama: { running: false, installed: false },
+  runningModels: [],
+  systemResources: null,
+  cloudTelemetry: {},
+  ollama: { running: false, installed: true },
+  ollamaStatusText: "",
+  ollamaError: null,
   pulls: {},
   error: "",
   busy: false,
@@ -272,6 +337,7 @@ export const useAi = create<AiState>((set, get) => ({
       config: config.ok ? (config.config ?? null) : null,
       keys: keys.ok ? (keys.configured ?? {}) : {},
     });
+    void get().refreshLocal();
     await get().listSessions();
   },
 
@@ -458,6 +524,7 @@ export const useAi = create<AiState>((set, get) => ({
       }
     }
 
+    const turnStartedAt = Date.now();
     set((state) => ({
       chats: patchChat(state.chats, sessionId, (current) => ({
         ...current,
@@ -468,8 +535,8 @@ export const useAi = create<AiState>((set, get) => ({
         error: unreadable,
         turns: [
           ...current.turns,
-          { id: `${id}-user`, role: "user", text: message, thinking: "", steps: [], error: "", usage: null, streaming: false },
-          { id, role: "assistant", text: "", thinking: "", steps: [], error: "", usage: null, streaming: true },
+          { id: `${id}-user`, role: "user", text: message, thinking: "", steps: [], error: "", usage: null, streaming: false, startedAt: turnStartedAt },
+          { id, role: "assistant", text: "", thinking: "", steps: [], error: "", usage: null, streaming: true, startedAt: turnStartedAt },
         ],
       })),
     }));
@@ -481,7 +548,8 @@ export const useAi = create<AiState>((set, get) => ({
         provider,
         model,
         messages: providerMessages,
-        system: systemPrompt(await projectInstructions(projectRoot)),
+        system: systemPrompt(await projectInstructions(projectRoot), get().effort),
+        effort: get().effort,
       })
       .catch(
         (failure: unknown): Ok<{ answered?: boolean }> => ({
@@ -514,7 +582,7 @@ export const useAi = create<AiState>((set, get) => ({
         ...current,
         activeTurn: current.activeTurn === id ? null : current.activeTurn,
         stopping: current.activeTurn === id ? false : current.stopping,
-        turns: current.turns.map((turn) => (turn.id === id ? { ...turn, streaming: false } : turn)),
+        turns: current.turns.map((turn) => (turn.id === id ? { ...turn, streaming: false, endedAt: turn.endedAt ?? Date.now() } : turn)),
 
         error: reply.ok || reply.error === "no-key" || reply.error === "stopped"
           ? current.error
@@ -600,6 +668,37 @@ export const useAi = create<AiState>((set, get) => ({
     }));
   },
 
+  compactChat: async (sessionId) => {
+    const chat = get().chats[sessionId];
+    if (!chat || chat.history.length <= 4) {
+      toast.info(t("Conversation is already compact."));
+      return;
+    }
+    const recent = chat.history.slice(-4);
+    const older = chat.history.slice(0, -4);
+    const summarySnippet = older
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content ?? "").slice(0, 150)}...`)
+      .join("\n");
+    const compressed: AiMessage[] = [
+      {
+        role: "user",
+        content: `[Previous conversation summary]\n${summarySnippet}\n\n[End of summary. Continue assisting based on the above background.]`,
+      },
+      {
+        role: "assistant",
+        content: "I have the summary of our earlier discussion and will continue from here.",
+      },
+      ...recent,
+    ];
+    set((state) => ({
+      chats: patchChat(state.chats, sessionId, (c) => ({
+        ...c,
+        history: compressed,
+      })),
+    }));
+    toast.success(t("Context compacted successfully."));
+  },
+
   setQuery: (query) => set({ query }),
 
   search: async () => {
@@ -644,6 +743,7 @@ export const useAi = create<AiState>((set, get) => ({
           ...state.pulls,
           [reference]: { ...state.pulls[reference], status: "error", error: reply.error ?? "" },
         },
+        error: reply.error ?? "",
       }));
       return;
     }
@@ -656,6 +756,7 @@ export const useAi = create<AiState>((set, get) => ({
     set({
       ollama: { running: Boolean(reply.running), installed: Boolean(reply.installed) },
       installed: reply.models ?? [],
+      runningModels: reply.runningModels ?? get().runningModels,
       hardware: reply.hardware ?? null,
     });
     if (get().recommended.length === 0) {
@@ -664,12 +765,48 @@ export const useAi = create<AiState>((set, get) => ({
     }
   },
 
-  setupOllama: async () => {
-    set({ busy: true, error: "" });
-    const reply = await bridge.aiLocalSetup();
-    set({ busy: false, error: reply.ok ? "" : (reply.error ?? "Ollama could not be started.") });
-    await get().refreshLocal();
+  refreshTelemetry: async () => {
+    try {
+      const reply = await bridge.aiTelemetry();
+      if (!reply.ok) return;
+      set({
+        systemResources: reply.system ?? get().systemResources,
+        runningModels: reply.runningModels ?? get().runningModels,
+        cloudTelemetry: reply.cloud ?? get().cloudTelemetry,
+      });
+    } catch {
+    }
   },
+
+  setupOllama: async () => {
+    const isInstalled = get().ollama.installed;
+    const initialStatus = isInstalled
+      ? t("Starting Ollama service and waiting for connection…")
+      : t("Downloading and installing Ollama (this may take a few minutes)…");
+    set({ busy: true, error: "", ollamaStatusText: initialStatus, ollamaError: null });
+    toast.info(initialStatus);
+
+    try {
+      const reply = await bridge.aiLocalSetup();
+      if (reply && reply.ok) {
+        set({ busy: false, ollamaStatusText: "", ollamaError: null });
+        toast.success(t("Ollama is running and ready!"));
+        await get().refreshLocal();
+      } else {
+        const errMsg = reply?.error || t("Ollama could not be started.");
+        set({ busy: false, ollamaStatusText: "", ollamaError: errMsg });
+        toast.error(errMsg);
+        await get().refreshLocal();
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err || t("Ollama could not be started."));
+      set({ busy: false, ollamaStatusText: "", ollamaError: errMsg });
+      toast.error(errMsg);
+      await get().refreshLocal();
+    }
+  },
+
+  clearOllamaError: () => set({ ollamaError: null }),
 }));
 
 export function subscribeAiEvents(): () => void {
@@ -679,17 +816,16 @@ export function subscribeAiEvents(): () => void {
       return;
     }
     if (event.type === "edit") {
-
       if (useAiEdits.getState().reviewEnabled) {
         void useAiEdits.getState().queue({ path: event.path, root: event.root ?? "", content: event.content });
       } else {
         applyAiEdit(event.path, event.root ?? "", event.content, event.existed === true);
       }
-      return;
     }
 
     const sessionId = sessionOf(event.id);
     const settles = event.type === "done";
+    const now = Date.now();
     useAi.setState((state) => ({
       chats: patchChat(state.chats, sessionId, (chat) => ({
         ...chat,
@@ -705,21 +841,62 @@ export function subscribeAiEvents(): () => void {
             case "tool_start":
               return {
                 ...turn,
-                steps: [...turn.steps, { kind: "tool", name: event.name, input: event.input, result: "", done: false }],
+                steps: [
+                  ...turn.steps,
+                  { kind: "tool", name: event.name, input: event.input, result: "", done: false, startedAt: now },
+                ],
               };
+            case "edit": {
+              const steps = [...turn.steps];
+              for (let index = steps.length - 1; index >= 0; index -= 1) {
+                if ((steps[index].name === "write_file" || steps[index].name === "edit_file") && !steps[index].done) {
+                  steps[index] = {
+                    ...steps[index],
+                    filePath: event.path,
+                    oldContent: event.oldContent ?? "",
+                    newContent: event.content,
+                    existed: Boolean(event.existed),
+                  };
+                  return { ...turn, steps };
+                }
+              }
+              if (steps.length > 0) {
+                const lastIdx = steps.length - 1;
+                steps[lastIdx] = {
+                  ...steps[lastIdx],
+                  filePath: event.path,
+                  oldContent: event.oldContent ?? "",
+                  newContent: event.content,
+                  existed: Boolean(event.existed),
+                };
+              }
+              return { ...turn, steps };
+            }
+            case "file_read": {
+              const steps = [...turn.steps];
+              for (let index = steps.length - 1; index >= 0; index -= 1) {
+                if (steps[index].name === "read_file" && !steps[index].done) {
+                  steps[index] = {
+                    ...steps[index],
+                    filePath: event.path,
+                    newContent: event.content,
+                  };
+                  return { ...turn, steps };
+                }
+              }
+              return turn;
+            }
             case "tool_end": {
-
               const steps = [...turn.steps];
               for (let index = steps.length - 1; index >= 0; index -= 1) {
                 if (steps[index].name === event.name && !steps[index].done) {
-                  steps[index] = { ...steps[index], result: event.result, done: true };
+                  steps[index] = { ...steps[index], result: event.result, done: true, endedAt: now };
                   break;
                 }
               }
               return { ...turn, steps };
             }
             case "usage":
-
               return {
                 ...turn,
                 usage: {
@@ -729,9 +906,9 @@ export function subscribeAiEvents(): () => void {
                 },
               };
             case "error":
-              return { ...turn, error: event.message, streaming: false };
+              return { ...turn, error: event.message, streaming: false, endedAt: turn.endedAt ?? now };
             case "done":
-              return { ...turn, streaming: false };
+              return { ...turn, streaming: false, endedAt: turn.endedAt ?? now };
             default:
               return turn;
           }
@@ -754,6 +931,7 @@ export function subscribeAiPulls(): () => void {
           error: event.error ?? "",
         },
       },
+      error: event.error || state.error,
     }));
   });
 }

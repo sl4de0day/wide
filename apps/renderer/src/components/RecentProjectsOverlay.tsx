@@ -1,9 +1,9 @@
 import { Folder, FolderOpen, History, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { type Project } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useRecentProjects } from "@/stores/recentProjects";
 import { useWorkspace } from "@/stores/workspace";
-import type { Project } from "@/lib/bridge";
 
 function formatRelativeTime(timestamp?: number): string {
   if (!timestamp) return "";

@@ -51,6 +51,7 @@ function ExtensionRow({
 
   onCancel: () => void;
 }) {
+  const t = useT();
   const stageText =
     operation?.stage === "preparing"
       ? labels.preparing
@@ -72,7 +73,7 @@ function ExtensionRow({
       <button
         type="button"
         onClick={onOpen}
-        aria-label={extension.name}
+        aria-label={t(extension.name)}
         title={warning || undefined}
         className={cn(
           "absolute inset-0 z-0 w-full transition-colors duration-100",
@@ -90,7 +91,7 @@ function ExtensionRow({
       <div className="pointer-events-none relative z-10 min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className={cn("block truncate text-[12px] font-medium", warning ? "text-status-error" : "text-fg")}>
-            {extension.name}
+            {t(extension.name)}
           </span>
           {installed && !busy && (
             <span className="rounded bg-panel px-1 py-0.2 text-[9px] text-fg-faint">

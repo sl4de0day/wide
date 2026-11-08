@@ -1,5 +1,5 @@
 import { ChevronDown, GitBranch } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import logo from "@/assets/wide-logo.png";
 import { useT } from "@/lib/i18n";
@@ -11,10 +11,12 @@ import { useWorkspace } from "@/stores/workspace";
 function TitleButton({
   title,
   onClick,
+  active,
   children,
 }: {
   title: string;
   onClick?: () => void;
+  active?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -24,9 +26,10 @@ function TitleButton({
       aria-label={title}
       onClick={onClick}
       className={cn(
-        "no-drag flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-fg-dim",
-        "transition-colors duration-100 hover:bg-hover hover:text-fg",
+        "no-drag flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-fg-dim",
+        "transition-colors duration-150 hover:bg-hover hover:text-fg",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        active && "bg-hover text-fg",
       )}
     >
       {children}
@@ -36,7 +39,6 @@ function TitleButton({
 
 export function TitleBar() {
   const rootName = useWorkspace((state) => state.rootName);
-
   const workflowName = useWorkspace((state) => state.workflowName);
   const projectLabel = workflowName || rootName;
 
@@ -51,17 +53,10 @@ export function TitleBar() {
   return (
     <header
       className={cn(
-
-        "drag-region flex shrink-0 items-center gap-1 border-b border-line bg-chrome pr-[140px]",
+        "drag-region flex shrink-0 items-center gap-1.5 border-b border-line bg-chrome pr-[140px]",
       )}
       style={{ height: "var(--h-titlebar)" }}
     >
-      {
-
-}
-      {
-
-}
       <span className="flex shrink-0 items-center justify-center" style={{ width: "var(--w-activitybar)" }}>
         <img
           src={logo}
@@ -75,7 +70,7 @@ export function TitleBar() {
       </span>
 
       <TitleButton title={t("Project")} onClick={openFolder}>
-        <span className="max-w-48 truncate text-fg">{projectLabel || t("Open project")}</span>
+        <span className="max-w-48 truncate font-medium text-fg">{projectLabel || t("Open project")}</span>
         <ChevronDown className="size-3 shrink-0" strokeWidth={2} />
       </TitleButton>
 

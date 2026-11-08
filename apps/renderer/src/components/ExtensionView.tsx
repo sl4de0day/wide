@@ -362,7 +362,7 @@ export function ExtensionView({ id }: { id: string }) {
             <path d={extension.path} />
           </svg>
           <div className="min-w-0 flex-1">
-            <h1 className="text-[20px] font-semibold text-fg-bright">{extension.name}</h1>
+            <h1 className="text-[20px] font-semibold text-fg-bright">{t(extension.name)}</h1>
             <p className="pt-1 text-[13px] text-fg-muted">{t(extension.summary)}</p>
             <p className="flex flex-wrap items-center gap-2 pt-2 text-[11px] text-fg-faint">
               <span className="tabular-nums">{extension.version}</span>

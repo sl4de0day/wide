@@ -467,8 +467,9 @@ function readCommand(command, args) {
   return new Promise((resolve) => {
     let child;
     try {
+      const needsShell = process.platform === "win32" && /^(npm|npx|pnpm|yarn|.*\.(cmd|bat))$/i.test(String(command));
       child = node_child_process.spawn(command, args, {
-        shell: process.platform === "win32",
+        shell: needsShell,
         windowsHide: true,
         env: managerEnv(),
         stdio: ["pipe", "pipe", "ignore"],

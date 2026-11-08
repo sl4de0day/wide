@@ -14,6 +14,22 @@ type Entry =
   | { kind: "file"; path: string; relativePath: string }
   | { kind: "finding"; id: string; title: string; location: string };
 
+function highlightMatch(text: string, query: string) {
+  const q = query.trim();
+  if (!q) return text;
+  const index = text.toLowerCase().indexOf(q.toLowerCase());
+  if (index === -1) return text;
+  return (
+    <>
+      {text.slice(0, index)}
+      <span className="font-semibold text-accent underline underline-offset-2">
+        {text.slice(index, index + q.length)}
+      </span>
+      {text.slice(index + q.length)}
+    </>
+  );
+}
+
 export function CommandPalette() {
   const t = useT();
   const open = useCommandPalette((state) => state.open);
@@ -95,7 +111,7 @@ export function CommandPalette() {
     <>
       <div className="fixed inset-0 z-40" onClick={() => useCommandPalette.getState().close()} />
       <div role="dialog" aria-modal="true" aria-label={t("Command palette")} className="wide-enter-fade fixed left-1/2 top-24 z-50 flex max-h-[60vh] w-[min(560px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
           <CommandIcon className="size-4 shrink-0 text-fg-faint" strokeWidth={1.75} />
           <input
             ref={inputRef}
@@ -143,14 +159,14 @@ export function CommandPalette() {
                   {entry.kind === "finding" && <ShieldAlert className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />}
                   <span className="min-w-0 flex-1 truncate text-[12px] text-fg">
                     {entry.kind === "command"
-                      ? t(entry.command.title)
+                      ? highlightMatch(t(entry.command.title), query)
                       : entry.kind === "file"
-                        ? basename(entry.relativePath)
-                        : entry.title}
+                        ? highlightMatch(basename(entry.relativePath), query)
+                        : highlightMatch(entry.title, query)}
                   </span>
                   {entry.kind === "file" && (
                     <span className="min-w-0 max-w-[45%] shrink truncate text-[11px] text-fg-faint" title={entry.relativePath}>
-                      {entry.relativePath}
+                      {highlightMatch(entry.relativePath, query)}
                     </span>
                   )}
                   {combo && (

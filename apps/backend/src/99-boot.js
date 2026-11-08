@@ -15,6 +15,7 @@ function shutdownServices() {
     stopProxy,
     stopOast,
     stopBuiltinOast,
+    discordRpcShutdown,
     dispose,
   ];
   for (const step of steps) {
@@ -126,6 +127,7 @@ electron.app.whenReady().then(async () => {
   registerVaultHandlers();
   registerRealtimeHandlers();
   registerGrpcHandlers();
+  registerDiscordRpcHandlers();
   createWindow();
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();

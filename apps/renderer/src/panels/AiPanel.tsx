@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, MessageSquarePlus, Search, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, MessageSquarePlus, Pin, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -32,7 +32,27 @@ const clock = (at: number) => {
   return `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
 };
 
-function SessionRow({ session, open }: { session: AiSessionMeta; open: boolean }) {
+const PINNED_STORAGE_KEY = "wide.ai.pinned_sessions";
+function getStoredPinned(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function SessionRow({
+  session,
+  open,
+  pinned,
+  onTogglePin,
+}: {
+  session: AiSessionMeta;
+  open: boolean;
+  pinned: boolean;
+  onTogglePin: () => void;
+}) {
   const t = useT();
   const [confirming, setConfirming] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -97,6 +117,20 @@ function SessionRow({ session, open }: { session: AiSessionMeta; open: boolean }
 }
       <button
         type="button"
+        onClick={onTogglePin}
+        title={pinned ? t("Unpin conversation") : t("Pin conversation")}
+        aria-label={pinned ? t("Unpin conversation") : t("Pin conversation")}
+        className={cn(
+          "relative z-10 shrink-0 rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
+          pinned
+            ? "text-accent opacity-100"
+            : "text-fg-faint opacity-0 hover:text-fg group-hover:opacity-100 focus-visible:opacity-100",
+        )}
+      >
+        <Pin className={cn("size-3.5", pinned && "fill-accent")} strokeWidth={1.5} />
+      </button>
+      <button
+        type="button"
         onClick={() =>
           confirming ? void useAi.getState().deleteSession(session.id) : setConfirming(true)
         }
@@ -154,6 +188,15 @@ export function AiPanel() {
   const sessions = useAi((state) => state.sessions);
   const tabs = useEditor((state) => state.tabs);
   const [query, setQuery] = useState("");
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => getStoredPinned());
+
+  const togglePin = (id: string) => {
+    setPinnedIds((current) => {
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [id, ...current];
+      localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     void useAi.getState().load();
@@ -177,14 +220,20 @@ export function AiPanel() {
 
   const groups = useMemo(() => {
     const out: { label: string; rows: AiSessionMeta[] }[] = [];
-    for (const session of shown) {
+    const pinnedSet = new Set(pinnedIds);
+    const pinnedRows = shown.filter((s) => pinnedSet.has(s.id));
+    if (pinnedRows.length > 0) {
+      out.push({ label: t("Pinned"), rows: pinnedRows });
+    }
+    const unpinnedRows = shown.filter((s) => !pinnedSet.has(s.id));
+    for (const session of unpinnedRows) {
       const label = when(session.updatedAt || session.createdAt);
       const last = out[out.length - 1];
       if (last && last.label === label) last.rows.push(session);
       else out.push({ label, rows: [session] });
     }
     return out;
-  }, [shown, when]);
+  }, [shown, when, pinnedIds, t]);
 
   const start = async () => {
     const id = await useAi.getState().newSession();
@@ -251,7 +300,13 @@ export function AiPanel() {
                 {group.label}
               </p>
               {group.rows.map((session) => (
-                <SessionRow key={session.id} session={session} open={openIds.has(session.id)} />
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  open={openIds.has(session.id)}
+                  pinned={pinnedIds.includes(session.id)}
+                  onTogglePin={() => togglePin(session.id)}
+                />
               ))}
             </div>
           ))

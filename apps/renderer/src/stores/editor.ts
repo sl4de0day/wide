@@ -74,12 +74,14 @@ export interface FileTab {
   tooLarge: boolean;
   size: number;
   diskChanged?: boolean;
+  pinned?: boolean;
 }
 
 export interface VirtualTab {
   kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview" | "scratchpad";
   path: string;
   name: string;
+  pinned?: boolean;
 }
 
 export interface MediaTab {
@@ -89,6 +91,7 @@ export interface MediaTab {
   dataUri: string;
   mediaKind: "image" | "pdf" | "font" | "binary";
   size: number;
+  pinned?: boolean;
 }
 
 export type Tab = FileTab | VirtualTab | MediaTab;
@@ -168,6 +171,7 @@ interface EditorState {
   openDiff(relPath: string, staged: boolean): void;
 
   setTabName(path: string, name: string): void;
+  togglePinTab(path: string): void;
   closeTab(path: string): void;
 
   closeOthers(path: string): void;
@@ -693,6 +697,16 @@ export const useEditor = create<EditorState>((set, get) => ({
       return {
         tabs: state.tabs.map((item) => (item.path === path ? { ...item, name } : item)),
       };
+    }),
+
+  togglePinTab: (path) =>
+    set((state) => {
+      const tabs = state.tabs.map((tab) =>
+        tab.path === path ? { ...tab, pinned: !tab.pinned } : tab
+      );
+      const pinned = tabs.filter((t) => t.pinned);
+      const unpinned = tabs.filter((t) => !t.pinned);
+      return { tabs: [...pinned, ...unpinned] };
     }),
 
   closeTab: (path) => {

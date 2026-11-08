@@ -24,8 +24,8 @@ export function PromptHost() {
 
   return (
     <Modal title={pending.title} onClose={() => answer(null)}>
-      <div className="flex flex-col gap-3">
-        {pending.label && <label className="text-[11px] text-fg-dim">{pending.label}</label>}
+      <div className="flex flex-col gap-3.5">
+        {pending.label && <label className="text-[11.5px] font-medium text-fg-dim">{pending.label}</label>}
         <input
           autoFocus
           value={value}
@@ -39,13 +39,13 @@ export function PromptHost() {
           }}
           placeholder={pending.placeholder}
           spellCheck={false}
-          className="w-full rounded-sm border border-line bg-canvas px-2 py-1.5 text-[12px] text-fg outline-none transition-colors duration-100 focus:border-accent placeholder:text-fg-faint"
+          className="w-full rounded-md border border-line bg-canvas px-3 py-2 text-[12.5px] text-fg outline-none transition-colors duration-150 focus:border-accent placeholder:text-fg-faint"
         />
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => answer(null)} className="rounded-sm border border-line px-3 py-1 text-[12px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
+        <div className="flex items-center justify-end gap-2.5 pt-1">
+          <button type="button" onClick={() => answer(null)} className="rounded-md border border-line px-3.5 py-1.5 text-[12px] font-medium text-fg-dim transition-colors duration-150 hover:bg-hover hover:text-fg">
             {t("Cancel")}
           </button>
-          <button type="button" onClick={submit} className="rounded-sm border border-accent px-3 py-1 text-[12px] text-accent transition-colors duration-100 hover:bg-hover hover:text-fg">
+          <button type="button" onClick={submit} className="rounded-md border border-accent bg-accent/10 px-3.5 py-1.5 text-[12px] font-medium text-accent transition-colors duration-150 hover:bg-accent hover:text-fg-bright">
             {pending.confirmLabel ?? t("OK")}
           </button>
         </div>

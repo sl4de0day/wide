@@ -12,6 +12,8 @@ import { SymbolSearchOverlay } from "./components/SymbolSearchOverlay";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay";
 import { CommandPalette } from "./components/CommandPalette";
 import { DecoderOverlay } from "./components/DecoderOverlay";
+import { TabSwitcherOverlay } from "./components/TabSwitcherOverlay";
+import { useTabSwitcher } from "./stores/tabSwitcher";
 import { RecentProjectsOverlay } from "./components/RecentProjectsOverlay";
 import { useRecentProjects } from "./stores/recentProjects";
 import { TransformModal } from "./components/TransformModal";
@@ -28,7 +30,9 @@ import { subscribeProjectScan, useProjectScan } from "./stores/projectScan";
 import { AiEditsOverlay } from "./components/AiEditsOverlay";
 import { McpTrustPrompt } from "./components/McpTrustPrompt";
 import { useAiEdits } from "./stores/aiEdits";
+import { useAi } from "./stores/ai";
 import { sendSelectionToChat } from "./lib/sendToChat";
+import { selectedText } from "./editor/activeView";
 import { copyConversation, exportConversation } from "./lib/chatExport";
 import { BottomDock, SidePanel } from "./components/SidePanel";
 import { SettingsView } from "./components/SettingsView";
@@ -46,10 +50,11 @@ import { useTelemetry } from "./stores/telemetry";
 import { useDiagnostics } from "./stores/diagnostics";
 import { subscribeFindingsProject, useFindings } from "./stores/findings";
 import { SETTINGS_PATH, useEditor } from "./stores/editor";
-import { subscribeAiEvents, subscribeAiPulls } from "./stores/ai";
+import { subscribeAiEvents, subscribeAiPulls, useAi } from "./stores/ai";
 import { subscribeProxyTraffic } from "./stores/proxy";
 import { subscribeOast } from "./stores/oast";
 import { subscribeDebugEvents } from "./stores/debug";
+import { subscribeDiscordPresence } from "./stores/discordPresence";
 import { useExtensions } from "./stores/extensions";
 import { useSession } from "./stores/session";
 import { useSymbolSearch } from "./stores/symbolSearch";
@@ -168,7 +173,7 @@ function addSecurityFindingsForActiveFile(): number {
 
 function BootGate() {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: "#3b4252" }}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas">
       <img src={logo} alt="Wide" width={432} height={432} className="size-[432px] select-none animate-pulse" draggable={false} />
     </div>
   );
@@ -264,14 +269,13 @@ export default function App() {
         event.preventDefault();
         useTransformModal.getState().openModal();
       } else if (key === "tab") {
-
-        const { tabs, activePath, setActive } = useEditor.getState();
-        if (tabs.length > 1) {
-          event.preventDefault();
-          const i = tabs.findIndex((tab) => tab.path === activePath);
-          const n = tabs.length;
-          const next = tabs[(i + (event.shiftKey ? n - 1 : 1) + n) % n];
-          if (next) setActive(next.path);
+        event.preventDefault();
+        const switcher = useTabSwitcher.getState();
+        if (switcher.isOpen) {
+          if (event.shiftKey) switcher.prev();
+          else switcher.next();
+        } else {
+          switcher.open();
         }
       } else if (event.altKey && event.shiftKey && key === "f") {
 
@@ -284,6 +288,16 @@ export default function App() {
       } else if (key === "r" && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         useRecentProjects.getState().open();
+      } else if (key === "l" && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        void (async () => {
+          const newId = await useAi.getState().newSession();
+          if (newId) useEditor.getState().openAiChat(newId, t("New conversation"));
+        })();
+      } else if (key === "d" && event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        const snippet = selectedText();
+        useDecoder.getState().openDecoder(snippet);
       } else if (key === "t" && !event.shiftKey && !event.altKey) {
 
         event.preventDefault();
@@ -413,6 +427,7 @@ export default function App() {
 
 
     void useExtensions.getState().refresh();
+    void useAi.getState().load();
   }, []);
 
 
@@ -453,6 +468,7 @@ export default function App() {
 
   useEffect(() => subscribeProjectScan(), []);
   useEffect(() => subscribeFindingsProject(), []);
+  useEffect(() => subscribeDiscordPresence(), []);
 
 
   useEffect(() => {
@@ -687,6 +703,9 @@ export default function App() {
       { id: "go.file", title: "Go to File…", group: "Go", key: "ctrl+p", when: hasRoot, run: () => useQuickOpen.getState().openPalette() },
       { id: "go.symbol", title: "Go to Symbol in Project…", group: "Go", key: "ctrl+t", when: hasRoot, run: () => useSymbolSearch.getState().openSearch() },
       { id: "tool.decoder", title: "Decoder / JWT", group: "Tools", run: () => useDecoder.getState().openDecoder() },
+      { id: "tool.decoderSelection", title: "Quick Decode Selection…", group: "Tools", key: "ctrl+shift+d", run: () => useDecoder.getState().openDecoder(selectedText()) },
+      { id: "tool.sendPitcher", title: "Send Selection to Pitcher", group: "Tools", key: "ctrl+alt+p", run: () => { useEditor.getState().openPitcher(); } },
+      { id: "editor.pinTab", title: "Toggle Pin Active Tab", group: "View", run: () => { const p = useEditor.getState().activePath; if (p) useEditor.getState().togglePinTab(p); } },
       { id: "tool.transform", title: "Transform Selection…", group: "Tools", key: "ctrl+alt+e", run: () => useTransformModal.getState().openModal() },
       { id: "tool.transform.urle", title: "Transform: URL Encode Selection", group: "Tools", run: () => transformSelection(urlEncode) },
       { id: "tool.transform.urld", title: "Transform: URL Decode Selection", group: "Tools", run: () => transformSelection(urlDecode) },
@@ -710,10 +729,15 @@ export default function App() {
       { id: "view.debug", title: "Debug", group: "View", run: () => openPanel("debug") },
       { id: "view.scm", title: "Source Control", group: "View", when: () => has("codeberg") || has("github"), run: () => openPanel(has("codeberg") ? "codeberg" : "github") },
       { id: "view.ai", title: "AI Assistant", group: "View", when: () => has("ai-assistant"), run: () => openPanel("ai") },
+      { id: "ai.newChat", title: "New AI conversation", group: "AI", key: "ctrl+l", when: () => has("ai-assistant"), run: async () => { const newId = await useAi.getState().newSession(); if (newId) useEditor.getState().openAiChat(newId, t("New conversation")); } },
       { id: "ai.review", title: "Toggle: Review AI edits before applying", group: "AI", when: () => has("ai-assistant"), run: () => useAiEdits.getState().setReview(!useAiEdits.getState().reviewEnabled) },
       { id: "ai.ghost", title: "Toggle: Inline AI completions (ghost text)", group: "AI", when: () => has("ai-assistant"), run: () => useSettings.getState().set({ aiGhostText: !useSettings.getState().aiGhostText }) },
       { id: "ai.sendSelection", title: "Send the selection to the assistant", group: "AI", key: "ctrl+alt+a", when: () => has("ai-assistant"), run: () => void sendSelectionToChat() },
       { id: "ai.explainSelection", title: "Explain the selection", group: "AI", when: () => has("ai-assistant"), run: () => void sendSelectionToChat("Explain this code.") },
+      { id: "ai.fixSelection", title: "AI: Find and fix bugs in selection", group: "AI", key: "ctrl+alt+f", when: () => has("ai-assistant"), run: () => void sendSelectionToChat("Review this code for bugs, logic errors, and security issues. Propose a clean fix.") },
+      { id: "ai.refactorSelection", title: "AI: Refactor selection for clarity", group: "AI", when: () => has("ai-assistant"), run: () => void sendSelectionToChat("Refactor this code to be cleaner and more idiomatic without changing its behavior.") },
+      { id: "ai.testsSelection", title: "AI: Write unit tests for selection", group: "AI", when: () => has("ai-assistant"), run: () => void sendSelectionToChat("Write thorough unit tests for this code.") },
+      { id: "ai.docSelection", title: "AI: Document selection", group: "AI", when: () => has("ai-assistant"), run: () => void sendSelectionToChat("Add comprehensive documentation and comments to this code.") },
       { id: "ai.copyConversation", title: "Copy the conversation", group: "AI", when: () => has("ai-assistant"), run: () => void copyConversation() },
       { id: "ai.exportConversation", title: "Export the conversation to Markdown", group: "AI", when: () => has("ai-assistant"), run: () => void exportConversation() },
       { id: "security.toggle", title: "Toggle: Real-time security analysis", group: "Security", run: () => useSettings.getState().set({ securityLint: !useSettings.getState().securityLint }) },
@@ -839,6 +863,7 @@ export default function App() {
       <QuickOpenOverlay />
       <CommandPalette />
       <DecoderOverlay />
+      <TabSwitcherOverlay />
       <TransformModal />
       <RecentProjectsOverlay />
       <ComparerOverlay />

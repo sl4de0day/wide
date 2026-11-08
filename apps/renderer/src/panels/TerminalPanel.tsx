@@ -15,6 +15,7 @@ import { useRemote } from "@/stores/remote";
 import { useRun } from "@/stores/run";
 import { useSettings } from "@/stores/settings";
 import { useWorkspace } from "@/stores/workspace";
+import { useEditor } from "@/stores/editor";
 
 interface TerminalTab {
   id: string;
@@ -157,6 +158,42 @@ export function TerminalPanel() {
               range: { start: { x: m.index + 1, y: bufferLine }, end: { x: m.index + url.length, y: bufferLine } },
               text: url,
               activate: () => openLink(url),
+            });
+          }
+          callback(links.length ? links : undefined);
+        },
+      });
+
+      term.registerLinkProvider({
+        provideLinks(bufferLine, callback) {
+          const line = term.buffer.active.getLine(bufferLine - 1)?.translateToString(true) ?? "";
+          const fileRe = /(?:[a-zA-Z]:[\\/]|\/|\.\/|\.\.\/|[a-zA-Z0-9_-]+[\\/])[a-zA-Z0-9_.\-\\/]+\.[a-zA-Z0-9]+(?::\d+(?::\d+)?)?/g;
+          const links: {
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+            text: string;
+            activate: () => void;
+          }[] = [];
+          let m: RegExpExecArray | null;
+          while ((m = fileRe.exec(line)) !== null) {
+            const raw = m[0].replace(/[.,;:)\]]+$/, "");
+            const parts = raw.split(":");
+            const filePath = parts[0];
+            const lineNum = parts[1] ? parseInt(parts[1], 10) : undefined;
+            const colNum = parts[2] ? parseInt(parts[2], 10) : undefined;
+            links.push({
+              range: { start: { x: m.index + 1, y: bufferLine }, end: { x: m.index + raw.length, y: bufferLine } },
+              text: raw,
+              activate: () => {
+                const root = useWorkspace.getState().root;
+                const fullPath = root && !filePath.startsWith("/") && !/^[a-zA-Z]:[\\/]/.test(filePath)
+                  ? `${root.replace(/[\\/]+$/, "")}/${filePath.replace(/\\/g, "/")}`
+                  : filePath;
+                if (lineNum !== undefined) {
+                  void useEditor.getState().revealAt(fullPath, lineNum, colNum);
+                } else {
+                  void useEditor.getState().openFile(fullPath);
+                }
+              },
             });
           }
           callback(links.length ? links : undefined);

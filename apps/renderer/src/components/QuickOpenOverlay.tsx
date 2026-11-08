@@ -31,6 +31,22 @@ function score(query: string, target: string): number | null {
   return total - target.length * 0.05;
 }
 
+function highlightMatch(text: string, query: string) {
+  const q = query.trim();
+  if (!q) return text;
+  const index = text.toLowerCase().indexOf(q.toLowerCase());
+  if (index === -1) return text;
+  return (
+    <>
+      {text.slice(0, index)}
+      <span className="font-semibold text-accent underline underline-offset-2">
+        {text.slice(index, index + q.length)}
+      </span>
+      {text.slice(index + q.length)}
+    </>
+  );
+}
+
 export function QuickOpenOverlay() {
   const t = useT();
   const open = useQuickOpen((state) => state.open);
@@ -106,7 +122,7 @@ export function QuickOpenOverlay() {
     <>
       <div className="fixed inset-0 z-40" onClick={() => useQuickOpen.getState().close()} />
       <div className="wide-enter-fade fixed left-1/2 top-24 z-50 flex max-h-[60vh] w-[min(560px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2.5">
           <FileText className="size-4 shrink-0 text-fg-faint" strokeWidth={1.75} />
           <input
             ref={inputRef}
@@ -151,8 +167,8 @@ export function QuickOpenOverlay() {
                   ) : (
                     <FileText className="size-3.5 shrink-0 text-fg-dim" strokeWidth={1.5} />
                   )}
-                  <span className="shrink-0 truncate text-[12px] text-fg">{basename(file.relativePath)}</span>
-                  {dir && <span className="shrink truncate text-[11px] text-fg-faint">{dir}</span>}
+                  <span className="shrink-0 truncate text-[12px] text-fg">{highlightMatch(basename(file.relativePath), parsed.text)}</span>
+                  {dir && <span className="shrink truncate text-[11px] text-fg-faint">{highlightMatch(dir, parsed.text)}</span>}
                 </button>
               );
             })

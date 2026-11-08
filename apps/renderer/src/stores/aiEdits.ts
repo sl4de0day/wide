@@ -4,6 +4,7 @@ import { bridge } from "@/lib/bridge";
 import { t } from "@/lib/i18n";
 import { repointPath, useEditor } from "./editor";
 import { toast } from "./toast";
+import { useWorkspace } from "./workspace";
 
 export interface PendingEdit {
   id: string;
@@ -45,11 +46,7 @@ async function diskContent(path: string): Promise<string | null> {
 }
 
 async function writeAiEdit(path: string, root: string, content: string, mustExist: boolean): Promise<EditOutcome> {
-  if (openBuffer(path) !== null) {
-    useEditor.getState().updateContent(path, content);
-    return "applied";
-  }
-  if (mustExist) {
+  if (mustExist && openBuffer(path) === null) {
     const read = await diskRead(path);
     if (read.kind === "missing") {
       console.error(`The assistant's edit targets a file that is no longer there: ${path}`);
@@ -62,10 +59,21 @@ async function writeAiEdit(path: string, root: string, content: string, mustExis
   }
   try {
     const reply = await bridge.aiCommitFile(root, path, content);
-    if (reply?.ok) return "applied";
+    if (reply?.ok) {
+      if (openBuffer(path) !== null) {
+        useEditor.getState().replaceContent(path, content);
+        void useEditor.getState().reloadFromDisk(path);
+      }
+      void useWorkspace.getState().refresh();
+      return "applied";
+    }
     console.error(`The assistant's edit was refused: ${path}`, reply?.error);
   } catch (error) {
     console.error(`The assistant's edit could not be written: ${path}`, error);
+  }
+  if (openBuffer(path) !== null) {
+    useEditor.getState().replaceContent(path, content);
+    return "applied";
   }
   return "failed";
 }
@@ -81,9 +89,9 @@ export function applyAiEdit(path: string, root: string, content: string, mustExi
 const KEY = "wide.reviewAiEdits";
 const loadReview = (): boolean => {
   try {
-    return localStorage.getItem(KEY) !== "0";
+    return localStorage.getItem(KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 };
 

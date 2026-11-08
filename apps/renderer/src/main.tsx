@@ -4,6 +4,10 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ensureLanguageLoaded } from "./lib/i18n";
 import "./styles/index.css";
+import { applyTheme, applySyntaxPalette } from "./stores/settings";
+
+applyTheme();
+applySyntaxPalette();
 
 const host = document.getElementById("root");
 if (!host) throw new Error("#root is missing from index.html");

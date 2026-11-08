@@ -60,7 +60,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
+      <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-200" onClick={onClose} />
       <div
         ref={panelRef}
         role="dialog"
@@ -68,17 +68,17 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         aria-label={title}
         tabIndex={-1}
         className={
-          "wide-enter-fade fixed left-1/2 top-12 z-50 flex max-h-[84vh] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl outline-none " +
-          (wide ? "w-[min(900px,94vw)]" : "w-[min(620px,94vw)]")
+          "wide-enter-fade fixed left-1/2 top-14 z-50 flex max-h-[84vh] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl outline-none " +
+          (wide ? "w-[min(920px,94vw)]" : "w-[min(640px,94vw)]")
         }
       >
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-          <span className="flex-1 text-[12px] font-medium text-fg">{title}</span>
-          <button type="button" onClick={onClose} data-modal-close="true" aria-label={t("Close")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
+        <div className="flex shrink-0 items-center gap-2.5 border-b border-line px-4 py-3">
+          <span className="flex-1 text-[13px] font-semibold tracking-[-0.01em] text-fg">{title}</span>
+          <button type="button" onClick={onClose} data-modal-close="true" aria-label={t("Close")} className="rounded-md p-1.5 text-fg-faint transition-colors duration-150 hover:bg-hover hover:text-fg">
             <X className="size-4" strokeWidth={1.75} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
       </div>
     </>
   );

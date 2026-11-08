@@ -4,13 +4,20 @@ import {
   Columns3,
   Eraser,
   Eye,
+  FileCode,
+  FolderOpen,
   Grid2x2,
+  Pin,
   Play,
+  Plus,
   Rows2,
   Rows3,
+  Sparkles,
   Square,
+  Terminal,
   X,
 } from "lucide-react";
+import wideLogo from "@/assets/wide-logo.png";
 import { MediaView } from "./MediaView";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -20,7 +27,7 @@ import { bridge } from "@/lib/bridge";
 import { commentLanguageFor } from "@/lib/comments";
 import { runCommand } from "@/lib/runnable";
 import { requestCloseAll, requestCloseOthers, requestCloseRight, requestCloseTab } from "@/lib/tabClose";
-import { cn } from "@/lib/utils";
+import { cn, normalisePath } from "@/lib/utils";
 import {
   countLeaves,
   detectPreset,
@@ -41,6 +48,10 @@ import {
 import { useExtensions } from "@/stores/extensions";
 import { useRun } from "@/stores/run";
 import { useWorkspace } from "@/stores/workspace";
+import { useQuickOpen } from "@/stores/quickOpen";
+import { useCommandPalette } from "@/stores/commands";
+import { useAi } from "@/stores/ai";
+import { toast } from "@/stores/toast";
 import { ReferencesOverlay } from "./ReferencesOverlay";
 import { SettingsView } from "./SettingsView";
 
@@ -83,9 +94,9 @@ function RunButton({ tab, root, run }: { tab: Tab; root: string | null; run: (pa
         e.stopPropagation();
         void run(tab.path, command);
       }}
-      className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-status-ok"
+      className="flex size-3.5 items-center justify-center rounded text-fg-dim transition-colors hover:bg-hover hover:text-status-ok"
     >
-      <Play className="size-3" strokeWidth={2} fill="currentColor" />
+      <Play className="size-2.5" strokeWidth={2} fill="currentColor" />
     </button>
   );
 }
@@ -94,14 +105,14 @@ function TabOverflowMenu({ tabs, activePath, onPick }: { tabs: Tab[]; activePath
   const t = useT();
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative flex shrink-0 items-stretch border-l border-line">
+    <div className="relative flex shrink-0 items-center">
       <button
         type="button"
         title={t("Open editors")}
         aria-label={t("Open editors")}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center px-1.5 text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+        className="flex items-center justify-center size-6 rounded text-fg-dim transition-colors hover:bg-hover hover:text-fg"
       >
         <ChevronDown className="size-3.5" strokeWidth={2} />
       </button>
@@ -191,62 +202,122 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
   return (
     <>
     <div
-      className="flex shrink-0 items-stretch border-b border-line bg-chrome"
-      style={{ height: "var(--h-tabbar)" }}
+      className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 py-1 text-xs select-none"
+      style={{ minHeight: "var(--h-tabbar)" }}
     >
-      <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
-      {tabs.map((tab) => (
-        <div
-          key={tab.path}
-          onClick={() => setActive(tab.path)}
-          onContextMenu={(e) => { e.preventDefault(); setTabMenu({ path: tab.path, x: e.clientX, y: e.clientY }); }}
-          onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void requestCloseTab(tab.path); } }}
-          className={cn(
-            "group flex shrink-0 cursor-pointer items-center gap-2 border-r border-line px-3 text-[12px]",
-            tab.path === activePath ? "bg-canvas text-fg-bright" : "text-fg-dim hover:bg-hover",
-          )}
-        >
-          <span className="truncate">
-            {tab.kind === "file" ? tab.name : t(tab.name)}
-          </span>
-          {hasCleaner && tab.kind === "file" && commentLanguageFor(tab.name) && (
-            <button
-              type="button"
-              title={t("Remove comments")}
-              aria-label={t("Remove comments from {name}", { name: tab.name })}
-              onClick={(e) => { e.stopPropagation(); void clean(tab.path); }}
-              className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg-bright"
-            >
-              <Eraser className="size-3" strokeWidth={1.75} />
-            </button>
-          )}
-          {hasMarkdownViewer && tab.kind === "file" && /\.(?:md|markdown|mdx)$/i.test(tab.name) && (
-            <button
-              type="button"
-              title={t("Preview Markdown")}
-              aria-label={t("Preview Markdown")}
-              onClick={(e) => { e.stopPropagation(); useEditor.getState().openMarkdownPreview(tab.path, tab.name); }}
-              className="flex size-4 items-center justify-center rounded-sm text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg-bright"
-            >
-              <Eye className="size-3" strokeWidth={1.75} />
-            </button>
-          )}
-          {tab.kind === "file" && <RunButton tab={tab} root={root} run={run} />}
-          <button
-            type="button"
-            title={t("Close")}
-            aria-label={t("Close {name}", {
-              name: tab.kind === "file" ? tab.name : t(tab.name),
-            })}
-            onClick={(e) => { e.stopPropagation(); void requestCloseTab(tab.path); }}
-            className="flex size-4 items-center justify-center rounded-sm text-fg-dim hover:bg-hover hover:text-fg"
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-0.5">
+      {tabs.map((tab) => {
+        const isActive = tab.path === activePath;
+        return (
+          <div
+            key={tab.path}
+            onClick={() => setActive(tab.path)}
+            onContextMenu={(e) => { e.preventDefault(); setTabMenu({ path: tab.path, x: e.clientX, y: e.clientY }); }}
+            onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void requestCloseTab(tab.path); } }}
+            className={cn(
+              "group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t px-2.5 py-1 font-mono text-[11px] transition-colors",
+              isActive
+                ? "bg-canvas text-fg font-medium border-t-2 border-accent"
+                : "border-t-2 border-transparent text-fg-dim hover:bg-hover hover:text-fg",
+            )}
           >
-            {isDirty(tab) ? <span className="text-[16px] leading-none">•</span> : <X className="size-3" strokeWidth={2} />}
-          </button>
-        </div>
-      ))}
+            <span className="truncate max-w-[180px]">
+              {tab.kind === "file" ? tab.name : t(tab.name)}
+            </span>
+            {hasCleaner && tab.kind === "file" && commentLanguageFor(tab.name) && (
+              <button
+                type="button"
+                title={t("Remove comments")}
+                aria-label={t("Remove comments from {name}", { name: tab.name })}
+                onClick={(e) => { e.stopPropagation(); void clean(tab.path); }}
+                className="flex size-3.5 items-center justify-center rounded text-fg-dim opacity-0 transition-opacity hover:bg-hover hover:text-fg-bright group-hover:opacity-100"
+              >
+                <Eraser className="size-2.5" strokeWidth={1.75} />
+              </button>
+            )}
+            {hasMarkdownViewer && tab.kind === "file" && /\.(?:md|markdown|mdx)$/i.test(tab.name) && (
+              <button
+                type="button"
+                title={t("Preview Markdown")}
+                aria-label={t("Preview Markdown")}
+                onClick={(e) => { e.stopPropagation(); useEditor.getState().openMarkdownPreview(tab.path, tab.name); }}
+                className="flex size-3.5 items-center justify-center rounded text-fg-dim opacity-0 transition-opacity hover:bg-hover hover:text-fg-bright group-hover:opacity-100"
+              >
+                <Eye className="size-2.5" strokeWidth={1.75} />
+              </button>
+            )}
+            {tab.kind === "file" && <RunButton tab={tab} root={root} run={run} />}
+            {!tab.pinned ? (
+              <button
+                type="button"
+                title={isDirty(tab) ? t("Unsaved changes. Click to close") : t("Close")}
+                aria-label={t("Close {name}", {
+                  name: tab.kind === "file" ? tab.name : t(tab.name),
+                })}
+                onClick={(e) => { e.stopPropagation(); void requestCloseTab(tab.path); }}
+                className={cn(
+                  "group/close relative flex size-3.5 items-center justify-center rounded p-0.5 text-fg-dim transition-all hover:text-status-danger",
+                  isDirty(tab) ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                )}
+              >
+                {isDirty(tab) ? (
+                  <>
+                    <span className="size-1.5 rounded-full bg-accent transition-opacity group-hover/close:opacity-0" />
+                    <X className="absolute size-2.5 stroke-[2] opacity-0 transition-opacity group-hover/close:opacity-100" />
+                  </>
+                ) : (
+                  <X className="size-2.5" strokeWidth={2} />
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                title={t("Unpin tab")}
+                aria-label={t("Unpin tab")}
+                onClick={(e) => { e.stopPropagation(); useEditor.getState().togglePinTab(tab.path); }}
+                className="flex size-3.5 items-center justify-center rounded text-accent transition-colors hover:bg-hover"
+              >
+                <Pin className="size-2.5 fill-accent" strokeWidth={1.5} />
+              </button>
+            )}
+          </div>
+        );
+      })}
+        <button
+          type="button"
+          title={t("New text")}
+          aria-label={t("New text")}
+          onClick={() => useEditor.getState().openScratchpad()}
+          className="flex items-center justify-center size-6 rounded hover:bg-hover text-fg-dim hover:text-fg transition-colors shrink-0"
+        >
+          <Plus className="size-3.5" />
+        </button>
       </div>
-      <div className="flex items-stretch shrink-0">
+      <div className="flex items-center gap-1 shrink-0 pl-2">
+        <button
+          type="button"
+          onClick={() => {
+            const current = detectPreset(useEditor.getState().layout);
+            useEditor.getState().setGridPreset(current === "1x2" ? "1x1" : "1x2");
+          }}
+          title={t("Toggle Split Right (1x2)")}
+          aria-label={t("Toggle Split Right")}
+          className="flex items-center justify-center size-6 rounded text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+        >
+          <Columns2 className="size-3.5" strokeWidth={1.75} />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const current = detectPreset(useEditor.getState().layout);
+            useEditor.getState().setGridPreset(current === "2x1" ? "1x1" : "2x1");
+          }}
+          title={t("Toggle Split Down (2x1)")}
+          aria-label={t("Toggle Split Down")}
+          className="flex items-center justify-center size-6 rounded text-fg-dim transition-colors hover:bg-hover hover:text-fg"
+        >
+          <Rows2 className="size-3.5" strokeWidth={1.75} />
+        </button>
         {tabs.length > 1 && <TabOverflowMenu tabs={tabs} activePath={activePath} onPick={setActive} />}
         <LayoutPickerMenu />
       </div>
@@ -258,6 +329,18 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
           className="wide-pop-up fixed z-[301] min-w-44 rounded-md border border-line bg-panel p-1 shadow-lg"
           style={{ left: Math.min(tabMenu.x, window.innerWidth - 190), top: Math.min(tabMenu.y, window.innerHeight - 160) }}
         >
+          <button
+            type="button"
+            className={menuItem}
+            onClick={() => {
+              const p = tabMenu.path;
+              setTabMenu(null);
+              useEditor.getState().togglePinTab(p);
+            }}
+          >
+            {tabs.find((t) => t.path === tabMenu.path)?.pinned ? t("Unpin Tab") : t("Pin Tab")}
+          </button>
+          <div className="my-1 h-px bg-line" />
           <button type="button" className={menuItem} onClick={() => { const p = tabMenu.path; setTabMenu(null); void requestCloseTab(p); }}>{t("Close")}</button>
           <button type="button" className={menuItem} onClick={() => { const p = tabMenu.path; setTabMenu(null); void requestCloseOthers(p); }}>{t("Close Others")}</button>
           <button type="button" className={menuItem} onClick={() => { const p = tabMenu.path; setTabMenu(null); void requestCloseRight(p); }}>{t("Close to the Right")}</button>
@@ -301,14 +384,14 @@ function LayoutPickerMenu() {
       : Square;
 
   return (
-    <div className="relative flex shrink-0 items-stretch border-l border-line">
+    <div className="relative flex shrink-0 items-center">
       <button
         type="button"
         title={t("Editor grid layout")}
         aria-label={t("Editor grid layout")}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center px-2 text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg"
+        className="flex items-center justify-center size-6 rounded text-fg-dim transition-colors hover:bg-hover hover:text-fg"
       >
         <CurrentIcon className="size-3.5" strokeWidth={1.75} />
       </button>
@@ -419,15 +502,116 @@ function PaneFileSwitcher({
   );
 }
 
-function TabContentRenderer({ tab, paneId }: { tab: Tab | null; paneId: string }) {
+function EmptyEditorView() {
   const t = useT();
+  const root = useWorkspace((state) => state.root);
 
-  if (!tab) {
-    return (
-      <div className="wide-enter-fade flex h-full flex-col items-center justify-center p-4 text-center">
-        <p className="text-[12px] italic text-fg-dim">{t("Open a file to start editing.")}</p>
+  const actions = [
+    {
+      icon: FileCode,
+      label: t("Quick Open File"),
+      shortcut: "Ctrl + P",
+      run: () => {
+        if (useWorkspace.getState().root) {
+          useQuickOpen.getState().openPalette();
+        } else {
+          toast.info(t("Open a folder to quick-open files."));
+        }
+      },
+    },
+    {
+      icon: Sparkles,
+      label: t("New AI Conversation"),
+      shortcut: "Ctrl + L",
+      run: async () => {
+        const id = await useAi.getState().newSession();
+        if (id) useEditor.getState().openAiChat(id, t("New conversation"));
+      },
+    },
+    {
+      icon: Terminal,
+      label: t("Command Palette"),
+      shortcut: "Ctrl + Shift + P",
+      run: () => useCommandPalette.getState().openPalette(),
+    },
+    {
+      icon: FolderOpen,
+      label: root ? t("Open Different Folder") : t("Open Folder"),
+      shortcut: "Ctrl + O",
+      run: () => void useWorkspace.getState().openFolder(),
+    },
+  ];
+
+  return (
+    <div className="wide-enter-fade flex h-full flex-col items-center justify-center p-6 pt-20 text-center select-none">
+      <div className="mb-6 flex flex-col items-center">
+        <img src={wideLogo} alt="Wide" className="size-42 object-contain" />
       </div>
-    );
+
+      <div className="grid w-full max-w-xs gap-2">
+        {actions.map((act) => {
+          const Icon = act.icon;
+          return (
+            <button
+              key={act.label}
+              type="button"
+              onClick={act.run}
+              className="group flex items-center justify-between rounded-md border border-line/60 bg-panel/60 px-3 py-2 text-left transition-all duration-150 hover:border-line hover:bg-panel hover:shadow-sm"
+            >
+              <div className="flex items-center gap-2.5">
+                <Icon className="size-4 text-fg-dim transition-colors group-hover:text-accent" strokeWidth={1.75} />
+                <span className="text-[12px] font-medium text-fg-dim transition-colors group-hover:text-fg-bright">
+                  {act.label}
+                </span>
+              </div>
+              <span className="font-mono text-[10px] text-fg-faint transition-colors group-hover:text-fg-dim">
+                {act.shortcut}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EditorBreadcrumbs() {
+  const tab = usePaneTab(useEditor((state) => state.activePaneId));
+  const root = useWorkspace((state) => state.root);
+  const rootName = useWorkspace((state) => state.rootName);
+
+  if (!tab || tab.kind !== "file") return null;
+
+  const path = tab.path;
+  const relative = root ? normalisePath(path).slice(normalisePath(root).length + 1) : normalisePath(path);
+  const parts = [rootName || "root", ...relative.split("/")].filter(Boolean);
+
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1.5 border-b border-line/60 bg-canvas/80 px-3 text-[11px] text-fg-dim select-none"
+      style={{ height: "24px" }}
+    >
+      <FileCode className="size-3 shrink-0 text-fg-faint" strokeWidth={1.75} />
+      <span className="flex min-w-0 items-center gap-1 truncate">
+        {parts.map((part, index) => {
+          const isFile = index === parts.length - 1;
+          return (
+            <span key={`${part}-${index}`} className="flex items-center gap-1">
+              {index > 0 && <span className="text-fg-faint text-[10px]">/</span>}
+              <span className={cn(isFile ? "text-fg font-medium" : "text-fg-faint hover:text-fg-dim cursor-default")}>
+                {part}
+              </span>
+            </span>
+          );
+        })}
+      </span>
+    </div>
+  );
+}
+
+function TabContentRenderer({ tab, paneId }: { tab: Tab | null; paneId: string }) {
+  if (!tab) {
+    return <EmptyEditorView />;
   }
 
   if (tab.kind === "file") {
@@ -638,6 +822,7 @@ export function EditorArea({ onOpenPanel }: { onOpenPanel?: (id: string) => void
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
       <ReferencesOverlay />
       <EditorTabs onOpenPanel={onOpenPanel} />
+      <EditorBreadcrumbs />
       <div className="min-h-0 min-w-0 flex-1 flex">
         <LayoutRenderer node={layout} isOnlyPane={isOnlyPane} />
       </div>
