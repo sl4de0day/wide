@@ -1,4 +1,4 @@
-import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, Radar, RotateCw, ScrollText, Trash2, Upload, X } from "lucide-react";
+import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, Radar, RotateCw, ScrollText, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -8,6 +8,7 @@ import { useT } from "@/lib/i18n";
 import { canVerifyLive, verifyFindingLive } from "@/lib/liveVerify";
 import { emptyReportMeta, pentestReportHtml, pentestReportMarkdown, type ReportMeta } from "@/lib/pentestReport";
 import { cn, copyText } from "@/lib/utils";
+import { useAi } from "@/stores/ai";
 import { diffFindings, FINDING_STATUSES, findingsReport, findingsReportHtml, findingsReportJson, parseImportedFindings, SEVERITIES, useFindings, type Finding, type FindingStatus, type Severity } from "@/stores/findings";
 import { useProjectScan } from "@/stores/projectScan";
 import { toast } from "@/stores/toast";
@@ -108,6 +109,16 @@ function ReportDialog({ findings, onClose }: { findings: Finding[]; onClose: () 
             <input value={meta.date} onChange={(e) => field("date", e.target.value)} className={cn(input, "mt-1 font-mono")} spellCheck={false} />
           </div>
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <p className={label}>{t("Assessment type")}</p>
+            <input value={meta.assessmentType || ""} onChange={(e) => field("assessmentType", e.target.value)} placeholder="Web Application Pentest" className={cn(input, "mt-1")} spellCheck={false} />
+          </div>
+          <div>
+            <p className={label}>{t("Methodology")}</p>
+            <input value={meta.methodology || ""} onChange={(e) => field("methodology", e.target.value)} placeholder="OWASP WSTG / ASVS" className={cn(input, "mt-1")} spellCheck={false} />
+          </div>
+        </div>
         <div>
           <p className={label}>{t("Scope")}</p>
           <textarea value={meta.scope} onChange={(e) => field("scope", e.target.value)} rows={2} className={cn(input, "mt-1 resize-y")} spellCheck={false} />
@@ -116,10 +127,16 @@ function ReportDialog({ findings, onClose }: { findings: Finding[]; onClose: () 
           <p className={label}>{t("Executive summary")}</p>
           <textarea value={meta.summary} onChange={(e) => field("summary", e.target.value)} rows={3} className={cn(input, "mt-1 resize-y")} spellCheck={false} />
         </div>
-        <label className="flex items-center gap-2 text-[12px] text-fg-dim">
-          <input type="checkbox" checked={meta.confidential} onChange={(e) => field("confidential", e.target.checked)} />
-          {t("Mark as confidential")}
-        </label>
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 text-[12px] text-fg-dim">
+            <input type="checkbox" checked={meta.includePoc !== false} onChange={(e) => field("includePoc", e.target.checked)} />
+            {t("Include HTTP Proof of Concept (PoC) evidence")}
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-fg-dim">
+            <input type="checkbox" checked={meta.confidential} onChange={(e) => field("confidential", e.target.checked)} />
+            {t("Mark as confidential")}
+          </label>
+        </div>
         <p className="text-[11px] text-fg-faint">{t("{count} findings will be included.", { count: findings.length })}</p>
         <div className="flex flex-wrap gap-1.5 pt-1">
           <button type="button" onClick={() => printHtml(pentestReportHtml(meta, findings))} className="flex items-center gap-1.5 rounded-sm border border-accent px-3 py-1.5 text-[12px] text-accent transition-colors duration-100 hover:bg-accent hover:text-bg">
@@ -207,6 +224,41 @@ export function FindingsPanel() {
   const [showReport, setShowReport] = useState(false);
   const [osv, setOsv] = useState<{ exists?: boolean; updatedAt?: string; count?: number } | null>(null);
   const [osvBusy, setOsvBusy] = useState(false);
+  const [fixingId, setFixingId] = useState<string | null>(null);
+
+  const fixFindingWithAi = async (finding: Finding) => {
+    setFixingId(finding.id);
+    try {
+      const root = useWorkspace.getState().root;
+      const session = await useAi.getState().newSession();
+      if (!session) {
+        toast.error(t("Could not initialize AI session."));
+        return;
+      }
+      const filePart = finding.location ? finding.location.split(":")[0].trim() : "";
+      if (filePart && root) {
+        const fullPath = filePart.startsWith("/") || filePart.includes(":\\") || filePart.includes(":/")
+          ? filePart
+          : `${root}/${filePart}`;
+        useAi.getState().attach(session, fullPath);
+      }
+      const prompt =
+        `Please fix this security issue in the project source code:\n\n` +
+        `Title: ${finding.title}\n` +
+        `Severity: ${finding.severity}\n` +
+        `Location: ${finding.location}\n` +
+        `Details:\n${finding.detail}\n\n` +
+        (finding.pocRequest ? `PoC Request:\n\`\`\`http\n${finding.pocRequest}\n\`\`\`\n\n` : "") +
+        `Inspect the file at this location, apply the code patch using edit_file to remediate the vulnerability safely, and explain the changes made.`;
+      await useAi.getState().openChat(session);
+      await useAi.getState().ask(session, prompt);
+      toast.success(t("AI remediation initiated in AI Chat."));
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setFixingId(null);
+    }
+  };
 
   useEffect(() => {
     const root = useWorkspace.getState().root;
@@ -398,7 +450,33 @@ export function FindingsPanel() {
                       {t(finding.detail)}
                     </pre>
                   )}
+                  {finding.pocRequest && (
+                    <div className="mt-1">
+                      <p className="text-[9px] uppercase tracking-wide text-fg-faint">{t("PoC Request")}</p>
+                      <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-sm border border-line bg-canvas p-1.5 font-mono text-[10px] text-fg-dim">
+                        {finding.pocRequest}
+                      </pre>
+                    </div>
+                  )}
+                  {finding.pocResponse && (
+                    <div className="mt-1">
+                      <p className="text-[9px] uppercase tracking-wide text-fg-faint">{t("PoC Response")}</p>
+                      <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-sm border border-line bg-canvas p-1.5 font-mono text-[10px] text-fg-dim">
+                        {finding.pocResponse}
+                      </pre>
+                    </div>
+                  )}
                   <div className="mt-1 flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => void fixFindingWithAi(finding)}
+                      disabled={fixingId === finding.id}
+                      title={t("Fix vulnerability with AI")}
+                      className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-accent transition-colors duration-100 hover:bg-hover hover:text-accent-bright disabled:opacity-40"
+                    >
+                      <Sparkles className="size-3" strokeWidth={1.75} />
+                      {t("AI Fix")}
+                    </button>
                     {canVerifyLive(finding.location) && (
                       <button
                         type="button"

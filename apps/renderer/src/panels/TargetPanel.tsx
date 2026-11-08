@@ -1,16 +1,19 @@
-import { ArrowUpRight, ChevronDown, ChevronRight, Crosshair, Flag, Globe, Plus, Radar, ShieldCheck, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, ChevronRight, Copy, Crosshair, FileJson, Flag, Globe, Plus, Radar, Search, ShieldCheck, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
 import type { ProxyEntry } from "@/lib/bridge";
+import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { hostInScope } from "@/lib/scope";
-import { cn } from "@/lib/utils";
+import { cn, copyText } from "@/lib/utils";
 import { useCatcher } from "@/stores/catcher";
 import { useFindings } from "@/stores/findings";
 import { useIntruder } from "@/stores/intruder";
 import { useProxy } from "@/stores/proxy";
 import { useScanner } from "@/stores/scanner";
+import { toast } from "@/stores/toast";
+import { useWorkspace } from "@/stores/workspace";
 import { openInBrowser } from "@/lib/browserActions";
 
 function statusTone(status: number): string {
@@ -20,24 +23,36 @@ function statusTone(status: number): string {
   return "text-emerald-400";
 }
 
-function dissect(entry: ProxyEntry): { host: string; segments: string[] } {
+function methodBadgeColor(method: string): string {
+  const m = (method || "").toUpperCase();
+  if (m === "GET") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-400";
+  if (m === "POST") return "border-sky-500/40 bg-sky-500/10 text-sky-400";
+  if (m === "PUT") return "border-amber-500/40 bg-amber-500/10 text-amber-400";
+  if (m === "DELETE") return "border-rose-500/40 bg-rose-500/10 text-rose-400";
+  if (m === "PATCH") return "border-purple-500/40 bg-purple-500/10 text-purple-400";
+  if (m === "WS") return "border-teal-500/40 bg-teal-500/10 text-teal-400";
+  return "border-line bg-panel text-fg-dim";
+}
+
+function isSensitivePath(path: string): boolean {
+  return /(auth|login|signin|admin|account|token|session|secret|passwd|password|oauth|graphql|v1|v2|api)/i.test(path);
+}
+
+function dissect(entry: ProxyEntry): { host: string; segments: string[]; pathname: string } {
   try {
     const url = new URL(entry.url);
-    return { host: url.host, segments: url.pathname.split("/").filter(Boolean) };
+    return { host: url.host, segments: url.pathname.split("/").filter(Boolean), pathname: url.pathname };
   } catch {
-    return { host: entry.host || "—", segments: entry.url.split("/").filter(Boolean) };
+    const parts = entry.url.split("/").filter(Boolean);
+    return { host: entry.host || "—", segments: parts, pathname: entry.url };
   }
 }
 
 interface TreeNode {
-
   label: string;
-
   key: string;
   children: Map<string, TreeNode>;
-
   entries: ProxyEntry[];
-
   count: number;
 }
 
@@ -145,6 +160,14 @@ function RequestActions({ entry }: { entry: ProxyEntry }) {
               (entry.reqBody ? `\n\n${entry.reqBody}` : "") +
               `\n\nResponse: ${entry.status}\n` +
               entry.resHeaders.map(([n, v]) => `${n}: ${v}`).join("\n"),
+            pocRequest:
+              `${entry.method} ${entry.url} HTTP/1.1\n` +
+              entry.reqHeaders.map(([n, v]) => `${n}: ${v}`).join("\n") +
+              (entry.reqBody ? `\n\n${entry.reqBody}` : ""),
+            pocResponse:
+              `HTTP/1.1 ${entry.status}\n` +
+              entry.resHeaders.map(([n, v]) => `${n}: ${v}`).join("\n") +
+              (entry.resBody ? `\n\n${entry.resBody}` : ""),
           });
         }}
         title={t("Send to findings")}
@@ -157,7 +180,17 @@ function RequestActions({ entry }: { entry: ProxyEntry }) {
   );
 }
 
-function RequestRow({ entry, depth }: { entry: ProxyEntry; depth: number }) {
+function RequestRow({
+  entry,
+  depth,
+  selected,
+  onSelect,
+}: {
+  entry: ProxyEntry;
+  depth: number;
+  selected: boolean;
+  onSelect: (entry: ProxyEntry) => void;
+}) {
   const { host } = dissect(entry);
   const path = (() => {
     try {
@@ -167,17 +200,32 @@ function RequestRow({ entry, depth }: { entry: ProxyEntry; depth: number }) {
       return entry.url;
     }
   })();
+  const issues = useProxy((state) => state.issueCounts[entry.id]);
+
   return (
     <div
-      className="group flex items-center gap-2 border-b border-line/50 py-1 pr-2 hover:bg-hover"
+      onClick={() => onSelect(entry)}
+      className={cn(
+        "group flex cursor-pointer items-center gap-2 border-b border-line/50 py-1 pr-2 transition-colors duration-100",
+        selected ? "bg-selected" : "hover:bg-hover",
+      )}
       style={{ paddingLeft: 8 + depth * 12 }}
       title={`${entry.method} ${entry.url}`}
     >
       <span className={cn("w-8 shrink-0 font-mono text-[10px] tabular-nums", statusTone(entry.status))}>
         {entry.status || "—"}
       </span>
-      <span className="w-10 shrink-0 font-mono text-[10px] text-fg-dim">{entry.method}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-fg-faint">{path === "/" ? host : path}</span>
+      <span className={cn("rounded-sm border px-1 py-0.2 font-mono text-[9px] font-semibold", methodBadgeColor(entry.method))}>
+        {entry.method}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-fg-faint">
+        {path === "/" ? host : path}
+      </span>
+      {issues ? (
+        <span className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-0.2 font-mono text-[9px] font-semibold text-amber-400">
+          {issues}
+        </span>
+      ) : null}
       <RequestActions entry={entry} />
     </div>
   );
@@ -189,12 +237,16 @@ function TreeRow({
   scope,
   expanded,
   toggle,
+  selectedEntry,
+  onSelectEntry,
 }: {
   node: TreeNode;
   depth: number;
   scope: string[];
   expanded: Set<string>;
   toggle: (key: string) => void;
+  selectedEntry: ProxyEntry | null;
+  onSelectEntry: (entry: ProxyEntry) => void;
 }) {
   const t = useT();
   const isHost = depth === 0;
@@ -262,13 +314,122 @@ function TreeRow({
       {open && (
         <div>
           {childNodes.map((child) => (
-            <TreeRow key={child.key} node={child} depth={depth + 1} scope={scope} expanded={expanded} toggle={toggle} />
+            <TreeRow
+              key={child.key}
+              node={child}
+              depth={depth + 1}
+              scope={scope}
+              expanded={expanded}
+              toggle={toggle}
+              selectedEntry={selectedEntry}
+              onSelectEntry={onSelectEntry}
+            />
           ))}
           {node.entries.map((entry) => (
-            <RequestRow key={entry.id} entry={entry} depth={depth + 1} />
+            <RequestRow
+              key={entry.id}
+              entry={entry}
+              depth={depth + 1}
+              selected={selectedEntry?.id === entry.id}
+              onSelect={onSelectEntry}
+            />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function EndpointInspector({
+  entry,
+  onClose,
+}: {
+  entry: ProxyEntry;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const params = useMemo(() => {
+    const list: { name: string; value: string; source: "query" | "body" }[] = [];
+    try {
+      const url = new URL(entry.url);
+      url.searchParams.forEach((val, key) => list.push({ name: key, value: val, source: "query" }));
+    } catch {
+      void 0;
+    }
+    if (entry.reqBody) {
+      try {
+        const parsed = JSON.parse(entry.reqBody);
+        if (typeof parsed === "object" && parsed !== null) {
+          for (const [k, v] of Object.entries(parsed)) {
+            list.push({ name: k, value: typeof v === "object" ? JSON.stringify(v) : String(v), source: "body" });
+          }
+        }
+      } catch {
+        const formParams = new URLSearchParams(entry.reqBody);
+        formParams.forEach((val, key) => list.push({ name: key, value: val, source: "body" }));
+      }
+    }
+    return list;
+  }, [entry]);
+
+  return (
+    <div className="flex h-64 shrink-0 flex-col border-t border-line bg-canvas">
+      <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-1.5">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <span className={cn("rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-semibold", methodBadgeColor(entry.method))}>
+            {entry.method}
+          </span>
+          <span className="truncate font-mono text-[11px] text-fg" title={entry.url}>
+            {entry.url}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <RequestActions entry={entry} />
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-sm p-1 text-fg-faint hover:bg-hover hover:text-fg"
+          >
+            <X className="size-3.5" strokeWidth={1.75} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 overflow-auto p-3 text-[11px]">
+        <div className="w-1/2 border-r border-line pr-3">
+          <p className="pb-1 text-[10px] uppercase tracking-wide text-fg-faint">{t("Parameters Discovered")} ({params.length})</p>
+          {params.length === 0 ? (
+            <p className="text-[10px] text-fg-faint">{t("No query or body parameters detected.")}</p>
+          ) : (
+            <div className="flex max-h-40 flex-col gap-1 overflow-auto">
+              {params.map((p, idx) => (
+                <div key={idx} className="flex items-center gap-2 rounded-sm border border-line bg-panel px-2 py-0.5">
+                  <span className="rounded-sm bg-canvas px-1 font-mono text-[9px] uppercase text-fg-faint">{p.source}</span>
+                  <span className="font-mono text-[10px] font-semibold text-accent">{p.name}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-fg-dim">{p.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="w-1/2 pl-3">
+          <p className="pb-1 text-[10px] uppercase tracking-wide text-fg-faint">{t("Headers & Status")}</p>
+          <div className="flex items-center gap-2 pb-1.5 font-mono text-[10px]">
+            <span className="text-fg-faint">Status:</span>
+            <span className={statusTone(entry.status)}>{entry.status || "—"}</span>
+            <span className="text-fg-faint ml-2">Host:</span>
+            <span className="text-fg-dim">{entry.host}</span>
+          </div>
+          <div className="max-h-36 overflow-auto rounded-sm border border-line bg-panel p-1.5 font-mono text-[10px]">
+            {entry.reqHeaders.map(([k, v], idx) => (
+              <div key={idx} className="truncate">
+                <span className="text-syn-property">{k}:</span> <span className="text-fg-dim">{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -342,17 +503,57 @@ export function TargetPanel() {
   const t = useT();
   const entries = useProxy((state) => state.entries);
   const scope = useProxy((state) => state.scope);
-  const [scopeOnly, setScopeOnly] = useState(false);
+  const [filterMode, setFilterMode] = useState<"all" | "scope" | "api" | "sensitive">("all");
+  const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectedEntry, setSelectedEntry] = useState<ProxyEntry | null>(null);
 
   useEffect(() => {
     void useProxy.getState().refresh();
   }, []);
 
-  const shown = useMemo(
-    () => (scopeOnly ? entries.filter((entry) => hostInScope(dissect(entry).host, scope)) : entries),
-    [entries, scope, scopeOnly],
-  );
+  const stats = useMemo(() => {
+    const hosts = new Set<string>();
+    const uniqueUrls = new Set<string>();
+    let sensitiveCount = 0;
+    const params = new Set<string>();
+
+    for (const entry of entries) {
+      const { host, pathname } = dissect(entry);
+      if (host) hosts.add(host);
+      uniqueUrls.add(entry.url);
+      if (isSensitivePath(pathname)) sensitiveCount += 1;
+      try {
+        const u = new URL(entry.url);
+        u.searchParams.forEach((_, k) => params.add(k));
+      } catch {
+        void 0;
+      }
+    }
+    return {
+      totalHosts: hosts.size,
+      totalEndpoints: uniqueUrls.size,
+      sensitiveCount,
+      totalParams: params.size,
+    };
+  }, [entries]);
+
+  const shown = useMemo(() => {
+    return entries.filter((entry) => {
+      const { host, pathname } = dissect(entry);
+      if (filterMode === "scope" && !hostInScope(host, scope)) return false;
+      if (filterMode === "api" && !pathname.includes("/api")) return false;
+      if (filterMode === "sensitive" && !isSensitivePath(pathname)) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        if (!entry.url.toLowerCase().includes(q) && !(entry.method || "").toLowerCase().includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [entries, filterMode, search, scope]);
+
   const tree = useMemo(() => buildTree(shown), [shown]);
   const hosts = useMemo(() => [...tree.children.values()], [tree]);
 
@@ -374,6 +575,52 @@ export function TargetPanel() {
     setExpanded(keys);
   };
 
+  const copyUrlList = async () => {
+    const urls = Array.from(new Set(shown.map((e) => e.url))).join("\n");
+    if (await copyText(urls)) {
+      toast.success(t("Copied {count} endpoint URLs.", { count: urls.split("\n").filter(Boolean).length }));
+    }
+  };
+
+  const exportOpenApi = async () => {
+    const pathsObj: Record<string, Record<string, unknown>> = {};
+    for (const entry of shown) {
+      try {
+        const u = new URL(entry.url);
+        const path = u.pathname || "/";
+        const method = (entry.method || "get").toLowerCase();
+        if (!pathsObj[path]) pathsObj[path] = {};
+        const queryParams: { name: string; in: string; schema: { type: string } }[] = [];
+        u.searchParams.forEach((_, key) => {
+          queryParams.push({ name: key, in: "query", schema: { type: "string" } });
+        });
+        pathsObj[path][method] = {
+          summary: `${entry.method} ${path}`,
+          parameters: queryParams,
+          responses: {
+            [String(entry.status || 200)]: { description: `Status ${entry.status || 200} response` },
+          },
+        };
+      } catch {
+        void 0;
+      }
+    }
+    const spec = {
+      openapi: "3.0.3",
+      info: { title: "Discovered Attack Surface API", version: "1.0.0" },
+      paths: pathsObj,
+    };
+    const jsonStr = JSON.stringify(spec, null, 2);
+    const root = useWorkspace.getState().root;
+    if (root) {
+      await bridge.writeFile(`${root}/wide-openapi-spec.json`, jsonStr);
+      toast.success(t("Exported OpenAPI specification to wide-openapi-spec.json."));
+    } else {
+      await copyText(jsonStr);
+      toast.success(t("Copied OpenAPI specification to clipboard."));
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t("Target")}>
@@ -382,16 +629,21 @@ export function TargetPanel() {
           <>
             <button
               type="button"
-              onClick={() => setScopeOnly((v) => !v)}
-              title={scopeOnly ? t("Showing in-scope hosts only") : t("Show in-scope only")}
-              aria-label={t("Show in-scope only")}
-              aria-pressed={scopeOnly}
-              className={cn(
-                "rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
-                scopeOnly ? "bg-selected text-emerald-400" : "text-fg-faint hover:text-fg",
-              )}
+              onClick={() => void copyUrlList()}
+              title={t("Copy discovered URLs")}
+              aria-label={t("Copy discovered URLs")}
+              className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
             >
-              <ShieldCheck className="size-3.5" strokeWidth={1.75} />
+              <Copy className="size-3.5" strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              onClick={() => void exportOpenApi()}
+              title={t("Export OpenAPI 3.0 skeleton")}
+              aria-label={t("Export OpenAPI 3.0 skeleton")}
+              className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+            >
+              <FileJson className="size-3.5" strokeWidth={1.75} />
             </button>
             <button
               type="button"
@@ -406,21 +658,78 @@ export function TargetPanel() {
         )}
       </PanelHeader>
 
+      <div className="flex shrink-0 items-center justify-between border-b border-line bg-chrome px-3 py-1.5 text-[10px] text-fg-faint">
+        <div className="flex items-center gap-3 font-mono">
+          <span>Hosts: <strong className="text-fg">{stats.totalHosts}</strong></span>
+          <span>Endpoints: <strong className="text-fg">{stats.totalEndpoints}</strong></span>
+          <span>Sensitive: <strong className="text-amber-400">{stats.sensitiveCount}</strong></span>
+          <span>Params: <strong className="text-accent">{stats.totalParams}</strong></span>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-2 py-1.5">
+        <div className="flex min-w-[140px] flex-1 items-center gap-1 rounded-sm border border-line bg-panel px-2">
+          <Search className="size-3 text-fg-faint" strokeWidth={1.75} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("Filter attack surface…")}
+            className="min-w-0 flex-1 bg-transparent py-0.5 text-[11px] text-fg outline-none placeholder:text-fg-faint"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch("")} className="text-fg-faint hover:text-fg">
+              <X className="size-3" strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {(["all", "scope", "api", "sensitive"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setFilterMode(mode)}
+              className={cn(
+                "rounded-sm border px-1.5 py-0.5 text-[10px] capitalize transition-colors duration-100",
+                filterMode === mode ? "border-accent bg-selected text-fg-bright font-medium" : "border-line text-fg-faint hover:bg-hover hover:text-fg",
+              )}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <ScopeBar />
 
       <div className="min-h-0 flex-1 overflow-auto">
         {hosts.length === 0 ? (
           <p className="px-3 py-4 text-[12px] leading-relaxed text-fg-faint">
-            {scopeOnly
-              ? t("No in-scope traffic yet. Add a host to the scope, or turn off the in-scope filter.")
+            {filterMode !== "all" || search
+              ? t("No endpoints matched the active filter.")
               : t("The site map fills in as the proxy captures traffic. Start the proxy and browse a target.")}
           </p>
         ) : (
           hosts.map((host) => (
-            <TreeRow key={host.key} node={host} depth={0} scope={scope} expanded={expanded} toggle={toggle} />
+            <TreeRow
+              key={host.key}
+              node={host}
+              depth={0}
+              scope={scope}
+              expanded={expanded}
+              toggle={toggle}
+              selectedEntry={selectedEntry}
+              onSelectEntry={setSelectedEntry}
+            />
           ))
         )}
       </div>
+
+      {selectedEntry && (
+        <EndpointInspector
+          entry={selectedEntry}
+          onClose={() => setSelectedEntry(null)}
+        />
+      )}
     </div>
   );
 }

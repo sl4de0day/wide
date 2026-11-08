@@ -4,7 +4,6 @@ import {
   AtSign,
   Check,
   ChevronDown,
-  ChevronRight,
   Copy,
   Download,
   ExternalLink,

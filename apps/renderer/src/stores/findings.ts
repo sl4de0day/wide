@@ -12,14 +12,13 @@ export interface Finding {
   id: string;
   title: string;
   severity: Severity;
-
   location: string;
-
   detail: string;
-
   status?: FindingStatus;
-
   at: number;
+  pocRequest?: string;
+  pocResponse?: string;
+  remediation?: string;
 }
 
 export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -212,7 +211,16 @@ export function findingsReport(findings: Finding[]): string {
 }
 
 export function findingsReportJson(findings: Finding[]): string {
-  const items = findings.map((f) => ({ title: f.title, severity: f.severity, location: f.location, detail: f.detail, status: f.status ?? "open" }));
+  const items = findings.map((f) => ({
+    title: f.title,
+    severity: f.severity,
+    location: f.location,
+    detail: f.detail,
+    status: f.status ?? "open",
+    pocRequest: f.pocRequest,
+    pocResponse: f.pocResponse,
+    remediation: f.remediation,
+  }));
   return JSON.stringify({ tool: "Wide", version: 1, exportedAt: new Date().toISOString(), findings: items }, null, 2);
 }
 

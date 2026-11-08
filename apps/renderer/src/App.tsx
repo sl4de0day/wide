@@ -30,7 +30,6 @@ import { subscribeProjectScan, useProjectScan } from "./stores/projectScan";
 import { AiEditsOverlay } from "./components/AiEditsOverlay";
 import { McpTrustPrompt } from "./components/McpTrustPrompt";
 import { useAiEdits } from "./stores/aiEdits";
-import { useAi } from "./stores/ai";
 import { sendSelectionToChat } from "./lib/sendToChat";
 import { selectedText } from "./editor/activeView";
 import { copyConversation, exportConversation } from "./lib/chatExport";

@@ -1,4 +1,4 @@
-import { CornerDownRight, Crosshair, FileCode2, FileWarning, Hash, ListTree, Radar, Redo2, Send, Terminal, KeyRound } from "lucide-react";
+import { CornerDownRight, Crosshair, FileCode2, FileWarning, Hash, ListTree, Radar, Redo2, Send, Terminal, KeyRound, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
@@ -9,6 +9,7 @@ import { csrfPocFromRequest } from "@/lib/poc/generate";
 import { goToRouteInCode } from "@/lib/trafficBridge";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useAi } from "@/stores/ai";
 import { useCatcher } from "@/stores/catcher";
 import { useComparer } from "@/stores/comparer";
 import { useCyberchef } from "@/stores/cyberchef";
@@ -17,6 +18,7 @@ import { useDecoder } from "@/stores/decoder";
 import { repeaterSeeds } from "@/stores/editor";
 import { useIntruder } from "@/stores/intruder";
 import { useScanner } from "@/stores/scanner";
+import { toast } from "@/stores/toast";
 
 import { HttpBodyView } from "./http/HttpBodyView";
 import { HttpMessageEditor } from "./http/HttpMessageEditor";
@@ -121,6 +123,37 @@ export function RepeaterView({ id }: { id: string }) {
     setError("");
   };
 
+  const [analyzingAi, setAnalyzingAi] = useState(false);
+
+  const analyzeWithAi = async () => {
+    setAnalyzingAi(true);
+    try {
+      const session = await useAi.getState().newSession();
+      if (!session) {
+        toast.error(t("Could not initialize AI session."));
+        return;
+      }
+      const responseInfo = reply
+        ? `HTTP/${reply.status} ${reply.statusText || ""}\n` +
+          reply.headers.map(([k, v]) => `${k}: ${v}`).join("\n") +
+          "\n\n" +
+          (reply.body ? (reply.body.length > 4000 ? reply.body.slice(0, 4000) + "\n...[truncated]" : reply.body) : "")
+        : "(No response received yet)";
+      const prompt =
+        `Perform a defensive security assessment on this HTTP transaction:\n\n` +
+        `### Request\n\`\`\`http\n${text}\n\`\`\`\n\n` +
+        `### Response\n\`\`\`http\n${responseInfo}\n\`\`\`\n\n` +
+        `Evaluate potential vulnerabilities, authentication or authorization flaws, missing security headers, and recommend source code remediation.`;
+      await useAi.getState().openChat(session);
+      await useAi.getState().ask(session, prompt);
+      toast.success(t("AI security analysis initiated in AI Chat."));
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setAnalyzingAi(false);
+    }
+  };
+
   const sendToIntruder = () => useIntruder.getState().openIntruder(text);
   const goToRoute = () => {
     const parsed = parseHttpMessage(text);
@@ -172,6 +205,10 @@ export function RepeaterView({ id }: { id: string }) {
           </button>
           <button type="button" onClick={() => void csrfPocFromRequest(text)} title={t("Generate CSRF PoC")} className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
             <FileWarning className="size-3" strokeWidth={1.75} />
+          </button>
+          <button type="button" onClick={() => void analyzeWithAi()} disabled={analyzingAi} title={t("AI Security Analysis")} className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-accent disabled:opacity-40">
+            <Sparkles className="size-3" strokeWidth={1.75} />
+            <span>{t("AI Analysis")}</span>
           </button>
           <button type="button" onClick={goToRoute} title={t("Go to the route in the code")} className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors duration-100 hover:bg-hover hover:text-fg">
             <FileCode2 className="size-3" strokeWidth={1.75} />

@@ -26,6 +26,7 @@ interface ProxyState {
   selected: number | null;
   busy: boolean;
   error: string;
+  issueCounts: Record<number, number>;
 
   rules: MatchReplaceRule[];
   intercepting: boolean;
@@ -71,6 +72,7 @@ export const useProxy = create<ProxyState>((set, get) => ({
   selected: null,
   busy: false,
   error: "",
+  issueCounts: {},
   rules: [],
   intercepting: false,
   interceptingResponses: false,
@@ -134,7 +136,7 @@ export const useProxy = create<ProxyState>((set, get) => ({
     await bridge.proxyClear();
 
     scannedKeys.clear();
-    set({ entries: [], selected: null });
+    set({ entries: [], selected: null, issueCounts: {} });
   },
 
   select: (id) => set({ selected: id }),
@@ -194,15 +196,34 @@ export const useProxy = create<ProxyState>((set, get) => ({
 
   ingestBatch: (list) => {
     if (!list.length) return;
-    const findingsToAdd: { title: string; severity: Severity; location: string; detail: string }[] = [];
+    const findingsToAdd: {
+      title: string;
+      severity: Severity;
+      location: string;
+      detail: string;
+      pocRequest?: string;
+      pocResponse?: string;
+      remediation?: string;
+    }[] = [];
+    const nextIssueCounts: Record<number, number> = { ...get().issueCounts };
     if (get().scanning) {
       for (const entry of list) {
         if (entry.websocket) continue;
-        for (const issue of passiveChecks(entry)) {
+        const issues = passiveChecks(entry);
+        if (issues.length) nextIssueCounts[entry.id] = issues.length;
+        for (const issue of issues) {
           const key = `${entry.host}:${issue.checkId}`;
           if (scannedKeys.has(key)) continue;
           scannedKeys.add(key);
-          findingsToAdd.push({ title: issue.title, severity: issue.severity, location: entry.url, detail: issue.detail });
+          findingsToAdd.push({
+            title: issue.title,
+            severity: issue.severity,
+            location: entry.url,
+            detail: issue.detail,
+            pocRequest: issue.pocRequest,
+            pocResponse: issue.pocResponse,
+            remediation: issue.remediation,
+          });
         }
       }
     }
@@ -219,15 +240,17 @@ export const useProxy = create<ProxyState>((set, get) => ({
         }
       }
       if (entries.length > MAX) entries.splice(0, entries.length - MAX);
-      return { entries };
+      return { entries, issueCounts: nextIssueCounts };
     });
     for (const finding of findingsToAdd) useFindings.getState().add(finding);
   },
 
   ingest: (entry) => {
-
+    const nextIssueCounts: Record<number, number> = { ...get().issueCounts };
     if (get().scanning && !entry.websocket) {
-      for (const issue of passiveChecks(entry)) {
+      const issues = passiveChecks(entry);
+      if (issues.length) nextIssueCounts[entry.id] = issues.length;
+      for (const issue of issues) {
         const key = `${entry.host}:${issue.checkId}`;
         if (scannedKeys.has(key)) continue;
         scannedKeys.add(key);
@@ -236,6 +259,9 @@ export const useProxy = create<ProxyState>((set, get) => ({
           severity: issue.severity,
           location: entry.url,
           detail: issue.detail,
+          pocRequest: issue.pocRequest,
+          pocResponse: issue.pocResponse,
+          remediation: issue.remediation,
         });
       }
     }
@@ -244,11 +270,11 @@ export const useProxy = create<ProxyState>((set, get) => ({
       if (at !== -1) {
         const entries = [...state.entries];
         entries[at] = entry;
-        return { entries };
+        return { entries, issueCounts: nextIssueCounts };
       }
       const entries = [...state.entries, entry];
       if (entries.length > MAX) entries.shift();
-      return { entries };
+      return { entries, issueCounts: nextIssueCounts };
     });
   },
 

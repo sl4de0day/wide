@@ -1,4 +1,4 @@
-import { ArrowUpRight, Braces, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
+import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -14,6 +14,7 @@ import { cn, copyText } from "@/lib/utils";
 import { useWindowedRows } from "@/lib/useWindow";
 import { goToRouteInCode } from "@/lib/trafficBridge";
 import { useCyberchef } from "@/stores/cyberchef";
+import { useComparer } from "@/stores/comparer";
 import { useDecoder } from "@/stores/decoder";
 import { useExtensions } from "@/stores/extensions";
 import { useCatcher } from "@/stores/catcher";
@@ -97,21 +98,39 @@ function WsComposer({ id, seed }: { id: number; seed?: { text: string; direction
 
   return (
     <div className="shrink-0 border-t border-line px-2 py-2">
-      <div className="mb-1 flex items-center gap-1">
-        {(["up", "down"] as const).map((dir) => (
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          {(["up", "down"] as const).map((dir) => (
+            <button
+              key={dir}
+              type="button"
+              onClick={() => setDirection(dir)}
+              className={cn(
+                "rounded-sm px-2 py-0.5 font-mono text-[10px] transition-colors duration-100",
+                direction === dir ? "bg-accent/15 text-accent font-medium" : "text-fg-dim hover:bg-hover hover:text-fg",
+              )}
+              title={dir === "up" ? t("Send to the server") : t("Send to the browser")}
+            >
+              {dir === "up" ? `▲ ${t("To server")}` : `▼ ${t("To browser")}`}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1">
           <button
-            key={dir}
             type="button"
-            onClick={() => setDirection(dir)}
-            className={cn(
-              "rounded-sm px-2 py-0.5 font-mono text-[10px] transition-colors duration-100",
-              direction === dir ? "bg-accent/15 text-accent" : "text-fg-dim hover:bg-hover hover:text-fg",
-            )}
-            title={dir === "up" ? t("Send to the server") : t("Send to the browser")}
+            onClick={() => setText('{"type":"ping"}')}
+            className="rounded-sm border border-line px-1.5 py-0.2 font-mono text-[9px] text-fg-faint transition-colors hover:bg-hover hover:text-fg"
           >
-            {dir === "up" ? `▲ ${t("To server")}` : `▼ ${t("To browser")}`}
+            ping
           </button>
-        ))}
+          <button
+            type="button"
+            onClick={() => setText('{"action":"subscribe"}')}
+            className="rounded-sm border border-line px-1.5 py-0.2 font-mono text-[9px] text-fg-faint transition-colors hover:bg-hover hover:text-fg"
+          >
+            subscribe
+          </button>
+        </div>
       </div>
       <textarea
         value={text}
@@ -141,12 +160,25 @@ function WsComposer({ id, seed }: { id: number; seed?: { text: string; direction
   );
 }
 
+function formatWsPayload(text: string, prettify: boolean): string {
+  if (!prettify) return text;
+  try {
+    const obj = JSON.parse(text);
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    return text;
+  }
+}
+
 function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) {
   const hasCyberchef = useExtensions((state) => state.installed.has("cyberchef"));
   const t = useT();
   const [tab, setTab] = useState<"request" | "response">("request");
   const [wsSeed, setWsSeed] = useState<{ text: string; direction: "up" | "down" } | null>(null);
   const [wsFilter, setWsFilter] = useState("");
+  const [wsDir, setWsDir] = useState<"all" | "up" | "down">("all");
+  const [selectedFrame, setSelectedFrame] = useState<number | null>(null);
+  const [prettifyJson, setPrettifyJson] = useState(false);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col border-t border-line">
@@ -353,54 +385,170 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
       </div>
 
       {}
-      {entry.websocket ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="shrink-0 border-b border-line px-2 py-1">
-            <input
-              value={wsFilter}
-              onChange={(event) => setWsFilter(event.target.value)}
-              placeholder={t("Filter frames…")}
-              className="w-full rounded-sm border border-line bg-canvas px-2 py-0.5 font-mono text-[10px] text-fg outline-none focus:border-accent placeholder:text-fg-faint"
-            />
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
-            {(entry.frames ?? []).length === 0 ? (
-              <p className="text-[11px] text-fg-faint">{t("No frames yet.")}</p>
-            ) : (
-              (entry.frames ?? [])
-                .filter((frame) => !wsFilter || (frame.kind === "text" && (frame.text ?? "").toLowerCase().includes(wsFilter.toLowerCase())))
-                .map((frame, index) => (
-                <div key={index} className="flex items-start gap-2 border-b border-line py-1">
-                  <span
+      {entry.websocket ? (() => {
+        const frames = (entry.frames ?? []).filter((frame) => {
+          if (wsDir !== "all" && frame.direction !== wsDir) return false;
+          if (wsFilter && frame.kind === "text") {
+            return (frame.text ?? "").toLowerCase().includes(wsFilter.toLowerCase());
+          }
+          return true;
+        });
+        const activeFrame = selectedFrame !== null ? frames[selectedFrame] : null;
+
+        return (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-center gap-1.5 border-b border-line px-2 py-1">
+              <input
+                value={wsFilter}
+                onChange={(event) => setWsFilter(event.target.value)}
+                placeholder={t("Filter frames…")}
+                className="min-w-0 flex-1 rounded-sm border border-line bg-canvas px-2 py-0.5 font-mono text-[10px] text-fg outline-none focus:border-accent placeholder:text-fg-faint"
+              />
+              {(["all", "up", "down"] as const).map((dir) => (
+                <button
+                  key={dir}
+                  type="button"
+                  onClick={() => {
+                    setWsDir(dir);
+                    setSelectedFrame(null);
+                  }}
+                  className={cn(
+                    "rounded-sm border px-1.5 py-0.5 font-mono text-[9px] uppercase transition-colors duration-100",
+                    wsDir === dir ? "border-accent bg-selected text-fg-bright font-medium" : "border-line text-fg-faint hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  {dir === "all" ? t("All") : dir === "up" ? "▲ Up" : "▼ Down"}
+                </button>
+              ))}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
+              {frames.length === 0 ? (
+                <p className="p-3 text-[11px] text-fg-faint">{t("No frames match filter.")}</p>
+              ) : (
+                frames.map((frame, index) => (
+                  <div
+                    key={index}
+                    onClick={() => setSelectedFrame(selectedFrame === index ? null : index)}
                     className={cn(
-                      "shrink-0 font-mono text-[10px]",
-                      frame.direction === "up" ? "text-accent" : "text-emerald-400",
+                      "flex cursor-pointer items-start gap-1.5 rounded-sm border-b border-line/40 px-2 py-1 transition-colors duration-100",
+                      selectedFrame === index ? "bg-selected" : "hover:bg-hover",
                     )}
-                    title={frame.direction === "up" ? t("Sent") : t("Received")}
                   >
-                    {frame.direction === "up" ? "▲" : "▼"}
-                  </span>
-                  {frame.kind === "text" ? (
+                    <span
+                      className={cn(
+                        "shrink-0 font-mono text-[10px]",
+                        frame.direction === "up" ? "text-accent" : "text-emerald-400",
+                      )}
+                      title={frame.direction === "up" ? t("To server") : t("To browser")}
+                    >
+                      {frame.direction === "up" ? "▲" : "▼"}
+                    </span>
+                    {frame.at ? (
+                      <span className="shrink-0 font-mono text-[9px] tabular-nums text-fg-faint">
+                        {new Date(frame.at).toLocaleTimeString()}
+                      </span>
+                    ) : null}
+                    {frame.kind === "text" ? (
+                      <span className="min-w-0 flex-1 break-all font-mono text-[11px] text-fg">
+                        {frame.text}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-[11px] text-fg-faint">
+                        {frame.kind === "binary" ? t("{bytes} bytes (binary)", { bytes: frame.bytes ?? 0 }) : t("close")}
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {activeFrame && (
+              <div className="flex h-44 shrink-0 flex-col border-t border-line bg-canvas">
+                <div className="flex shrink-0 items-center justify-between border-b border-line px-2 py-1 text-[10px]">
+                  <div className="flex items-center gap-1.5">
+                    <span className={cn("font-mono font-semibold", activeFrame.direction === "up" ? "text-accent" : "text-emerald-400")}>
+                      {activeFrame.direction === "up" ? "▲ TO SERVER" : "▼ FROM SERVER"}
+                    </span>
+                    {activeFrame.bytes != null && <span className="font-mono text-fg-faint">{activeFrame.bytes} B</span>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {activeFrame.kind === "text" && (
+                      <button
+                        type="button"
+                        onClick={() => setPrettifyJson((v) => !v)}
+                        className={cn("rounded-sm border px-1.5 py-0.5 font-mono text-[9px] transition-colors", prettifyJson ? "border-accent bg-selected text-fg-bright font-medium" : "border-line text-fg-faint hover:text-fg")}
+                        title={t("Toggle JSON pretty print")}
+                      >
+                        <Braces className="size-3" strokeWidth={1.75} />
+                      </button>
+                    )}
+                    {activeFrame.kind === "text" && activeFrame.text && (
+                      <button
+                        type="button"
+                        onClick={() => void copyText(activeFrame.text!)}
+                        className="rounded-sm border border-line px-1.5 py-0.5 text-fg-faint hover:bg-hover hover:text-fg"
+                        title={t("Copy frame payload")}
+                      >
+                        <Copy className="size-3" strokeWidth={1.75} />
+                      </button>
+                    )}
+                    {activeFrame.kind === "text" && activeFrame.text && (
+                      <button
+                        type="button"
+                        onClick={() => setWsSeed({ text: activeFrame.text!, direction: activeFrame.direction })}
+                        className="rounded-sm border border-line px-1.5 py-0.5 text-fg-dim hover:bg-hover hover:text-fg"
+                        title={t("Load this frame into the composer")}
+                      >
+                        {t("Tamper")}
+                      </button>
+                    )}
+                    {activeFrame.kind === "text" && activeFrame.text && (
+                      <button
+                        type="button"
+                        onClick={() => useDecoder.getState().openDecoder(activeFrame.text!)}
+                        className="rounded-sm border border-line px-1.5 py-0.5 text-fg-dim hover:bg-hover hover:text-fg"
+                      >
+                        {t("Decoder")}
+                      </button>
+                    )}
+                    {activeFrame.kind === "text" && activeFrame.text && (
+                      <button
+                        type="button"
+                        onClick={() => useComparer.getState().send(activeFrame.text!)}
+                        className="rounded-sm border border-line px-1.5 py-0.5 text-fg-dim hover:bg-hover hover:text-fg"
+                      >
+                        {t("Comparer")}
+                      </button>
+                    )}
+                    {hasCyberchef && activeFrame.kind === "text" && activeFrame.text && (
+                      <button
+                        type="button"
+                        onClick={() => useCyberchef.getState().send(activeFrame.text!)}
+                        className="rounded-sm border border-line px-1.5 py-0.5 text-fg-dim hover:bg-hover hover:text-fg"
+                      >
+                        {t("CyberChef")}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      title={t("Load this frame into the composer")}
-                      onClick={() => setWsSeed({ text: frame.text ?? "", direction: frame.direction })}
-                      className="min-w-0 flex-1 break-all text-left font-mono text-[11px] text-fg transition-colors duration-100 hover:text-fg-bright"
+                      onClick={() => setSelectedFrame(null)}
+                      className="rounded-sm p-0.5 text-fg-faint hover:text-fg"
                     >
-                      {frame.text}
+                      <X className="size-3" strokeWidth={1.75} />
                     </button>
-                  ) : (
-                    <span className="font-mono text-[11px] text-fg-faint">
-                      {frame.kind === "binary" ? t("{bytes} bytes (binary)", { bytes: frame.bytes ?? 0 }) : t("close")}
-                    </span>
-                  )}
+                  </div>
                 </div>
-              ))
+                <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all p-2 font-mono text-[10px] text-fg-dim">
+                  {activeFrame.kind === "text" ? formatWsPayload(activeFrame.text || "", prettifyJson) : `[Binary frame: ${activeFrame.bytes ?? 0} bytes]`}
+                </pre>
+              </div>
             )}
+
+            <WsComposer id={entry.id} seed={wsSeed} />
           </div>
-          <WsComposer id={entry.id} seed={wsSeed} />
-        </div>
-      ) : (
+        );
+      })() : (
       <>
       <div className="flex shrink-0 border-b border-line">
         {(["request", "response"] as const).map((name) => (
@@ -896,6 +1044,7 @@ function MatchReplace() {
 
 const TrafficRow = memo(function TrafficRow({ entry, selected }: { entry: ProxyEntry; selected: boolean }) {
   const { host, path } = summarise(entry);
+  const issues = useProxy((state) => state.issueCounts[entry.id]);
   return (
     <button
       type="button"
@@ -914,6 +1063,14 @@ const TrafficRow = memo(function TrafficRow({ entry, selected }: { entry: ProxyE
         <span className="text-fg-dim">{host}</span>
         {path}
       </span>
+      {issues ? (
+        <span
+          className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-amber-400"
+          title={`${issues} passive security issue(s) detected`}
+        >
+          {issues}
+        </span>
+      ) : null}
     </button>
   );
 });
