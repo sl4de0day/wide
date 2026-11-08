@@ -1454,7 +1454,7 @@ function EmptyChat() {
         src={wideLogo}
         alt=""
         draggable={false}
-        className="mb-4 size-48 object-contain select-none"
+        className="mb-4 size-96 max-w-full object-contain select-none"
       />
       <h2 className="text-[17px] font-semibold text-fg tracking-tight">
         {t("How can I help you today?")}
