@@ -1,4 +1,4 @@
-import { Bell, CircleAlert, EyeOff, Radio, Server, ShieldAlert, TriangleAlert } from "lucide-react";
+import { Bell, CheckCircle2, CircleAlert, EyeOff, Radio, Server, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
 import { languageLabel } from "@/editor/languages";
@@ -49,16 +49,20 @@ function ProxyChip({ onOpenPanel }: { onOpenPanel: (id: string) => void }) {
             : `Catcher Proxy: Listening on port ${port} (Click to intercept · Shift-click for Panel)`
       }
       className={cn(
-        "flex shrink-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-[11px] font-medium transition-colors duration-100",
-        !running && "text-fg-faint hover:text-fg-dim hover:bg-hover",
-        running && !intercepting && "text-emerald-400 hover:bg-emerald-500/10",
-        running && intercepting && "bg-amber-500/15 text-amber-400 animate-pulse hover:bg-amber-500/25",
+        "flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-sans transition-colors duration-100",
+        !running && "text-fg-faint hover:text-fg hover:bg-hover/60",
+        running && !intercepting && "bg-emerald-500/10 text-emerald-400 font-medium hover:bg-emerald-500/20",
+        running && intercepting && "bg-amber-500/15 text-amber-400 font-medium animate-pulse hover:bg-amber-500/25",
       )}
     >
-      <Radio className="size-3" strokeWidth={2.5} />
+      {running ? (
+        <span className={cn("size-1.5 rounded-full shrink-0", intercepting ? "bg-amber-400" : "bg-emerald-400")} />
+      ) : (
+        <Radio className="size-3 text-fg-faint shrink-0" strokeWidth={2} />
+      )}
       <span>
         {!running
-          ? "Proxy: Off"
+          ? "Proxy"
           : intercepting
             ? `Intercept: ${heldCount ? `(${heldCount})` : "On"}`
             : `Proxy: ${port || 8080}`}
@@ -259,7 +263,7 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
 
   return (
     <footer
-      className="flex shrink-0 items-center gap-3 border-t border-line bg-chrome px-3 text-[12px] text-fg-dim"
+      className="flex shrink-0 items-center gap-2 border-t border-line/40 bg-chrome px-3 text-[11px] font-sans text-fg-dim select-none"
       style={{ height: "var(--h-statusbar)" }}
     >
       <button
@@ -270,18 +274,27 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
         })}
         onClick={() => onOpenPanel("problems")}
         className={cn(
-          "flex shrink-0 items-center gap-2 rounded-sm px-1.5 py-0.5 tabular-nums text-[11px]",
-          "transition-colors duration-100 hover:bg-hover",
+          "flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 tabular-nums text-[11px] font-sans transition-colors duration-100 hover:bg-hover",
+          errors === 0 && warnings === 0 ? "text-fg-faint" : "text-fg",
         )}
       >
-        <span className={cn("flex items-center gap-1", errors > 0 && "text-status-error font-medium")}>
-          <CircleAlert className="size-3" strokeWidth={2} />
-          {errors}
-        </span>
-        <span className={cn("flex items-center gap-1", warnings > 0 && "text-status-warn font-medium")}>
-          <TriangleAlert className="size-3" strokeWidth={2} />
-          {warnings}
-        </span>
+        {errors === 0 && warnings === 0 ? (
+          <span className="flex items-center gap-1 text-fg-faint hover:text-fg">
+            <CheckCircle2 className="size-3 text-emerald-400/80" strokeWidth={2} />
+            <span>0</span>
+          </span>
+        ) : (
+          <>
+            <span className={cn("flex items-center gap-1", errors > 0 ? "text-status-error font-medium" : "text-fg-faint")}>
+              <CircleAlert className="size-3" strokeWidth={2} />
+              {errors}
+            </span>
+            <span className={cn("flex items-center gap-1", warnings > 0 ? "text-status-warn font-medium" : "text-fg-faint")}>
+              <TriangleAlert className="size-3" strokeWidth={2} />
+              {warnings}
+            </span>
+          </>
+        )}
       </button>
 
       <button
@@ -291,14 +304,18 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
         })}
         onClick={() => onOpenPanel("findings")}
         className={cn(
-          "flex shrink-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 tabular-nums text-[11px] font-medium transition-all duration-100",
+          "flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 tabular-nums text-[11px] font-sans transition-all duration-100",
           vulnCount > 0
-            ? "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25"
-            : "text-fg-faint hover:text-fg-dim hover:bg-hover",
+            ? "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 font-medium"
+            : "text-fg-faint hover:text-fg hover:bg-hover/60",
         )}
       >
-        <ShieldAlert className="size-3" strokeWidth={2} />
-        <span>Vulns: {vulnCount}</span>
+        {vulnCount > 0 ? (
+          <ShieldAlert className="size-3 shrink-0" strokeWidth={2} />
+        ) : (
+          <ShieldCheck className="size-3 shrink-0 text-fg-faint" strokeWidth={2} />
+        )}
+        <span>{vulnCount > 0 ? `Vulns: ${vulnCount}` : "Vulns"}</span>
       </button>
 
       {file ? (
@@ -315,14 +332,14 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
       <NotificationBell />
 
       {file && (
-        <>
-          <span className="shrink-0 tabular-nums">
+        <div className="flex shrink-0 items-center divide-x divide-line/30 text-[11px] font-sans text-fg-faint">
+          <span className="px-2 tabular-nums text-fg-dim hover:text-fg">
             {cursor.line}:{cursor.column}
           </span>
-          <span className="shrink-0">{t("{n} spaces", { n: tabSize })}</span>
-          <span className="shrink-0">{t(languageLabel(file.path))}</span>
-          <span className="shrink-0">UTF-8</span>
-        </>
+          <span className="px-2 text-fg-dim hover:text-fg">{t("{n} spaces", { n: tabSize })}</span>
+          <span className="px-2 text-fg-dim hover:text-fg">{t(languageLabel(file.path))}</span>
+          <span className="px-2 text-fg-dim hover:text-fg">UTF-8</span>
+        </div>
       )}
     </footer>
   );

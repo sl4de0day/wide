@@ -1,4 +1,4 @@
-import { ArrowUpRight, ChevronDown, ChevronRight, Copy, Crosshair, FileJson, Flag, Globe, Plus, Radar, Search, ShieldCheck, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, ChevronRight, Copy, Crosshair, FileJson, Flag, Globe, MoreHorizontal, Plus, Radar, Search, ShieldCheck, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -505,6 +505,7 @@ export function TargetPanel() {
   const scope = useProxy((state) => state.scope);
   const [filterMode, setFilterMode] = useState<"all" | "scope" | "api" | "sensitive">("all");
   const [search, setSearch] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedEntry, setSelectedEntry] = useState<ProxyEntry | null>(null);
 
@@ -624,38 +625,66 @@ export function TargetPanel() {
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t("Target")}>
-        <span className="flex-1" />
-        {hosts.length > 0 && (
-          <>
-            <button
-              type="button"
-              onClick={() => void copyUrlList()}
-              title={t("Copy discovered URLs")}
-              aria-label={t("Copy discovered URLs")}
-              className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-            >
-              <Copy className="size-3.5" strokeWidth={1.75} />
-            </button>
-            <button
-              type="button"
-              onClick={() => void exportOpenApi()}
-              title={t("Export OpenAPI 3.0 skeleton")}
-              aria-label={t("Export OpenAPI 3.0 skeleton")}
-              className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-            >
-              <FileJson className="size-3.5" strokeWidth={1.75} />
-            </button>
-            <button
-              type="button"
-              onClick={() => (expanded.size > 0 ? setExpanded(new Set()) : expandAll())}
-              title={expanded.size > 0 ? t("Collapse all") : t("Expand all")}
-              aria-label={expanded.size > 0 ? t("Collapse all") : t("Expand all")}
-              className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-            >
-              {expanded.size > 0 ? <ChevronDown className="size-3.5" strokeWidth={2} /> : <ChevronRight className="size-3.5" strokeWidth={2} />}
-            </button>
-          </>
-        )}
+        <div className="flex items-center gap-1">
+          {hosts.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => (expanded.size > 0 ? setExpanded(new Set()) : expandAll())}
+                title={expanded.size > 0 ? t("Collapse all") : t("Expand all")}
+                aria-label={expanded.size > 0 ? t("Collapse all") : t("Expand all")}
+                className="rounded-md p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+              >
+                {expanded.size > 0 ? <ChevronDown className="size-3.5" strokeWidth={2} /> : <ChevronRight className="size-3.5" strokeWidth={2} />}
+              </button>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  title={t("More actions")}
+                  aria-label={t("More actions")}
+                  aria-expanded={menuOpen}
+                  className={cn(
+                    "rounded-md p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg",
+                    menuOpen && "bg-hover text-fg",
+                  )}
+                >
+                  <MoreHorizontal className="size-3.5" strokeWidth={1.75} />
+                </button>
+                {menuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-[400]" onClick={() => setMenuOpen(false)} />
+                    <div className="wide-pop-up absolute right-0 top-full z-[401] mt-1 w-52 overflow-hidden rounded-md border border-line bg-panel p-1 shadow-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          void copyUrlList();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                      >
+                        <Copy className="size-3.5 text-fg-faint" strokeWidth={1.75} />
+                        <span>{t("Copy discovered URLs")}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          void exportOpenApi();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                      >
+                        <FileJson className="size-3.5 text-fg-faint" strokeWidth={1.75} />
+                        <span>{t("Export OpenAPI 3.0 skeleton")}</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </PanelHeader>
 
       <div className="flex shrink-0 items-center justify-between border-b border-line bg-chrome px-3 py-1.5 text-[10px] text-fg-faint">

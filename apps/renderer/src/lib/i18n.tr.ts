@@ -178,6 +178,7 @@ export const TR: Record<string, string> = {
   "Enforcing": "Uygulanıyor",
   "Logging only": "Yalnızca kayıt",
   "Off": "Kapalı",
+  "On": "Açık",
   "Fails {mode}": "{mode} başarısız olur",
   "open": "açık",
   "closed": "kapalı",
@@ -1848,4 +1849,5 @@ export const TR: Record<string, string> = {
   "Could not launch new window.": "Yeni pencere başlatılamadı.",
   "Open in New Window": "Yeni Pencerede Aç",
   "Active": "Aktif",
+  "More actions": "Diğer işlemler",
 };

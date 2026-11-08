@@ -53,7 +53,7 @@ export function TitleBar() {
   return (
     <header
       className={cn(
-        "drag-region flex shrink-0 items-center gap-1.5 border-b border-line bg-chrome pr-[140px]",
+        "drag-region flex shrink-0 items-center gap-1.5 border-b border-line/40 bg-chrome pr-[140px]",
       )}
       style={{ height: "var(--h-titlebar)" }}
     >

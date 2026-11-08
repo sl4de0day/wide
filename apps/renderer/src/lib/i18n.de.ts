@@ -178,6 +178,7 @@ export const DE: Record<string, string> = {
   "Enforcing": "Erzwingend",
   "Logging only": "Nur Protokollierung",
   "Off": "Aus",
+  "On": "Ein",
   "Fails {mode}": "Fehlerverhalten: {mode}",
   "open": "offen",
   "closed": "geschlossen",
@@ -1848,4 +1849,5 @@ export const DE: Record<string, string> = {
   "Could not launch new window.": "Could not launch new window.",
   "Open in New Window": "Open in New Window",
   "Active": "Active",
+  "More actions": "Weitere Aktionen",
 };

@@ -1,4 +1,4 @@
-import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
+import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileCode2, FileDown, FileUp, FileWarning, Flag, FlaskConical, Globe, Hand, KeyRound, MoreHorizontal, Network, Play, Plus, Radar, Replace, Reply, ScanSearch, Send, ShieldCheck, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -1100,6 +1100,7 @@ export function ProxyPanel() {
   const held = useProxy((state) => state.held);
   const heldResponses = useProxy((state) => state.heldResponses);
   const [byHost, setByHost] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [filter, setFilter] = useState("");
 
   useEffect(() => {
@@ -1128,164 +1129,206 @@ export function ProxyPanel() {
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t("Proxy")}>
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => useProxy.getState().toggleScan()}
-          title={scanning ? t("Passive scan is on") : t("Passive scan (into findings)")}
-          aria-label={t("Passive scan (into findings)")}
-          aria-pressed={scanning}
-          className={cn(
-            "rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
-            scanning ? "bg-selected text-emerald-400" : "text-fg-faint hover:text-fg",
-          )}
-        >
-          <ScanSearch className="size-3.5" strokeWidth={1.75} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void useProxy.getState().setIntercept(!intercepting)}
-          title={intercepting ? t("Interception is on — requests are held") : t("Intercept requests")}
-          aria-label={t("Intercept requests")}
-          aria-pressed={intercepting}
-          className={cn(
-            "rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
-            intercepting ? "bg-selected text-amber-400" : "text-fg-faint hover:text-fg",
-          )}
-        >
-          <Hand className="size-3.5" strokeWidth={1.75} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void useProxy.getState().setInterceptResponse(!interceptingResponses)}
-          title={interceptingResponses ? t("Response interception is on — responses are held") : t("Intercept responses")}
-          aria-label={t("Intercept responses")}
-          aria-pressed={interceptingResponses}
-          className={cn(
-            "rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
-            interceptingResponses ? "bg-selected text-sky-400" : "text-fg-faint hover:text-fg",
-          )}
-        >
-          <Reply className="size-3.5" strokeWidth={1.75} />
-        </button>
-        {entries.length > 0 && (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setByHost((v) => !v)}
-            title={byHost ? t("Flat list") : t("Group by host")}
-            aria-label={t("Group by host")}
-            aria-pressed={byHost}
+            onClick={() => void (running ? useProxy.getState().stop() : useProxy.getState().start())}
+            disabled={busy}
+            title={running ? t("Stop the proxy") : t("Start the proxy")}
+            aria-label={running ? t("Stop the proxy") : t("Start the proxy")}
             className={cn(
-              "rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
-              byHost ? "bg-selected text-fg-bright" : "text-fg-faint hover:text-fg",
+              "flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors duration-100 disabled:opacity-40",
+              running
+                ? "bg-rose-500/15 text-rose-400 hover:bg-rose-500/25"
+                : "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25",
             )}
           >
-            <Network className="size-3.5" strokeWidth={1.5} />
+            {running ? (
+              <Square className="size-3" strokeWidth={2} fill="currentColor" />
+            ) : (
+              <Play className="size-3" strokeWidth={2} fill="currentColor" />
+            )}
+            <span>{running ? t("Stop") : t("Start")}</span>
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => {
-            const root = useWorkspace.getState().root;
-            if (!root) return;
-            void bridge.writeFile(`${root}/.wide/catcher-session.json`, exportCatcherSession());
-          }}
-          title={t("Save the Catcher session (scope, rules, traffic, issues, repeaters)")}
-          aria-label={t("Save session")}
-          className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-        >
-          <Download className="size-3.5" strokeWidth={1.5} />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const root = useWorkspace.getState().root;
-            if (!root) return;
-            void bridge.readFile(`${root}/.wide/catcher-session.json`).then((file) => {
-              if (file?.content) importCatcherSession(file.content);
-            });
-          }}
-          title={t("Load a saved Catcher session from .wide/catcher-session.json")}
-          aria-label={t("Load session")}
-          className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-        >
-          <Upload className="size-3.5" strokeWidth={1.5} />
-        </button>
-        {entries.length > 0 && (
+
           <button
             type="button"
-            onClick={() => {
-              const root = useWorkspace.getState().root;
-              if (!root) {
-                toast.error(t("Open a project first."));
-                return;
-              }
-              void bridge.writeFile(`${root}/wide-traffic.har`, toHar(entries)).then((reply) => {
-                if (reply.error) toast.error(t(reply.error));
-                else toast.success(t("Traffic exported to wide-traffic.har."));
-              });
-            }}
-            title={t("Export traffic as HAR")}
-            aria-label={t("Export traffic as HAR")}
-            className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+            onClick={() => void useProxy.getState().setIntercept(!intercepting)}
+            title={intercepting ? t("Interception is on — requests are held") : t("Intercept requests")}
+            aria-label={t("Intercept requests")}
+            aria-pressed={intercepting}
+            className={cn(
+              "rounded-md p-1 transition-colors duration-100",
+              intercepting ? "bg-amber-500/20 text-amber-400 font-medium" : "text-fg-faint hover:bg-hover hover:text-fg",
+            )}
           >
-            <FileDown className="size-3.5" strokeWidth={1.5} />
+            <Hand className="size-3.5" strokeWidth={1.75} />
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => {
-            void bridge.openFile().then((picked) => {
-              if (!picked) return;
-              void bridge.readFile(picked.path).then((file) => {
-                if (file.error) {
-                  toast.error(t(file.error));
-                  return;
-                }
-                const imported = fromHar(file.content);
-                if (!imported.length) {
-                  toast.error(t("No requests found in that HAR file."));
-                  return;
-                }
-                useProxy.getState().importEntries(imported);
-                toast.success(t("Imported requests from HAR: {count}", { count: imported.length }));
-              });
-            });
-          }}
-          title={t("Import a HAR file")}
-          aria-label={t("Import a HAR file")}
-          className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
-        >
-          <FileUp className="size-3.5" strokeWidth={1.5} />
-        </button>
-        {entries.length > 0 && (
+
           <button
             type="button"
-            onClick={() => void useProxy.getState().clear()}
-            title={t("Clear captured traffic")}
-            aria-label={t("Clear captured traffic")}
-            className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg"
+            onClick={() => useProxy.getState().toggleScan()}
+            title={scanning ? t("Passive scan is on") : t("Passive scan (into findings)")}
+            aria-label={t("Passive scan (into findings)")}
+            aria-pressed={scanning}
+            className={cn(
+              "rounded-md p-1 transition-colors duration-100",
+              scanning ? "bg-emerald-500/20 text-emerald-400 font-medium" : "text-fg-faint hover:bg-hover hover:text-fg",
+            )}
           >
-            <Trash2 className="size-3.5" strokeWidth={1.5} />
+            <ScanSearch className="size-3.5" strokeWidth={1.75} />
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => void (running ? useProxy.getState().stop() : useProxy.getState().start())}
-          disabled={busy}
-          title={running ? t("Stop the proxy") : t("Start the proxy")}
-          aria-label={running ? t("Stop the proxy") : t("Start the proxy")}
-          className={cn(
-            "rounded-sm p-1 transition-colors duration-100 hover:bg-hover disabled:opacity-40",
-            running ? "text-status-error" : "text-emerald-400",
-          )}
-        >
-          {running ? (
-            <Square className="size-3.5" strokeWidth={2} fill="currentColor" />
-          ) : (
-            <Play className="size-3.5" strokeWidth={2} fill="currentColor" />
-          )}
-        </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMoreMenuOpen((v) => !v)}
+              title={t("More actions")}
+              aria-label={t("More actions")}
+              aria-expanded={moreMenuOpen}
+              className={cn(
+                "rounded-md p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg",
+                moreMenuOpen && "bg-hover text-fg",
+              )}
+            >
+              <MoreHorizontal className="size-3.5" strokeWidth={1.75} />
+            </button>
+            {moreMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-[400]" onClick={() => setMoreMenuOpen(false)} />
+                <div className="wide-pop-up absolute right-0 top-full z-[401] mt-1 w-56 overflow-hidden rounded-md border border-line bg-panel p-1 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      void useProxy.getState().setInterceptResponse(!interceptingResponses);
+                    }}
+                    className="flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Reply className="size-3.5 text-fg-faint" strokeWidth={1.75} />
+                      <span>{t("Intercept responses")}</span>
+                    </div>
+                    <span className={cn("text-[10px] font-medium", interceptingResponses ? "text-sky-400" : "text-fg-faint")}>
+                      {interceptingResponses ? t("On") : t("Off")}
+                    </span>
+                  </button>
+                  {entries.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setByHost((v) => !v);
+                      }}
+                      className="flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Network className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                        <span>{t("Group by host")}</span>
+                      </div>
+                      <span className={cn("text-[10px] font-medium", byHost ? "text-accent" : "text-fg-faint")}>
+                        {byHost ? t("On") : t("Off")}
+                      </span>
+                    </button>
+                  )}
+                  <div className="my-1 border-t border-line/40" />
+                  {entries.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        const root = useWorkspace.getState().root;
+                        if (!root) {
+                          toast.error(t("Open a project first."));
+                          return;
+                        }
+                        void bridge.writeFile(`${root}/wide-traffic.har`, toHar(entries)).then((reply) => {
+                          if (reply.error) toast.error(t(reply.error));
+                          else toast.success(t("Traffic exported to wide-traffic.har."));
+                        });
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                    >
+                      <FileDown className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                      <span>{t("Export traffic as HAR")}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      void bridge.openFile().then((picked) => {
+                        if (!picked) return;
+                        void bridge.readFile(picked.path).then((file) => {
+                          if (file.error) {
+                            toast.error(t(file.error));
+                            return;
+                          }
+                          const imported = fromHar(file.content);
+                          if (!imported.length) {
+                            toast.error(t("No requests found in that HAR file."));
+                            return;
+                          }
+                          useProxy.getState().importEntries(imported);
+                          toast.success(t("Imported requests from HAR: {count}", { count: imported.length }));
+                        });
+                      });
+                    }}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                  >
+                    <FileUp className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                    <span>{t("Import a HAR file")}</span>
+                  </button>
+                  <div className="my-1 border-t border-line/40" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      const root = useWorkspace.getState().root;
+                      if (!root) return;
+                      void bridge.writeFile(`${root}/.wide/catcher-session.json`, exportCatcherSession());
+                    }}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                  >
+                    <Download className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                    <span>{t("Save session")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      const root = useWorkspace.getState().root;
+                      if (!root) return;
+                      void bridge.readFile(`${root}/.wide/catcher-session.json`).then((file) => {
+                        if (file?.content) importCatcherSession(file.content);
+                      });
+                    }}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                  >
+                    <Upload className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                    <span>{t("Load session")}</span>
+                  </button>
+                  {entries.length > 0 && (
+                    <>
+                      <div className="my-1 border-t border-line/40" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          void useProxy.getState().clear();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-status-error transition-colors hover:bg-status-error/10"
+                      >
+                        <Trash2 className="size-3.5" strokeWidth={1.5} />
+                        <span>{t("Clear captured traffic")}</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </PanelHeader>
 
       {error && (

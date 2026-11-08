@@ -1,4 +1,4 @@
-import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, Plus, Printer, Radar, RotateCw, ScrollText, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { ClipboardCopy, DatabaseZap, FileDown, Filter, GitCompareArrows, MoreHorizontal, Plus, Printer, Radar, RotateCw, ScrollText, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
@@ -216,6 +216,7 @@ export function FindingsPanel() {
   const t = useT();
   const findings = useFindings((state) => state.findings);
   const [adding, setAdding] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const scanCount = useProjectScan((state) => state.findings.length);
@@ -361,48 +362,155 @@ export function FindingsPanel() {
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={t("Findings")}>
-        <span className="flex-1" />
-        {findings.length > 0 && (
-          <button type="button" onClick={() => void copyReport()} title={t("Copy report (Markdown)")} aria-label={t("Copy report (Markdown)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-            <ClipboardCopy className="size-3.5" strokeWidth={1.5} />
+        <div className="flex items-center gap-1">
+          {findings.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setHideResolved((v) => !v)}
+              aria-pressed={hideResolved}
+              title={t("Hide resolved findings")}
+              aria-label={t("Hide resolved findings")}
+              className={cn(
+                "rounded-md p-1 transition-colors duration-100",
+                hideResolved ? "bg-accent/20 text-accent font-medium" : "text-fg-faint hover:bg-hover hover:text-fg",
+              )}
+            >
+              <Filter className="size-3.5" strokeWidth={1.75} />
+            </button>
+          )}
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              title={t("More actions")}
+              aria-label={t("More actions")}
+              aria-expanded={menuOpen}
+              className={cn(
+                "rounded-md p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg",
+                menuOpen && "bg-hover text-fg",
+              )}
+            >
+              <MoreHorizontal className="size-3.5" strokeWidth={1.75} />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-[400]" onClick={() => setMenuOpen(false)} />
+                <div className="wide-pop-up absolute right-0 top-full z-[401] mt-1 w-56 overflow-hidden rounded-md border border-line bg-panel p-1 shadow-xl">
+                  {canReport && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setShowReport(true);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                    >
+                      <ScrollText className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                      <span>{t("Generate report")}</span>
+                    </button>
+                  )}
+                  {canReport && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void exportHtml();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                    >
+                      <FileDown className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                      <span>{t("Export report (HTML)")}</span>
+                    </button>
+                  )}
+                  {canReport && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        printReport();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                    >
+                      <Printer className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                      <span>{t("Print / PDF")}</span>
+                    </button>
+                  )}
+                  {findings.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void copyReport();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                    >
+                      <ClipboardCopy className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                      <span>{t("Copy report (Markdown)")}</span>
+                    </button>
+                  )}
+                  <div className="my-1 border-t border-line/40" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void importFindings();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                  >
+                    <Upload className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                    <span>{t("Import findings (SARIF or JSON)")}</span>
+                  </button>
+                  {canReport && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void compareFindings();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-fg transition-colors hover:bg-hover"
+                    >
+                      <GitCompareArrows className="size-3.5 text-fg-faint" strokeWidth={1.5} />
+                      <span>{t("Compare with a saved report")}</span>
+                    </button>
+                  )}
+                  {findings.length > 0 && (
+                    <>
+                      <div className="my-1 border-t border-line/40" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          useFindings.getState().clear();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] text-status-error transition-colors hover:bg-status-error/10"
+                      >
+                        <Trash2 className="size-3.5" strokeWidth={1.5} />
+                        <span>{t("Clear all")}</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setAdding((v) => !v)}
+            title={t("Add finding")}
+            aria-label={t("Add finding")}
+            className={cn(
+              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors duration-100",
+              adding
+                ? "bg-accent text-bg"
+                : "bg-selected/50 text-fg hover:bg-hover hover:text-fg-bright",
+            )}
+          >
+            <Plus className="size-3" strokeWidth={2} />
+            <span>{t("Add finding")}</span>
           </button>
-        )}
-        {canReport && (
-          <button type="button" onClick={() => void exportHtml()} title={t("Export report (HTML)")} aria-label={t("Export report (HTML)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-            <FileDown className="size-3.5" strokeWidth={1.5} />
-          </button>
-        )}
-        {canReport && (
-          <button type="button" onClick={printReport} title={t("Print / PDF")} aria-label={t("Print / PDF")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-            <Printer className="size-3.5" strokeWidth={1.5} />
-          </button>
-        )}
-        {canReport && (
-          <button type="button" onClick={() => setShowReport(true)} title={t("Generate report")} aria-label={t("Generate report")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-            <ScrollText className="size-3.5" strokeWidth={1.5} />
-          </button>
-        )}
-        <button type="button" onClick={() => void importFindings()} title={t("Import findings (SARIF or JSON)")} aria-label={t("Import findings (SARIF or JSON)")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-          <Upload className="size-3.5" strokeWidth={1.5} />
-        </button>
-        {canReport && (
-          <button type="button" onClick={() => void compareFindings()} title={t("Compare with a saved report")} aria-label={t("Compare with a saved report")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-            <GitCompareArrows className="size-3.5" strokeWidth={1.5} />
-          </button>
-        )}
-        {findings.length > 0 && (
-          <button type="button" onClick={() => setHideResolved((v) => !v)} aria-pressed={hideResolved} title={t("Hide resolved findings")} aria-label={t("Hide resolved findings")} className={cn("rounded-sm p-1 transition-colors duration-100 hover:bg-hover hover:text-fg", hideResolved ? "text-fg" : "text-fg-faint")}>
-            <Filter className="size-3.5" strokeWidth={1.5} />
-          </button>
-        )}
-        <button type="button" onClick={() => setAdding((v) => !v)} title={t("Add finding")} aria-label={t("Add finding")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-          <Plus className="size-3.5" strokeWidth={1.5} />
-        </button>
-        {findings.length > 0 && (
-          <button type="button" onClick={() => useFindings.getState().clear()} title={t("Clear all")} aria-label={t("Clear all")} className="rounded-sm p-1 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
-            <Trash2 className="size-3.5" strokeWidth={1.5} />
-          </button>
-        )}
+        </div>
       </PanelHeader>
 
       {copied && <p className="shrink-0 border-b border-line px-3 py-1 text-[11px] text-emerald-300">{t("Report copied.")}</p>}

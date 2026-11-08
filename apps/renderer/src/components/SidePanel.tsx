@@ -54,7 +54,7 @@ export function SidePanel({
         aria-label={t("Resize panel")}
         onPointerDown={() => setDragging(true)}
         onDoubleClick={() => setWidth(defaultWidth)}
-        className="w-px cursor-col-resize bg-line transition-colors duration-150 hover:bg-accent"
+        className="w-px cursor-col-resize bg-line/40 transition-colors duration-150 hover:bg-accent"
       />
     </div>
   );
@@ -118,7 +118,7 @@ export function BottomDock({
           setHeight((prev) => (prev >= window.innerHeight - 160 ? defaultHeight : window.innerHeight - 120));
         }}
         title={t("Drag to resize · Double-click to maximize or restore")}
-        className="h-1 cursor-row-resize bg-line transition-colors duration-100 hover:bg-accent"
+        className="h-1 cursor-row-resize bg-line/40 transition-colors duration-100 hover:bg-accent"
       />
       <div className="wide-enter min-h-0 flex-1 overflow-hidden bg-chrome">{children}</div>
     </div>
@@ -134,7 +134,7 @@ export function PanelHeader({
 }) {
   return (
     <div
-      className="flex shrink-0 items-center gap-1.5 border-b border-line px-3 text-fg-muted"
+      className="flex shrink-0 items-center gap-1.5 border-b border-line/40 bg-chrome/40 px-3 text-fg-muted select-none"
       style={{ height: "var(--h-tabbar)" }}
     >
       <span className="truncate text-[11px] font-semibold uppercase tracking-wider">{title}</span>

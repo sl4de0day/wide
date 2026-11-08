@@ -178,6 +178,7 @@ export const KO: Record<string, string> = {
   "Enforcing": "적용 중",
   "Logging only": "기록 전용",
   "Off": "꺼짐",
+  "On": "켜짐",
   "Fails {mode}": "실패 시 {mode}",
   "open": "개방",
   "closed": "폐쇄",
@@ -1848,4 +1849,5 @@ export const KO: Record<string, string> = {
   "Could not launch new window.": "Could not launch new window.",
   "Open in New Window": "Open in New Window",
   "Active": "Active",
+  "More actions": "추가 작업",
 };

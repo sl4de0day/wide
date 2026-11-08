@@ -5,15 +5,22 @@ import {
   Eraser,
   Eye,
   FileCode,
+  FlaskConical,
   FolderOpen,
+  Globe,
   Grid2x2,
   Pin,
   Play,
   Plus,
+  Radar,
   Rows2,
   Rows3,
+  Send,
+  Settings,
+  ShieldAlert,
   Sparkles,
   Square,
+  StickyNote,
   Terminal,
   X,
 } from "lucide-react";
@@ -99,6 +106,20 @@ function RunButton({ tab, root, run }: { tab: Tab; root: string | null; run: (pa
       <Play className="size-2.5" strokeWidth={2} fill="currentColor" />
     </button>
   );
+}
+
+function TabKindIcon({ kind }: { kind: Tab["kind"] }) {
+  if (kind === "catcher") return <Radar className="size-3.5 shrink-0 text-emerald-400" strokeWidth={1.75} />;
+  if (kind === "pitcher") return <Send className="size-3.5 shrink-0 text-sky-400" strokeWidth={1.75} />;
+  if (kind === "ai-chat") return <Sparkles className="size-3.5 shrink-0 text-purple-400" strokeWidth={1.75} />;
+  if (kind === "browser") return <Globe className="size-3.5 shrink-0 text-blue-400" strokeWidth={1.75} />;
+  if (kind === "cyberchef") return <FlaskConical className="size-3.5 shrink-0 text-amber-400" strokeWidth={1.75} />;
+  if (kind === "scratchpad") return <StickyNote className="size-3.5 shrink-0 text-amber-300" strokeWidth={1.75} />;
+  if (kind === "settings") return <Settings className="size-3.5 shrink-0 text-fg-dim" strokeWidth={1.75} />;
+  if (kind === "policy") return <ShieldAlert className="size-3.5 shrink-0 text-rose-400" strokeWidth={1.75} />;
+  if (kind === "diff") return <Columns2 className="size-3.5 shrink-0 text-accent" strokeWidth={1.75} />;
+  if (kind === "markdown-preview") return <Eye className="size-3.5 shrink-0 text-teal-400" strokeWidth={1.75} />;
+  return <FileCode className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />;
 }
 
 function TabOverflowMenu({ tabs, activePath, onPick }: { tabs: Tab[]; activePath: string | null; onPick: (path: string) => void }) {
@@ -202,8 +223,8 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
   return (
     <>
     <div
-      className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 py-1 text-xs select-none"
-      style={{ minHeight: "var(--h-tabbar)" }}
+      className="flex shrink-0 items-center justify-between border-b border-line/40 bg-chrome px-2 py-1 select-none"
+      style={{ height: "var(--h-tabbar)" }}
     >
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-0.5">
       {tabs.map((tab) => {
@@ -215,12 +236,13 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
             onContextMenu={(e) => { e.preventDefault(); setTabMenu({ path: tab.path, x: e.clientX, y: e.clientY }); }}
             onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void requestCloseTab(tab.path); } }}
             className={cn(
-              "group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t px-2.5 py-1 font-mono text-[11px] transition-colors",
+              "group relative flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-sans transition-all duration-150",
               isActive
-                ? "bg-canvas text-fg font-medium border-t-2 border-accent"
-                : "border-t-2 border-transparent text-fg-dim hover:bg-hover hover:text-fg",
+                ? "bg-canvas text-fg-bright font-medium shadow-xs border border-line/40 ring-1 ring-inset ring-accent/15"
+                : "border border-transparent text-fg-dim hover:bg-hover/60 hover:text-fg",
             )}
           >
+            <TabKindIcon kind={tab.kind} />
             <span className="truncate max-w-[180px]">
               {tab.kind === "file" ? tab.name : t(tab.name)}
             </span>
@@ -256,7 +278,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
                 })}
                 onClick={(e) => { e.stopPropagation(); void requestCloseTab(tab.path); }}
                 className={cn(
-                  "group/close relative flex size-3.5 items-center justify-center rounded p-0.5 text-fg-dim transition-all hover:text-status-danger",
+                  "group/close relative flex size-3.5 items-center justify-center rounded text-fg-dim transition-all hover:bg-hover hover:text-status-danger",
                   isDirty(tab) ? "opacity-100" : "opacity-0 group-hover:opacity-100",
                 )}
               >
@@ -288,9 +310,9 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
           title={t("New text")}
           aria-label={t("New text")}
           onClick={() => useEditor.getState().openScratchpad()}
-          className="flex items-center justify-center size-6 rounded hover:bg-hover text-fg-dim hover:text-fg transition-colors shrink-0"
+          className="flex items-center justify-center size-6 rounded-md hover:bg-hover text-fg-dim hover:text-fg transition-colors shrink-0"
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-3.5" strokeWidth={1.75} />
         </button>
       </div>
       <div className="flex items-center gap-1 shrink-0 pl-2">
@@ -588,7 +610,7 @@ function EditorBreadcrumbs() {
 
   return (
     <div
-      className="flex shrink-0 items-center gap-1.5 border-b border-line/60 bg-canvas/80 px-3 text-[11px] text-fg-dim select-none"
+      className="flex shrink-0 items-center gap-1.5 border-b border-line/30 bg-canvas/60 px-3 text-[11px] text-fg-dim select-none"
       style={{ height: "24px" }}
     >
       <FileCode className="size-3 shrink-0 text-fg-faint" strokeWidth={1.75} />

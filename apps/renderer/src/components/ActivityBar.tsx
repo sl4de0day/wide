@@ -213,7 +213,7 @@ function ActivityButton({
         active ? "bg-selected text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
       )}
     >
-      <Icon className="size-6" strokeWidth={1.5} />
+      <Icon className="size-5" strokeWidth={1.5} />
     </button>
   );
 }
@@ -236,7 +236,7 @@ function ToolBarButton({ tool, active }: { tool: ToolButton; active: boolean }) 
         active ? "bg-selected text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
       )}
     >
-      <Icon className="size-6" strokeWidth={1.5} />
+      <Icon className="size-5" strokeWidth={1.5} />
     </button>
   );
 }
@@ -296,7 +296,7 @@ function ExtensionsFlyout({
           active ? "bg-selected text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
         )}
       >
-        <Icon className="size-6" strokeWidth={1.5} />
+        <Icon className="size-5" strokeWidth={1.5} />
       </button>
       <div
         onMouseEnter={show}
@@ -331,7 +331,7 @@ function ExtensionsFlyout({
                 item.active ? "bg-selected text-fg-bright" : "text-fg-dim hover:text-fg",
               )}
             >
-              <ItemIcon className="size-6" strokeWidth={1.5} />
+              <ItemIcon className="size-5" strokeWidth={1.5} />
             </button>
           );
         })}
@@ -371,7 +371,7 @@ export function ActivityBar({
   return (
     <nav
       aria-label={t("Tools")}
-      className="flex shrink-0 flex-col items-center gap-1 border-r border-line bg-chrome py-2"
+      className="flex shrink-0 flex-col items-center gap-1 border-r border-line/40 bg-chrome py-2"
       style={{ width: "var(--w-activitybar)" }}
     >
       {topBuiltin.map((panel) =>

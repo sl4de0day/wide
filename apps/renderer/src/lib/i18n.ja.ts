@@ -178,6 +178,7 @@ export const JA: Record<string, string> = {
   "Enforcing": "適用中",
   "Logging only": "記録のみ",
   "Off": "オフ",
+  "On": "オン",
   "Fails {mode}": "フェイル{mode}",
   "open": "オープン",
   "closed": "クローズ",
@@ -1848,4 +1849,5 @@ export const JA: Record<string, string> = {
   "Could not launch new window.": "Could not launch new window.",
   "Open in New Window": "Open in New Window",
   "Active": "Active",
+  "More actions": "その他の操作",
 };

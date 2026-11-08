@@ -605,8 +605,11 @@ textarea {
 }
 
 .wide-pop-up {
-  transform-origin: bottom left;
+  transform-origin: top right;
   animation: wide-pop-up var(--dur-fast) var(--ease) both;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
 }
 
 .wide-wave-dot {
