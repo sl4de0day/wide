@@ -109,7 +109,7 @@ function RunButton({ tab, root, run }: { tab: Tab; root: string | null; run: (pa
 }
 
 function TabKindIcon({ kind }: { kind: Tab["kind"] }) {
-  const iconClass = "size-3.5 shrink-0 text-fg-dim";
+  const iconClass = "size-3 shrink-0 text-fg-dim";
   if (kind === "catcher") return <Radar className={iconClass} strokeWidth={1.75} />;
   if (kind === "pitcher") return <Send className={iconClass} strokeWidth={1.75} />;
   if (kind === "ai-chat") return <Sparkles className={iconClass} strokeWidth={1.75} />;
@@ -224,7 +224,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
   return (
     <>
     <div
-      className="flex shrink-0 items-center justify-between border-b border-line/40 bg-chrome px-2 py-1 select-none"
+      className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 py-1 text-xs select-none"
       style={{ height: "var(--h-tabbar)" }}
     >
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-0.5">
@@ -237,10 +237,10 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
             onContextMenu={(e) => { e.preventDefault(); setTabMenu({ path: tab.path, x: e.clientX, y: e.clientY }); }}
             onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void requestCloseTab(tab.path); } }}
             className={cn(
-              "group relative flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-sans transition-all duration-150",
+              "group relative flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t px-2.5 py-1 font-mono text-[11px] transition-colors",
               isActive
-                ? "bg-canvas text-fg-bright font-medium shadow-xs border border-line/40 ring-1 ring-inset ring-accent/15"
-                : "border border-transparent text-fg-dim hover:bg-hover/60 hover:text-fg",
+                ? "bg-canvas text-fg font-medium border-t-2 border-accent"
+                : "text-fg-dim hover:bg-hover hover:text-fg",
             )}
           >
             <TabKindIcon kind={tab.kind} />
@@ -279,17 +279,16 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
                 })}
                 onClick={(e) => { e.stopPropagation(); void requestCloseTab(tab.path); }}
                 className={cn(
-                  "group/close relative flex size-3.5 items-center justify-center rounded text-fg-dim transition-all hover:bg-hover hover:text-status-danger",
-                  isDirty(tab) ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                  "p-0.5 rounded transition-opacity",
+                  isDirty(tab)
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 hover:text-status-danger",
                 )}
               >
                 {isDirty(tab) ? (
-                  <>
-                    <span className="size-1.5 rounded-full bg-accent transition-opacity group-hover/close:opacity-0" />
-                    <X className="absolute size-2.5 stroke-[2] opacity-0 transition-opacity group-hover/close:opacity-100" />
-                  </>
+                  <span className="size-1.5 rounded-full bg-accent block" />
                 ) : (
-                  <X className="size-2.5" strokeWidth={2} />
+                  <X className="size-2.5" />
                 )}
               </button>
             ) : (
@@ -298,7 +297,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
                 title={t("Unpin tab")}
                 aria-label={t("Unpin tab")}
                 onClick={(e) => { e.stopPropagation(); useEditor.getState().togglePinTab(tab.path); }}
-                className="flex size-3.5 items-center justify-center rounded text-fg-dim transition-colors hover:bg-hover"
+                className="p-0.5 rounded text-fg-dim transition-colors hover:bg-hover"
               >
                 <Pin className="size-2.5 fill-current" strokeWidth={1.5} />
               </button>
@@ -311,9 +310,9 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
           title={t("New text")}
           aria-label={t("New text")}
           onClick={() => useEditor.getState().openScratchpad()}
-          className="flex items-center justify-center size-6 rounded-md hover:bg-hover text-fg-dim hover:text-fg transition-colors shrink-0"
+          className="flex items-center justify-center size-6 rounded hover:bg-hover text-fg-dim hover:text-fg transition-colors shrink-0"
         >
-          <Plus className="size-3.5" strokeWidth={1.75} />
+          <Plus className="size-3.5" />
         </button>
       </div>
       <div className="flex items-center gap-1 shrink-0 pl-2">
