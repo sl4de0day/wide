@@ -2000,11 +2000,11 @@ export function AiChatView({ id }: { id: string }) {
               </div>
             )}
 
-            <div className="relative rounded-2xl border border-line bg-panel/95 shadow-lg backdrop-blur-sm transition-all duration-150 focus-within:border-accent/80 focus-within:ring-1 focus-within:ring-accent/20 p-2.5">
+            <div className="relative rounded-2xl border border-line bg-panel/95 shadow-lg backdrop-blur-sm p-2.5">
               {context && (
                 <div className="flex items-center gap-1.5 pb-2 px-1">
                   <span className="flex items-center gap-1.5 rounded-md bg-canvas px-2 py-0.5 text-[11px] text-fg-dim border border-line/60">
-                    <FileCode className="size-3 text-accent shrink-0" strokeWidth={1.75} />
+                    <FileCode className="size-3 text-fg-dim shrink-0" strokeWidth={1.75} />
                     <span className="max-w-[200px] truncate">{basename(context)}</span>
                   </span>
                 </div>
@@ -2013,7 +2013,7 @@ export function AiChatView({ id }: { id: string }) {
                 <div className="flex flex-wrap gap-1 pb-2 px-1">
                   {attachments.map((path) => (
                     <span key={path} className="flex items-center gap-1 rounded-md bg-canvas px-2 py-0.5 text-[11px] text-fg-dim border border-line/60" title={path}>
-                      <AtSign className="size-3 shrink-0 text-accent" strokeWidth={1.75} />
+                      <AtSign className="size-3 shrink-0 text-fg-dim" strokeWidth={1.75} />
                       <span className="max-w-[160px] truncate">{basename(path)}</span>
                       <button type="button" onClick={() => useAi.getState().detach(id, path)} className="text-fg-faint hover:text-fg ml-0.5" aria-label={t("Remove")}>
                         <X className="size-3" strokeWidth={2} />
