@@ -20,6 +20,7 @@ const AI_DEFAULT_CONFIG = {
     deepseek: "deepseek-v4-pro",
     claude: "",
     "claude-code": "",
+    opencode: "",
   },
   localModel: "",
 

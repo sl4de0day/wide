@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { bridge, type AiModelFile } from "@/lib/bridge";
+import { bridge, type AiModelFile, type OpenCodeModel } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAi } from "@/stores/ai";
@@ -82,10 +82,22 @@ export function formatCloudModelName(raw: string, provider?: string): string {
     if (provider === "deepseek") return "DeepSeek";
     if (provider === "claude") return "Claude API";
     if (provider === "claude-code") return "Claude Code";
+    if (provider === "opencode") return "OpenCode";
     return provider || "";
   }
   const clean = raw.trim();
   if (CLOUD_MODEL_NAMES[clean]) return CLOUD_MODEL_NAMES[clean];
+
+  if (provider === "opencode" || clean.startsWith("opencode/")) {
+    const unprefix = clean.replace(/^opencode\//i, "");
+    if (CLOUD_MODEL_NAMES[unprefix]) return CLOUD_MODEL_NAMES[unprefix];
+    return unprefix
+      .replace(/[-_]/g, " ")
+      .replace(/(\d+)\s+(\d+)/g, "$1.$2")
+      .split(" ")
+      .map((w) => (w.toLowerCase() === "vl" ? "VL" : w.charAt(0).toUpperCase() + w.slice(1)))
+      .join(" ");
+  }
 
   return clean
     .replace(/^gemini[-_]/i, "Gemini ")
@@ -610,6 +622,184 @@ function ClaudeCodeCard() {
   );
 }
 
+let openCodeProbeState: {
+  checked: boolean;
+  installed: boolean;
+  broken: boolean;
+  version: string;
+} | null = null;
+let openCodeCachedModels: OpenCodeModel[] = [];
+
+function OpenCodeCard() {
+  const t = useT();
+  const config = useAi((state) => state.config);
+  const selected = config?.tab === "cloud" && config?.provider === "opencode";
+  const [probe, setProbe] = useState(
+    () => openCodeProbeState ?? { checked: false, installed: false, broken: false, version: "" },
+  );
+  const [models, setModels] = useState<OpenCodeModel[]>(() => openCodeCachedModels);
+  const [busy, setBusy] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(false);
+
+  const fetchModels = async (fresh = false) => {
+    setLoadingModels(true);
+    try {
+      const reply = await bridge.aiOpenCodeModels(fresh);
+      if (reply.ok && Array.isArray(reply.models)) {
+        openCodeCachedModels = reply.models;
+        setModels(reply.models);
+        const current = useAi.getState().config?.cloudModel?.opencode;
+        if (!current && reply.selectedModel) {
+          void useAi.getState().setConfig({
+            cloudModel: { opencode: reply.selectedModel },
+          });
+        }
+      }
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  const check = (fresh = false) => {
+    void bridge.aiOpenCodeStatus(fresh).then((reply) => {
+      const next = {
+        checked: true,
+        installed: Boolean(reply.ok && reply.installed),
+        broken: Boolean(reply.ok && reply.broken),
+        version: reply.ok ? (reply.version ?? "") : "",
+      };
+      openCodeProbeState = next;
+      setProbe(next);
+      if (next.installed) {
+        void fetchModels(fresh);
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (openCodeProbeState) {
+      if (openCodeProbeState.installed && openCodeCachedModels.length === 0) {
+        void fetchModels();
+      }
+      return;
+    }
+    check();
+  }, []);
+
+  const install = async () => {
+    setBusy(true);
+    try {
+      await bridge.aiOpenCodeInstall();
+      check(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectCard = () => {
+    if (probe.installed) {
+      const current = config?.cloudModel?.opencode;
+      const fallback = models[0]?.key || "";
+      void useAi.getState().setConfig({
+        tab: "cloud",
+        provider: "opencode",
+        ...(!current && fallback ? { cloudModel: { opencode: fallback } } : {}),
+      });
+    } else {
+      void install();
+    }
+  };
+
+  const selectedModelKey = config?.cloudModel?.opencode ?? "";
+
+  return (
+    <div className="border-b border-line">
+      <button
+        type="button"
+        onClick={selectCard}
+        disabled={busy}
+        className={cn(
+          "flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors duration-150 disabled:opacity-60",
+          selected ? "bg-selected" : "hover:bg-hover",
+        )}
+      >
+        <span
+          className={cn(
+            "size-2 shrink-0 rounded-full",
+            probe.installed ? "bg-emerald-400" : probe.broken ? "bg-amber-400" : "bg-fg-faint/40",
+          )}
+        />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-[12px] font-medium",
+            selected ? "text-fg-bright" : "text-fg",
+          )}
+        >
+          OpenCode
+        </span>
+        {probe.installed ? (
+          <span className="shrink-0 truncate text-[10.5px] text-fg-faint">
+            {formatCloudModelName(selectedModelKey || models[0]?.name || "", "opencode")}
+          </span>
+        ) : (
+          <span className="shrink-0 text-[10.5px] font-medium text-accent">
+            {busy ? t("Working…") : !probe.checked ? t("Checking…") : t("Install")}
+          </span>
+        )}
+      </button>
+
+      {probe.installed && selected && (
+        <div className="wide-enter-fade flex items-center gap-1.5 px-3 pb-2.5">
+          <select
+            value={selectedModelKey}
+            onChange={(event) =>
+              void useAi.getState().setConfig({ cloudModel: { opencode: event.target.value } })
+            }
+            className="min-w-0 flex-1 rounded-md border border-line bg-panel px-2 py-1 text-[11px] text-fg outline-none focus:border-accent"
+          >
+            {models.length === 0 ? (
+              <option value="">{loadingModels ? t("Checking…") : t("No model chosen")}</option>
+            ) : (
+              models.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.name || formatCloudModelName(m.key, "opencode")}
+                  {m.free ? " (Free)" : ""}
+                </option>
+              ))
+            )}
+          </select>
+          <button
+            type="button"
+            onClick={() => void fetchModels(true)}
+            disabled={loadingModels}
+            title={t("Refresh")}
+            aria-label={t("Refresh")}
+            className="shrink-0 rounded-md border border-line p-1 text-fg-faint transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
+          >
+            <RotateCw className={cn("size-3", loadingModels && "animate-spin")} strokeWidth={1.75} />
+          </button>
+        </div>
+      )}
+
+      {probe.checked && !probe.installed && (
+        <div className="px-3 pb-2.5">
+          <p className="pb-1.5 text-[10.5px] leading-snug text-fg-faint">
+            {t("Access free models through the OpenCode CLI.")}
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void install()}
+            className="rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-dim transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
+          >
+            {busy ? t("Working…") : t("Install")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CloudHalf() {
   const t = useT();
   return (
@@ -633,6 +823,7 @@ function CloudHalf() {
         models={["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"]}
       />
       <ClaudeCodeCard />
+      <OpenCodeCard />
     </>
   );
 }
@@ -650,6 +841,13 @@ export function useModelLabel(): { label: string; ready: boolean } {
     };
   }
   if (config.provider === "claude-code") return { label: "Claude Code", ready: true };
+  if (config.provider === "opencode") {
+    const chosen = config.cloudModel?.opencode ?? "";
+    return {
+      label: formatCloudModelName(chosen, "opencode") || "OpenCode",
+      ready: true,
+    };
+  }
   const model = config.cloudModel[config.provider] ?? "";
   const ready = Boolean(keys[config.provider]);
   if (!ready || !model) {

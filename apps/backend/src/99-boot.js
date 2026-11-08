@@ -12,6 +12,7 @@ function shutdownServices() {
     closeAllRealtime,
     closeAllGrpc,
     mcpDisposeAll,
+    openCodeStop,
     stopProxy,
     stopOast,
     stopBuiltinOast,
@@ -115,6 +116,7 @@ electron.app.whenReady().then(async () => {
   registerMcpHandlers();
   registerAiAgentHandlers();
   registerClaudeCodeHandlers();
+  registerOpenCodeHandlers();
   registerBrowserHandlers();
   registerProxyHandlers();
   registerDebugHandlers();

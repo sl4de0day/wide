@@ -311,7 +311,7 @@ capability ai.egress {
   #
   # "local" burada çünkü tur bu kapıdan geçiyor; kendisi 127.0.0.1'e gider ve
   # asıl sınırı ai.local koyar. "claude-code" ağa CLI üzerinden çıkar.
-  deny  when arg 0 matches /^(?!(gemini|deepseek|claude|claude-code|local)$)/  reason "Tanınmayan sağlayıcı"
+  deny  when arg 0 matches /^(?!(gemini|deepseek|claude|claude-code|opencode|local)$)/  reason "Tanınmayan sağlayıcı"
   allow always
 
   limit 120 per minute
@@ -639,6 +639,12 @@ bind "ai:localRemove"   to ai.local
 bind "ai:claudeCodeStatus"  to ai.local
 bind "ai:claudeCodeInstall" to ai.local
 bind "ai:claudeCodeLogin"   to ai.local
+bind "ai:openCodeStatus"    to ai.local
+bind "ai:openCodeInstall"   to ai.local
+bind "ai:openCodeServer"    to ai.local
+bind "ai:openCodeStart"     to ai.local
+bind "ai:openCodeStop"      to ai.local
+bind "ai:openCodeModels"    to ai.models
 
 # Asistanin araclari kendi kanal adlariyla denetlenir: fs:readFile'a baglamak
 # onlari fs.read'e goturur ve ai.read hic calismazdi. Ayri ad, ayri yetenek,

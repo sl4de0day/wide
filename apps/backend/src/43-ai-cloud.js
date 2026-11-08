@@ -65,6 +65,20 @@ const aiCloudTelemetry = {
     lastStatus: "ready",
     updatedAt: 0,
   },
+  opencode: {
+    requestsLimit: 60,
+    requestsRemaining: 60,
+    tokensLimit: 200000,
+    tokensRemaining: 200000,
+    requestsUsed: 0,
+    tokensUsed: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    resetAt: "",
+    lastLatencyMs: 0,
+    lastStatus: "ready",
+    updatedAt: 0,
+  },
 };
 
 function aiRecordCloudHeaders(provider, headers, statusCode, latencyMs = 0) {
@@ -142,6 +156,7 @@ function aiGetCloudTelemetry() {
     deepseek: { ...aiCloudTelemetry.deepseek },
     gemini: { ...aiCloudTelemetry.gemini },
     "claude-code": { ...aiCloudTelemetry["claude-code"] },
+    opencode: { ...aiCloudTelemetry.opencode },
   };
 }
 

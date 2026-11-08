@@ -131,6 +131,7 @@ export const KO: Record<string, string> = {
   "soon": "곧 제공",
   "Signing in opens a console and a browser window.": "로그인하면 콘솔과 브라우저 창이 열립니다.",
   "Uses your Claude subscription rather than a key.": "키 대신 Claude 구독을 사용합니다.",
+  "Access free models through the OpenCode CLI.": "OpenCode CLI를 통해 무료 모델에 액세스합니다.",
   "Try again": "다시 시도",
   "New conversation": "새 대화",
   "Search conversations": "대화 검색",

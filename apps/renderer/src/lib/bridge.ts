@@ -704,6 +704,38 @@ export interface AiModelFile {
   fit?: "gpu" | "cpu" | "no" | "unknown";
 }
 
+export interface OpenCodeServerState {
+  running: boolean;
+  starting: boolean;
+  port: number;
+  version: string;
+  api: "" | "v1" | "v2";
+  source: "" | "cli" | "desktop";
+  since: number;
+  error: string;
+}
+
+export interface OpenCodeModel {
+  key: string;
+  id: string;
+  providerId: string;
+  providerName: string;
+  name: string;
+  free: boolean;
+  reasoning: boolean;
+  tools: boolean;
+  context: number;
+  output: number;
+}
+
+export interface OpenCodeModelsReply {
+  models: OpenCodeModel[];
+  defaultModel: string;
+  selectedModel: string;
+  api?: "v1" | "v2";
+  version?: string;
+}
+
 export interface AiHardware {
   totalRam: number;
   vram: number;
@@ -1308,6 +1340,22 @@ export interface HostApi {
   aiClaudeCodeStatus(): Promise<Ok<{ installed?: boolean; path?: string; signedIn?: boolean }>>;
   aiClaudeCodeInstall(): Promise<Ok<{ path?: string }>>;
   aiClaudeCodeLogin(): Promise<Ok<{ started?: boolean }>>;
+  aiOpenCodeStatus(fresh?: boolean): Promise<
+    Ok<{
+      installed?: boolean;
+      broken?: boolean;
+      path?: string;
+      version?: string;
+      source?: "cli" | "desktop";
+      api?: "v1" | "v2";
+      found?: { path: string; version: string; source: "cli" | "desktop" }[];
+    }>
+  >;
+  aiOpenCodeInstall(): Promise<Ok<{ path?: string; version?: string }>>;
+  aiOpenCodeServer(): Promise<Ok<OpenCodeServerState>>;
+  aiOpenCodeStart(): Promise<Ok<OpenCodeServerState>>;
+  aiOpenCodeStop(): Promise<Ok<OpenCodeServerState>>;
+  aiOpenCodeModels(fresh?: boolean): Promise<Ok<OpenCodeModelsReply>>;
   onAiEvent: Subscriber<AiEvent>;
   onAiPull: Subscriber<AiPullEvent>;
   onMcpPending: Subscriber<McpPendingEvent>;
@@ -1638,6 +1686,12 @@ const fallback = {
   aiClaudeCodeStatus: async () => (warn(), { ok: false, error: "No bridge" }),
   aiClaudeCodeInstall: async () => (warn(), { ok: false, error: "No bridge" }),
   aiClaudeCodeLogin: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiOpenCodeStatus: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiOpenCodeInstall: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiOpenCodeServer: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiOpenCodeStart: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiOpenCodeStop: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiOpenCodeModels: async () => (warn(), { ok: false, error: "No bridge" }),
   onAiEvent: noSub<AiEvent>(),
   onAiPull: noSub<AiPullEvent>(),
   onMcpPending: noSub<McpPendingEvent>(),

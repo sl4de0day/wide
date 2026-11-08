@@ -131,6 +131,7 @@ export const TR: Record<string, string> = {
   "soon": "yakında",
   "Signing in opens a console and a browser window.": "Giriş bir konsol ve bir tarayıcı penceresi açar.",
   "Uses your Claude subscription rather than a key.": "Anahtar yerine Claude aboneliğinizi kullanır.",
+  "Access free models through the OpenCode CLI.": "OpenCode CLI ile ücretsiz modellere erişin.",
   "Try again": "Tekrar dene",
   "New conversation": "Yeni konuşma",
   "Search conversations": "Konuşmalarda ara",

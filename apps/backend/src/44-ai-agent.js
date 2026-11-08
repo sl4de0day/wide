@@ -1336,7 +1336,7 @@ function registerAiAgentHandlers() {
 
     const config = await readAiConfig();
     const key = await aiKeyFor(provider === "claude-code" ? "claude" : provider);
-    if (!key && provider !== "claude-code" && provider !== "local") {
+    if (!key && provider !== "claude-code" && provider !== "opencode" && provider !== "local") {
       return { ok: false, error: "no-key" };
     }
 
@@ -1348,7 +1348,7 @@ function registerAiAgentHandlers() {
     const controller = new AbortController();
     aiTurns.set(id, controller);
 
-    if (provider !== "claude-code") {
+    if (provider !== "claude-code" && provider !== "opencode") {
       try {
         await ensureMcp(root);
       } catch {
@@ -1371,6 +1371,19 @@ function registerAiAgentHandlers() {
           model,
           system: prompt,
           messages: turn,
+          signal: controller.signal,
+          send,
+        });
+      }
+      if (provider === "opencode") {
+        return await aiRunOpenCodeTurn({
+          root,
+          model,
+          system,
+          messages,
+          projectInstructions: projInstr.content,
+          allowWrites: config.allowWrites,
+          effort: cleanEffort,
           signal: controller.signal,
           send,
         });
@@ -1433,6 +1446,20 @@ function registerAiAgentHandlers() {
           system,
           messages,
           allowWrites: false,
+          signal: controller.signal,
+          send: (event) => {
+            if (event.type === "text" && typeof event.text === "string") text += event.text;
+          },
+        });
+      } else if (provider === "opencode") {
+        await aiRunOpenCodeTurn({
+          root: "",
+          model,
+          system,
+          messages,
+          projectInstructions: "",
+          allowWrites: false,
+          effort: "fast",
           signal: controller.signal,
           send: (event) => {
             if (event.type === "text" && typeof event.text === "string") text += event.text;

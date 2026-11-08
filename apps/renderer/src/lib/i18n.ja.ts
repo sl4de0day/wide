@@ -131,6 +131,7 @@ export const JA: Record<string, string> = {
   "soon": "近日対応",
   "Signing in opens a console and a browser window.": "サインインすると、コンソールとブラウザーウィンドウが開きます。",
   "Uses your Claude subscription rather than a key.": "キーではなく Claude のサブスクリプションを使用します。",
+  "Access free models through the OpenCode CLI.": "OpenCode CLI を通じて無料のモデルにアクセスします。",
   "Try again": "再試行",
   "New conversation": "新しい会話",
   "Search conversations": "会話を検索",

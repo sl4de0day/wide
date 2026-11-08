@@ -131,6 +131,7 @@ export const ES: Record<string, string> = {
   "soon": "próximamente",
   "Signing in opens a console and a browser window.": "Al iniciar sesión se abren una consola y una ventana del navegador.",
   "Uses your Claude subscription rather than a key.": "Usa su suscripción de Claude en lugar de una clave.",
+  "Access free models through the OpenCode CLI.": "Acceda a modelos gratuitos a través de la CLI de OpenCode.",
   "Try again": "Reintentar",
   "New conversation": "Nueva conversación",
   "Search conversations": "Buscar conversaciones",
