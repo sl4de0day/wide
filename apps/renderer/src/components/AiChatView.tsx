@@ -8,17 +8,12 @@ import {
   Download,
   ExternalLink,
   FileCode,
-  FileDiff,
-  FolderOpen,
   ImagePlus,
   Loader2,
-  Maximize2,
   Mic,
   MicOff,
-  Minimize2,
   Pencil,
   RefreshCw,
-  Search,
   Send,
   Settings2,
   Square,
@@ -50,8 +45,6 @@ import wideLogo from "@/assets/wide-logo.png";
 
 const kept: Record<string, { draft: string; scroll: number; pinned: boolean }> = {};
 const keptFor = (id: string) => (kept[id] ??= { draft: "", scroll: 0, pinned: true });
-
-const unfolded: Record<string, boolean> = {};
 
 const NOTHING_ATTACHED: string[] = [];
 const NO_IMAGES: AiImage[] = [];
@@ -652,309 +645,75 @@ function DiffSlidePanel({
   );
 }
 
-function AgentActivityStream({
-  turn,
-  activeInspectKey,
-  onInspectFile,
-  onFailure,
-}: {
-  turn: AiTurn;
-  activeInspectKey: string;
-  onInspectFile: (target: InspectorTarget) => void;
-  onFailure: (message: string) => void;
-}) {
-  const t = useT();
-  const root = useWorkspace((state) => state.root) ?? "";
-  const [maximized, setMaximized] = useState(() => unfolded[turn.id] ?? true);
-  const [now, setNow] = useState(() => Date.now());
+interface EnrichedStep {
+  key: string;
+  step: AiToolStep;
+  rawTarget: string;
+  fullPath: string;
+  fileName: string;
+  actionLabel: string;
+  actionKind: "edited" | "created" | "analyzed" | "other";
+  added: number;
+  removed: number;
+  stepSec: number | null;
+}
 
-  useEffect(() => {
-    if (!turn.streaming) {
-      setNow(Date.now());
-      return;
-    }
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [turn.streaming]);
+function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof useT>, turnId: string): EnrichedStep[] {
+  return steps.map((step, index) => {
+    const rawTarget = stepTarget(step);
+    const fullPath = step.filePath || (OPENS_A_FILE.has(step.name) ? resolvePath(root, rawTarget) : "");
+    const fileName = fullPath ? basename(fullPath) : basename(rawTarget) || rawTarget;
+    let actionLabel = step.name;
+    let actionKind: "edited" | "created" | "analyzed" | "other" = "other";
 
-  const toggleMaximized = (next: boolean) => {
-    unfolded[turn.id] = next;
-    setMaximized(next);
-  };
-
-  const elapsedSec = useMemo(() => {
-    const start = turn.startedAt ?? now;
-    const end = turn.streaming ? now : (turn.endedAt ?? now);
-    return Math.max(1, Math.round((end - start) / 1000));
-  }, [turn.startedAt, turn.endedAt, turn.streaming, now]);
-
-  const enrichedSteps = useMemo(() => {
-    return turn.steps.map((step, index) => {
-      const rawTarget = stepTarget(step);
-      const fullPath = step.filePath || (OPENS_A_FILE.has(step.name) ? resolvePath(root, rawTarget) : "");
-      const fileName = fullPath ? basename(fullPath) : basename(rawTarget) || rawTarget;
-      let actionLabel = step.name;
-      let actionKind: "edited" | "created" | "analyzed" | "other" = "other";
-
-      if (step.name === "read_file" || step.name === "open_file") {
-        actionLabel = step.done ? t("Analyzed") : t("Analyzing");
-        actionKind = "analyzed";
-      } else if (step.name === "write_file") {
-        if (step.existed === false) {
-          actionLabel = step.done ? t("Created") : t("Creating");
-          actionKind = "created";
-        } else {
-          actionLabel = step.done ? t("Edited") : t("Editing");
-          actionKind = "edited";
-        }
-      } else if (step.name === "edit_file") {
+    if (step.name === "read_file" || step.name === "open_file") {
+      actionLabel = step.done ? t("Analyzed") : t("Analyzing");
+      actionKind = "analyzed";
+    } else if (step.name === "write_file") {
+      if (step.existed === false) {
+        actionLabel = step.done ? t("Created") : t("Creating");
+        actionKind = "created";
+      } else {
         actionLabel = step.done ? t("Edited") : t("Editing");
         actionKind = "edited";
-      } else if (step.name === "search" || step.name === "find_relevant") {
-        actionLabel = step.done ? t("Searched") : t("Searching");
-      } else if (step.name === "list_dir" || step.name === "create_dir") {
-        actionLabel = step.done ? t("Explored directory") : t("Exploring directory");
-      } else if (step.name === "run_command" || step.name === "git") {
-        actionLabel = step.done ? t("Ran command") : t("Running command");
       }
-
-      let added = 0;
-      let removed = 0;
-      if ((actionKind === "edited" || actionKind === "created") && step.newContent !== undefined) {
-        const counts = diffCounts(lineDiff(step.oldContent ?? "", step.newContent));
-        added = counts.added;
-        removed = counts.removed;
-      }
-
-      const stepSec =
-        step.startedAt && step.endedAt
-          ? Math.max(0.1, Math.round((step.endedAt - step.startedAt) / 100) / 10)
-          : null;
-
-      return {
-        key: `${turn.id}-step-${index}`,
-        step,
-        rawTarget,
-        fullPath,
-        fileName,
-        actionLabel,
-        actionKind,
-        added,
-        removed,
-        stepSec,
-      };
-    });
-  }, [turn.steps, turn.id, root, t]);
-
-  const handleStepClick = async (item: (typeof enrichedSteps)[number]) => {
-    if (!item.fullPath) return;
-    if (item.step.newContent !== undefined) {
-      onInspectFile({
-        key: item.key,
-        path: item.fullPath,
-        relativePath: item.rawTarget || basename(item.fullPath),
-        action: item.actionKind === "other" ? "analyzed" : item.actionKind,
-        oldContent: item.step.oldContent ?? "",
-        newContent: item.step.newContent,
-      });
-      return;
+    } else if (step.name === "edit_file") {
+      actionLabel = step.done ? t("Edited") : t("Editing");
+      actionKind = "edited";
+    } else if (step.name === "search" || step.name === "find_relevant") {
+      actionLabel = step.done ? t("Searched") : t("Searching");
+    } else if (step.name === "list_dir" || step.name === "create_dir") {
+      actionLabel = step.done ? t("Explored directory") : t("Exploring directory");
+    } else if (step.name === "run_command" || step.name === "git") {
+      actionLabel = step.done ? t("Ran command") : t("Running command");
     }
-    const read = await bridge.readFile(item.fullPath);
-    if (!read || read.error || read.content == null) {
-      onFailure(t("{name} could not be opened.", { name: item.fileName }));
-      return;
+
+    let added = 0;
+    let removed = 0;
+    if ((actionKind === "edited" || actionKind === "created") && step.newContent !== undefined) {
+      const counts = diffCounts(lineDiff(step.oldContent ?? "", step.newContent));
+      added = counts.added;
+      removed = counts.removed;
     }
-    onInspectFile({
-      key: item.key,
-      path: item.fullPath,
-      relativePath: item.rawTarget || basename(item.fullPath),
-      action: item.actionKind === "other" ? "analyzed" : item.actionKind,
-      oldContent: item.step.oldContent ?? "",
-      newContent: read.content,
-    });
-  };
 
-  const activeStep = enrichedSteps.find((s) => !s.step.done);
-  const filePills = enrichedSteps.filter((s) => s.fullPath && s.actionKind !== "other");
-  const lastStep = enrichedSteps[enrichedSteps.length - 1];
+    const stepSec =
+      step.startedAt && step.endedAt
+        ? Math.max(0.1, Math.round((step.endedAt - step.startedAt) / 100) / 10)
+        : null;
 
-  const headerTitle = turn.streaming
-    ? activeStep
-      ? `${activeStep.actionLabel} ${activeStep.fileName}… (${elapsedSec}s)`
-      : lastStep
-        ? `${lastStep.actionLabel} ${lastStep.fileName}`
-        : ""
-    : lastStep
-      ? `${lastStep.actionLabel} ${lastStep.fileName}`
-      : "";
-
-  return (
-    <div className="my-1.5 overflow-hidden rounded-xl border border-line/70 bg-panel/50 shadow-sm transition-all duration-150">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-[12px] text-fg-muted hover:bg-hover/60">
-        <button
-          type="button"
-          onClick={() => toggleMaximized(!maximized)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        >
-          {turn.streaming ? (
-            <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
-          ) : (
-            <Check className="size-3.5 shrink-0 text-emerald-400" strokeWidth={2} />
-          )}
-          <span className="truncate font-medium text-fg">{headerTitle}</span>
-          {enrichedSteps.length > 0 && (
-            <span className="shrink-0 rounded-full bg-canvas/80 px-2 py-0.5 font-mono text-[10px] text-fg-faint border border-line/50">
-              {enrichedSteps.length}
-            </span>
-          )}
-        </button>
-
-        {!maximized && filePills.length > 0 && (
-          <div className="hidden sm:flex items-center gap-1 overflow-hidden max-w-[340px]">
-            {filePills.slice(-3).map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => void handleStepClick(item)}
-                className={cn(
-                  "flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors",
-                  activeInspectKey === item.key
-                    ? "border-accent bg-accent/15 text-accent"
-                    : "border-line/60 bg-canvas/80 text-fg-dim hover:border-accent/50 hover:text-fg",
-                )}
-              >
-                <span className="font-sans font-medium text-fg-faint">{item.actionLabel}</span>
-                <span className="truncate max-w-[90px]">{item.fileName}</span>
-                {(item.added > 0 || item.removed > 0) && (
-                  <span className="text-emerald-400">+{item.added}</span>
-                )}
-                {item.removed > 0 && (
-                  <span className="text-rose-400">−{item.removed}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={() => toggleMaximized(!maximized)}
-          title={maximized ? t("Minimize stream") : t("Maximize stream")}
-          aria-label={maximized ? t("Minimize stream") : t("Maximize stream")}
-          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-fg-faint transition-colors hover:bg-hover hover:text-fg"
-        >
-          {maximized ? (
-            <Minimize2 className="size-3.5" strokeWidth={1.75} />
-          ) : (
-            <Maximize2 className="size-3.5" strokeWidth={1.75} />
-          )}
-        </button>
-      </div>
-
-      {maximized && (
-        <div className="flex flex-col gap-1 border-t border-line/40 bg-canvas/35 px-3 py-2.5">
-          <div className="relative flex flex-col gap-1.5 pl-2 before:absolute before:bottom-2 before:left-[13px] before:top-2 before:w-px before:bg-line/60">
-            {enrichedSteps.map((item) => {
-              const isFileAction = Boolean(item.fullPath);
-              const isSelected = activeInspectKey === item.key;
-              const StepIcon =
-                item.actionKind === "edited" || item.actionKind === "created"
-                  ? FileDiff
-                  : item.actionKind === "analyzed"
-                    ? FileCode
-                    : item.step.name === "search" || item.step.name === "find_relevant"
-                      ? Search
-                      : item.step.name === "list_dir" || item.step.name === "create_dir"
-                        ? FolderOpen
-                        : Terminal;
-
-              const rowContent = (
-                <div className="flex w-full items-center gap-2 px-2 py-1 text-[12px]">
-                  <span className="z-10 flex size-4 shrink-0 items-center justify-center rounded-full bg-panel ring-2 ring-canvas">
-                    {!item.step.done ? (
-                      <Loader2 className="size-3 animate-spin text-accent" />
-                    ) : (
-                      <StepIcon
-                        className={cn(
-                          "size-3",
-                          item.actionKind === "edited" || item.actionKind === "created"
-                            ? "text-emerald-400"
-                            : item.actionKind === "analyzed"
-                              ? "text-sky-400"
-                              : "text-fg-faint",
-                        )}
-                        strokeWidth={2}
-                      />
-                    )}
-                  </span>
-
-                  <span
-                    className={cn(
-                      "shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border",
-                      item.actionKind === "edited" || item.actionKind === "created"
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                        : item.actionKind === "analyzed"
-                          ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                          : "bg-panel text-fg-dim border-line/60",
-                    )}
-                  >
-                    {item.actionLabel}
-                  </span>
-
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate font-mono text-[11.5px]",
-                      isFileAction ? "font-medium text-fg group-hover/step:text-accent" : "text-fg-dim",
-                    )}
-                    title={item.fullPath || item.rawTarget}
-                  >
-                    {item.fileName || item.rawTarget}
-                  </span>
-
-                  {(item.added > 0 || item.removed > 0) && (
-                    <div className="flex shrink-0 items-center gap-1 font-mono text-[10px]">
-                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-semibold text-emerald-400">
-                        +{item.added}
-                      </span>
-                      <span className="rounded bg-rose-500/15 px-1.5 py-0.5 font-semibold text-rose-400">
-                        −{item.removed}
-                      </span>
-                    </div>
-                  )}
-
-                  {item.stepSec !== null && (
-                    <span className="shrink-0 font-mono text-[10px] text-fg-faint tabular-nums">
-                      {item.stepSec}s
-                    </span>
-                  )}
-                </div>
-              );
-
-              return isFileAction ? (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => void handleStepClick(item)}
-                  className={cn(
-                    "group/step flex w-full items-center rounded-lg border text-left transition-all duration-100",
-                    isSelected
-                      ? "border-accent/60 bg-accent/10 shadow-sm"
-                      : "border-transparent hover:border-line/70 hover:bg-hover",
-                  )}
-                >
-                  {rowContent}
-                </button>
-              ) : (
-                <div key={item.key} className="flex w-full items-center rounded-lg">
-                  {rowContent}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    return {
+      key: `${turnId}-step-${index}`,
+      step,
+      rawTarget,
+      fullPath,
+      fileName,
+      actionLabel,
+      actionKind,
+      added,
+      removed,
+      stepSec,
+    };
+  });
 }
 
 const Turn = memo(function Turn({
@@ -1019,8 +778,47 @@ const Turn = memo(function Turn({
   }
 
   const hasThinking = Boolean(turn.thinking && turn.thinking.trim().length > 0);
-  const showStream = Boolean(turn.steps.length > 0);
   const isWaiting = Boolean(turn.streaming && !shown && turn.steps.length === 0);
+
+  const root = useWorkspace((state) => state.root) ?? "";
+
+  const enrichedSteps = useMemo(
+    () => enrichSteps(turn.steps, root, t, turn.id),
+    [turn.steps, root, t, turn.id],
+  );
+
+  const activeStep = useMemo(
+    () => enrichedSteps.find((s) => !s.step.done) ?? (turn.streaming && enrichedSteps.length > 0 ? enrichedSteps[enrichedSteps.length - 1] : null),
+    [enrichedSteps, turn.streaming],
+  );
+
+  const handleStepClick = useCallback(async (item: EnrichedStep) => {
+    if (!item.fullPath) return;
+    if (item.step.newContent !== undefined) {
+      onInspectFile({
+        key: item.key,
+        path: item.fullPath,
+        relativePath: item.rawTarget || basename(item.fullPath),
+        action: item.actionKind === "other" ? "analyzed" : item.actionKind,
+        oldContent: item.step.oldContent ?? "",
+        newContent: item.step.newContent,
+      });
+      return;
+    }
+    const read = await bridge.readFile(item.fullPath);
+    if (!read || read.error || read.content == null) {
+      onFailure(t("{name} could not be opened.", { name: item.fileName }));
+      return;
+    }
+    onInspectFile({
+      key: item.key,
+      path: item.fullPath,
+      relativePath: item.rawTarget || basename(item.fullPath),
+      action: item.actionKind === "other" ? "analyzed" : item.actionKind,
+      oldContent: item.step.oldContent ?? "",
+      newContent: read.content,
+    });
+  }, [onInspectFile, onFailure, t]);
 
   const thoughtSec = useMemo(() => {
     if (!turn.startedAt || turn.streaming) return 0;
@@ -1036,16 +834,17 @@ const Turn = memo(function Turn({
 
   return (
     <div className="group/turn relative mr-auto flex w-full flex-col gap-2 self-start py-1 text-left">
-      {showStream && (
-        <AgentActivityStream
-          turn={turn}
-          activeInspectKey={activeInspectKey}
-          onInspectFile={onInspectFile}
-          onFailure={onFailure}
-        />
+      {turn.streaming && activeStep && (
+        <div className="flex items-center gap-1.5 py-1">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-accent border border-accent/40 animate-pulse">
+            <Loader2 className="size-2.5 animate-spin text-accent" />
+            <span>{activeStep.actionLabel}</span>
+            {activeStep.fileName && <span className="font-mono text-fg-dim">{activeStep.fileName}</span>}
+          </span>
+        </div>
       )}
 
-      {isWaiting && (
+      {isWaiting && !activeStep && (
         <div className="flex items-center gap-1.5 py-2 px-1 select-none" aria-label="Thinking">
           <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
           <span className="size-2 rounded-full bg-accent/80 wide-wave-dot" />
@@ -1060,7 +859,7 @@ const Turn = memo(function Turn({
         </div>
       )}
 
-      {!turn.streaming && (shown || last || (turn.usage && turn.usage.total > 0) || thoughtSec > 0) && (
+      {!turn.streaming && (shown || last || (turn.usage && turn.usage.total > 0) || thoughtSec > 0 || enrichedSteps.length > 0) && (
         <div className="flex items-center gap-1.5 pt-0.5">
           {shown && (
             <button
@@ -1095,7 +894,45 @@ const Turn = memo(function Turn({
               <span className="hidden sm:inline">{t("Regenerate")}</span>
             </button>
           )}
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+            {enrichedSteps.map((item) => {
+              const isFileAction = Boolean(item.fullPath);
+              const isSelected = activeInspectKey === item.key;
+              if (isFileAction) {
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => void handleStepClick(item)}
+                    title={item.fullPath}
+                    className={cn(
+                      "flex items-center gap-1 rounded-full bg-panel px-2.5 py-0.5 text-[10px] border transition-colors cursor-pointer",
+                      isSelected
+                        ? "border-accent text-accent bg-accent/10"
+                        : "text-fg-faint border-line/50 hover:text-fg hover:border-line",
+                    )}
+                  >
+                    <span>{item.actionLabel}</span>
+                    <span className="font-mono text-fg-dim">{item.fileName}</span>
+                    {(item.added > 0 || item.removed > 0) && (
+                      <span className="font-mono font-medium text-emerald-400">+{item.added}</span>
+                    )}
+                    {item.removed > 0 && (
+                      <span className="font-mono font-medium text-rose-400">−{item.removed}</span>
+                    )}
+                  </button>
+                );
+              }
+              return (
+                <span
+                  key={item.key}
+                  className="flex items-center gap-1 rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-fg-faint border border-line/50"
+                >
+                  <span>{item.actionLabel}</span>
+                  {item.fileName && <span className="font-mono text-fg-dim truncate max-w-[120px]">{item.fileName}</span>}
+                </span>
+              );
+            })}
             {thoughtSec > 0 && (
               hasThinking ? (
                 <button
