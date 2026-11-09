@@ -11,6 +11,7 @@
   <a href="https://github.com/sl4de0day/wide-cli">Wide CLI</a> ·
   <a href="https://github.com/sl4de0day/wide-app">Wide App</a> ·
   <a href="https://github.com/sl4de0day/wide-sdk">Wide SDK</a> ·
+  <a href="https://github.com/sl4de0day/wide-action">Wide Action</a> ·
   <a href="LICENSE">License</a>
 </p>
 
@@ -90,13 +91,10 @@ Requirements:
 npm install
 npm run build:linux
 
-# Produce specific package format:
-npm run package:appimage   # Generates .AppImage
-npm run package:deb        # Generates .deb
-npm run package:rpm        # Generates .rpm
-npm run package:arch       # Generates Arch Linux .pkg.tar.zst
-
-# Or produce all formats at once:
+npm run package:appimage
+npm run package:deb
+npm run package:rpm
+npm run package:arch
 npm run package:all
 ```
 
