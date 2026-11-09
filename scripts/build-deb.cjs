@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const cp = require('node:child_process');
 const crypto = require('node:crypto');
@@ -9,7 +9,7 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
 const SOURCE_DIR = path.join(DIST, 'wide-linux-x64');
-const VERSION = '1.681126';
+const VERSION = '1.791126';
 const DEB_NAME = `wide-ide_${VERSION}_amd64.deb`;
 const DEB_OUT = path.join(DIST, DEB_NAME);
 const STAGE = path.join(DIST, '.deb-staging');

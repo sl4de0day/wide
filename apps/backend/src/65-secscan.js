@@ -135,23 +135,43 @@ function registerSecScanHandlers() {
     customRules: [],
   };
 
+  const SEC_DEFAULT_CACHE_DIR = node_path.join(node_os.homedir(), ".wide", "rules");
+  const SEC_DEFAULT_CACHE_FILE = node_path.join(SEC_DEFAULT_CACHE_DIR, "rules.json");
+  const SEC_REMOTE_RULES_URL = "https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/rules.json";
+
   function parseCustomRules(list) {
-    if (!Array.isArray(list)) return [];
+    if (!list) return [];
+    if (!Array.isArray(list)) {
+      if (typeof list === "object" && Array.isArray(list.rules)) {
+        list = list.rules;
+      } else {
+        return [];
+      }
+    }
     const out = [];
     for (const raw of list) {
-      if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || typeof raw.pattern !== "string") continue;
+      if (!raw || typeof raw !== "object" || typeof raw.id !== "string") continue;
+      const pat = raw.pattern || raw.text || raw.match;
+      if (typeof pat !== "string" || !pat) continue;
       let re;
       try {
-        re = new RegExp(raw.pattern, typeof raw.flags === "string" ? raw.flags.replace(/[^gimsuy]/g, "") : "");
+        re = new RegExp(pat, typeof raw.flags === "string" ? raw.flags.replace(/[^gimsuy]/g, "") : "");
       } catch {
         continue;
       }
-      const langs = Array.isArray(raw.langs) && raw.langs.length ? raw.langs.filter((v) => typeof v === "string") : EVERY_LANG;
+      const rawLangs = raw.languages || raw.langs;
+      const langs = Array.isArray(rawLangs) && rawLangs.length
+        ? rawLangs.filter((v) => typeof v === "string")
+        : EVERY_LANG;
+      let sev = String(raw.severity || "warning").toLowerCase();
+      if (sev === "critical" || sev === "high") sev = "error";
+      else if (sev === "medium") sev = "warning";
+      else if (sev === "low") sev = "info";
       out.push({
-        id: `custom/${raw.id}`,
+        id: raw.id.startsWith("wide/") || raw.id.startsWith("custom/") ? raw.id : `custom/${raw.id}`,
         langs,
         re,
-        severity: ["info", "low", "medium", "high", "critical", "warning", "error"].includes(raw.severity) ? raw.severity : "warning",
+        severity: ["info", "warning", "error"].includes(sev) ? sev : "warning",
         confidence: ["low", "medium", "high"].includes(raw.confidence) ? raw.confidence : "medium",
         cwe: typeof raw.cwe === "string" ? raw.cwe : "",
         message: typeof raw.message === "string" && raw.message ? raw.message : raw.id,
@@ -159,6 +179,30 @@ function registerSecScanHandlers() {
       });
     }
     return out;
+  }
+
+  async function updateRulesFromRemote() {
+    await promises.mkdir(SEC_DEFAULT_CACHE_DIR, { recursive: true });
+    return new Promise((resolve, reject) => {
+      node_https.get(SEC_REMOTE_RULES_URL, { headers: { "User-Agent": "Wide-IDE/1.791126" } }, (res) => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`Failed to download rules: HTTP ${res.statusCode}`));
+          return;
+        }
+        let data = "";
+        res.on("data", (chunk) => { data += chunk; });
+        res.on("end", async () => {
+          try {
+            const parsed = JSON.parse(data);
+            await writeFileAtomic(SEC_DEFAULT_CACHE_FILE, JSON.stringify(parsed, null, 2), "utf8");
+            const count = Array.isArray(parsed) ? parsed.length : Array.isArray(parsed.rules) ? parsed.rules.length : 0;
+            resolve(count);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }).on("error", reject);
+    });
   }
 
   async function readSecConfig(root) {
@@ -171,8 +215,27 @@ function registerSecScanHandlers() {
     } catch {
       void 0;
     }
+
+    const wsRulesFile = node_path.join(root, ".wide", "rules.json");
+    let wsRulesStamp = "none";
+    try {
+      const stat = await promises.stat(wsRulesFile);
+      wsRulesStamp = `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      void 0;
+    }
+
+    let cacheStamp = "none";
+    try {
+      const stat = await promises.stat(SEC_DEFAULT_CACHE_FILE);
+      cacheStamp = `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      void 0;
+    }
+
+    const compositeStamp = `${stamp}:${wsRulesStamp}:${cacheStamp}`;
     const cached = SEC_CONFIG_CACHE.get(root);
-    if (cached && cached.stamp === stamp) return cached.config;
+    if (cached && cached.stamp === compositeStamp) return cached.config;
 
     let parsed = {};
     if (stamp !== "none") {
@@ -183,6 +246,26 @@ function registerSecScanHandlers() {
       }
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) parsed = {};
+
+    let dynamicRules = [];
+    if (wsRulesStamp !== "none") {
+      try {
+        const raw = JSON.parse(await promises.readFile(wsRulesFile, "utf8"));
+        dynamicRules = parseCustomRules(raw);
+      } catch {
+        dynamicRules = [];
+      }
+    } else if (cacheStamp !== "none") {
+      try {
+        const raw = JSON.parse(await promises.readFile(SEC_DEFAULT_CACHE_FILE, "utf8"));
+        dynamicRules = parseCustomRules(raw);
+      } catch {
+        dynamicRules = [];
+      }
+    }
+
+    const secCustomRules = parseCustomRules(parsed.rules);
+    const combinedCustom = [...dynamicRules, ...secCustomRules];
 
     const config = {
       disable: new Set(
@@ -198,9 +281,9 @@ function registerSecScanHandlers() {
         .filter(Boolean),
       includeTests: parsed.includeTests === true,
       minConfidence: SEC_RANK[parsed.minConfidence] === undefined ? "low" : parsed.minConfidence,
-      customRules: parseCustomRules(parsed.rules),
+      customRules: combinedCustom,
     };
-    SEC_CONFIG_CACHE.set(root, { stamp, config });
+    SEC_CONFIG_CACHE.set(root, { stamp: compositeStamp, config });
     return config;
   }
 
@@ -3716,5 +3799,61 @@ function registerSecScanHandlers() {
       return { ok: false, error: String((error && error.message) || error) };
     }
     return { ok: true, count: fingerprints.length };
+  });
+
+  electron.ipcMain.handle("security:loadRules", async (_event, root) => {
+    if (root) {
+      const wsFile = node_path.join(root, ".wide", "rules.json");
+      try {
+        const raw = JSON.parse(await promises.readFile(wsFile, "utf8"));
+        const rules = parseCustomRules(raw);
+        if (rules.length > 0) return { ok: true, source: wsFile, count: rules.length };
+      } catch {
+        void 0;
+      }
+    }
+    try {
+      const raw = JSON.parse(await promises.readFile(SEC_DEFAULT_CACHE_FILE, "utf8"));
+      const rules = parseCustomRules(raw);
+      if (rules.length > 0) return { ok: true, source: SEC_DEFAULT_CACHE_FILE, count: rules.length };
+    } catch {
+      void 0;
+    }
+    return { ok: true, source: "embedded", count: RULES.length };
+  });
+
+  electron.ipcMain.handle("security:updateRules", async () => {
+    try {
+      const count = await updateRulesFromRemote();
+      return { ok: true, count };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  electron.ipcMain.handle("security:rulesPath", async (_event, root) => {
+    const wsPath = root ? node_path.join(root, ".wide", "rules.json") : null;
+    let active = null;
+    if (wsPath) {
+      try {
+        await promises.access(wsPath);
+        active = wsPath;
+      } catch {
+        void 0;
+      }
+    }
+    if (!active) {
+      try {
+        await promises.access(SEC_DEFAULT_CACHE_FILE);
+        active = SEC_DEFAULT_CACHE_FILE;
+      } catch {
+        void 0;
+      }
+    }
+    return {
+      active: active || "embedded",
+      workspace: wsPath,
+      cache: SEC_DEFAULT_CACHE_FILE,
+    };
   });
 }

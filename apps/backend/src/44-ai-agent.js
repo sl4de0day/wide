@@ -307,6 +307,46 @@ const AI_TOOLS = [
       required: ["action"],
     },
   },
+  {
+    name: "decision_score",
+    description: "Score and select the optimal candidate among alternatives using DecisionCore multi-criteria weighted scoring.",
+    parameters: {
+      type: "object",
+      properties: {
+        candidates: { type: "array", items: { type: "object" }, description: "Array of candidate objects to score." },
+        criteria: { type: "array", items: { type: "object" }, description: "Array of criteria with field name and weight." },
+        threshold: { type: "number", description: "Minimum acceptance threshold (defaults to 0.5)." }
+      },
+      required: ["candidates", "criteria"]
+    }
+  },
+  {
+    name: "decision_consensus",
+    description: "Form an unweighted multi-agent consensus across discrete choices using DecisionCore PluralityConsensus.",
+    parameters: {
+      type: "object",
+      properties: {
+        classesCount: { type: "number", description: "Number of discrete choices/classes." },
+        votes: { type: "array", items: { type: "object" }, description: "Array of votes with voterId and choice." },
+        minVotes: { type: "number", description: "Minimum required votes to settle." }
+      },
+      required: ["votes"]
+    }
+  },
+  {
+    name: "decision_claim",
+    description: "Acquire or check an exclusive lease on a shared resource slot using DecisionCore ClaimTable.",
+    parameters: {
+      type: "object",
+      properties: {
+        holderId: { type: "number", description: "Unique numeric identifier of the holder." },
+        bid: { type: "number", description: "Bid priority value." },
+        lifetime: { type: "number", description: "Lease duration in seconds." },
+        capacity: { type: "number", description: "Maximum concurrent allowed holders." }
+      },
+      required: ["holderId"]
+    }
+  },
 ];
 
 const AI_WRITE_TOOLS = new Set(["write_file", "edit_file", "create_dir", "delete_file", "run_command"]);
@@ -1919,6 +1959,40 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       return await aiExecuteManageCatcher(input.action, input.intercept, input.limit);
     }
 
+    if (name === "decision_score") {
+      const candidates = Array.isArray(input.candidates) ? input.candidates : [];
+      const criteria = Array.isArray(input.criteria) ? input.criteria : [];
+      if (candidates.length === 0) return "decision_score requires non-empty candidates array.";
+      const scorer = new DecisionWeightedScorer(
+        criteria.map((cr) => ({
+          weight: Number(cr.weight || 1.0),
+          term: (idx) => Number(candidates[idx]?.[cr.field] ?? 0.0)
+        }))
+      );
+      const sel = scorer.trySelect(candidates.length, Number(input.threshold || 0.5));
+      return JSON.stringify({ ok: true, bestIndex: sel.best, score: sel.score, success: sel.success });
+    }
+
+    if (name === "decision_consensus") {
+      const votes = Array.isArray(input.votes) ? input.votes : [];
+      const count = Number(input.classesCount || 4);
+      const c = new DecisionConsensus(count, Math.max(16, votes.length), Number(input.windowSec || 6.0), Number(input.minVotes || 1));
+      const now = Date.now() / 1000.0;
+      for (const v of votes) c.vote(Number(v.voterId || 1), Number(v.choice || 0), now);
+      const settled = c.resolve(now);
+      return JSON.stringify({ ok: true, settled, agreedClass: c.value });
+    }
+
+    if (name === "decision_claim") {
+      const holderId = Number(input.holderId || 1);
+      const bid = Number(input.bid || 1.0);
+      const lifetime = Number(input.lifetime || 10.0);
+      const capacity = Number(input.capacity || 1);
+      const now = Date.now() / 1000.0;
+      const ok = aiDecisionHub.claims.tryClaim(holderId, bid, lifetime, now, capacity);
+      return JSON.stringify({ ok, occupancy: aiDecisionHub.claims.occupancy(now) });
+    }
+
     return `There is no tool called ${name}.`;
   } catch (error) {
     return `That tool failed: ${String(error.message || error)}`;
@@ -1993,8 +2067,21 @@ async function aiRunTurn({ provider, model, key, root, system, messages, allowWr
 
     const latestUserText = aiGetLatestUserText(history);
 
+    const callCounts = new Map();
     for (const call of calls) {
       const norm = aiNormalizeToolCall(call.name, call.input);
+      const sig = `${norm.name}:${JSON.stringify(norm.input || {})}`;
+      const count = (callCounts.get(sig) || 0) + 1;
+      callCounts.set(sig, count);
+
+      if (count > 3) {
+        const errorResult = "DecisionCore CommitmentGate: Repeated identical tool invocation suppressed to prevent oscillation. Please synthesize your findings and proceed.";
+        send({ type: "tool_start", id: call.id, name: norm.name, input: norm.input });
+        send({ type: "tool_end", id: call.id, name: norm.name, result: errorResult });
+        history.push(aiToolResultTurn(provider, call, errorResult));
+        continue;
+      }
+
       send({ type: "tool_start", id: call.id, name: norm.name, input: norm.input });
       const result = call.truncated
         ? `The call to ${norm.name} arrived cut off, so nothing was done. Send the call again with the complete argument object.`

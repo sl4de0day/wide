@@ -381,9 +381,13 @@ export default function App() {
       void bridge
         .readFile(`${root}/.wide/rules.json`)
         .then((file) => {
-          const parsed = parseProjectRules(file?.content ?? "");
-          setProjectRules(parsed.rules);
-          for (const error of parsed.errors) console.warn(`[inspections] ${error}`);
+          if (file?.content) {
+            const parsed = parseProjectRules(file.content);
+            setProjectRules(parsed.rules);
+            for (const error of parsed.errors) console.warn(`[inspections] ${error}`);
+          } else {
+            setProjectRules([]);
+          }
         })
         .catch(() => setProjectRules([]));
 

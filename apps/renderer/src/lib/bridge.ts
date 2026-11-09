@@ -955,6 +955,12 @@ export interface HostApi {
   securityRescanFile(root: string, file: string, content?: string): Promise<{ findings: ProjectScanFinding[] }>;
   securityExport(root: string, format: "sarif" | "json"): Promise<Ok & { format?: string; text?: string; count?: number }>;
   securityBaseline(root: string, action: "set" | "clear"): Promise<Ok & { count?: number }>;
+  securityLoadRules(root?: string): Promise<Ok<{ source?: string; count?: number }>>;
+  securityUpdateRules(): Promise<Ok<{ count?: number }>>;
+  securityRulesPath(root?: string): Promise<{ active: string; workspace: string | null; cache: string }>;
+  decisionConsensus(options?: unknown): Promise<Ok<{ settled?: boolean; value?: number }>>;
+  decisionClaim(options?: unknown): Promise<Ok<{ occupancy?: number }>>;
+  decisionScore(options?: unknown): Promise<Ok<{ bestIndex?: number; score?: number; success?: boolean }>>;
   tsDocumentHighlights(root: string, file: string, position: number): Promise<{ spans: CodeSpan[] }>;
   tsSignatureHelp(root: string, file: string, position: number): Promise<SignatureHelp>;
 
@@ -1500,6 +1506,12 @@ const fallback = {
   securityRescanFile: async () => (warn(), { findings: [] }),
   securityExport: async () => (warn(), { ok: false, error: "No bridge" }),
   securityBaseline: async () => (warn(), { ok: false, error: "No bridge" }),
+  securityLoadRules: async () => (warn(), { ok: false, error: "No bridge" }),
+  securityUpdateRules: async () => (warn(), { ok: false, error: "No bridge" }),
+  securityRulesPath: async () => (warn(), { active: "embedded", workspace: null, cache: "" }),
+  decisionConsensus: async () => (warn(), { ok: false, error: "No bridge" }),
+  decisionClaim: async () => (warn(), { ok: false, error: "No bridge" }),
+  decisionScore: async () => (warn(), { ok: false, error: "No bridge" }),
   tsDocumentHighlights: async () => (warn(), { spans: [] }),
   tsSignatureHelp: async () => (warn(), { signatures: null }),
   tsNavigationTree: async () => (warn(), { tree: null }),

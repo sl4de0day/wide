@@ -81,15 +81,18 @@ function runNodePass(view: EditorView, rules: Rule[], ext: string, securityOn: b
 interface ProjectRule {
   id?: string;
   languages?: string[];
+  langs?: string[];
   severity?: string;
   category?: string;
   node?: string;
   match?: string;
   within?: string;
   text?: string;
+  pattern?: string;
   notMatch?: string;
   message?: string;
   why?: string;
+  remediation?: string;
   fix?: string;
   cwe?: string;
 }
@@ -102,25 +105,30 @@ export function parseProjectRules(source: string): { rules: Rule[]; errors: stri
   } catch (error) {
     return { rules: [], errors: [`.wide/rules.json is not valid JSON: ${(error as Error).message}`] };
   }
-  if (!Array.isArray(raw)) {
+  let list: ProjectRule[];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (raw && typeof raw === "object" && Array.isArray((raw as { rules?: unknown }).rules)) {
+    list = (raw as { rules: ProjectRule[] }).rules;
+  } else {
     return { rules: [], errors: [".wide/rules.json must be a list of rules."] };
   }
 
   const rules: Rule[] = [];
-  raw.forEach((entry: ProjectRule, index) => {
-
+  list.forEach((entry: ProjectRule, index) => {
     if (!entry || typeof entry !== "object") {
       errors.push(`rule ${index + 1} is not an object.`);
       return;
     }
     const where = entry.id ? `rule "${entry.id}"` : `rule ${index + 1}`;
-
-    if ((!entry.node && !entry.text) || (!entry.match && !entry.text) || !entry.message) {
+    const textPattern = entry.text || entry.pattern;
+    if ((!entry.node && !textPattern) || (!entry.match && !textPattern) || !entry.message) {
       errors.push(`${where} needs "message" and either "node"+"match" or "text".`);
       return;
     }
 
-    if (entry.languages !== undefined && !Array.isArray(entry.languages)) {
+    const rawLangs = entry.languages || entry.langs;
+    if (rawLangs !== undefined && !Array.isArray(rawLangs)) {
       errors.push(`${where} has a "languages" that is not a list.`);
       return;
     }
@@ -129,16 +137,23 @@ export function parseProjectRules(source: string): { rules: Rule[]; errors: stri
     let notMatch: RegExp | undefined;
     try {
       if (entry.match) match = new RegExp(entry.match);
-      if (entry.text) text = new RegExp(entry.text);
+      if (textPattern) text = new RegExp(textPattern);
       if (entry.notMatch) notMatch = new RegExp(entry.notMatch);
     } catch (error) {
       errors.push(`${where} has an invalid pattern: ${(error as Error).message}`);
       return;
     }
+    let sev: "error" | "warning" | "info" = "warning";
+    if (entry.severity) {
+      const s = String(entry.severity).toLowerCase();
+      if (s === "critical" || s === "high" || s === "error") sev = "error";
+      else if (s === "low" || s === "info") sev = "info";
+      else sev = "warning";
+    }
     rules.push({
       id: entry.id ?? `project/rule-${index + 1}`,
-      languages: entry.languages ?? [],
-      severity: entry.severity === "error" ? "error" : entry.severity === "info" ? "info" : "warning",
+      languages: rawLangs ?? [],
+      severity: sev,
       category: entry.category === "quality" ? "quality" : "security",
       node: entry.node,
       match,
@@ -146,7 +161,7 @@ export function parseProjectRules(source: string): { rules: Rule[]; errors: stri
       text,
       notMatch,
       message: entry.message,
-      why: entry.why ?? "",
+      why: entry.why ?? entry.remediation ?? "",
       fix: entry.fix,
       cwe: entry.cwe,
     });

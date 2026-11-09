@@ -282,6 +282,41 @@ async function checkCustomRules() {
   const bad = await invoke('security:testRule', ['(', '', 'x']);
   report(bad.result?.ok === false, 'security:testRule rejects an invalid pattern');
 
+  fsSync.writeFileSync(
+    pathSync.join(dir, '.wide', 'rules.json'),
+    JSON.stringify([
+      { id: 'wide/dynamic-sink', pattern: 'dynamicSink\\(', message: 'Dynamic sink detected', severity: 'CRITICAL', languages: ['js'] }
+    ]),
+    'utf8'
+  );
+  fsSync.writeFileSync(pathSync.join(dir, 'src', 'dyn.js'), 'dynamicSink(input);\n', 'utf8');
+
+  const dynScan = await invoke('security:scanProject', [dir]);
+  const dynFindings = dynScan.result?.findings ?? [];
+  report(dynFindings.some((f) => f.ruleId === 'wide/dynamic-sink'), 'dynamic rule from rules.json fires');
+
+  const loaded = await invoke('security:loadRules', [dir]);
+  report(loaded.result?.ok === true && loaded.result.count >= 1, 'security:loadRules returns workspace rules');
+
+  const rPath = await invoke('security:rulesPath', [dir]);
+  report(rPath.result?.workspace !== null, 'security:rulesPath detects workspace rules path');
+
+  const cons = await invoke('decision:consensus', [{
+    classesCount: 4,
+    votes: [{ voterId: 1, choice: 2 }, { voterId: 2, choice: 2 }, { voterId: 3, choice: 0 }]
+  }]);
+  report(cons.result?.settled === true && cons.result.value === 2, 'decision:consensus resolves plurality vote');
+
+  const claim = await invoke('decision:claim', [{ holderId: 10, bid: 1.0, lifetime: 5.0, capacity: 1 }]);
+  report(claim.result?.ok === true, 'decision:claim acquires exclusive lease');
+
+  const sc = await invoke('decision:score', [{
+    candidates: [{ relevance: 0.9, speed: 0.8 }, { relevance: 0.4, speed: 0.95 }],
+    criteria: [{ field: 'relevance', weight: 0.7 }, { field: 'speed', weight: 0.3 }],
+    threshold: 0.5
+  }]);
+  report(sc.result?.success === true && sc.result.bestIndex === 0, 'decision:score selects highest-scoring candidate');
+
   try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
   return failed;
 }
