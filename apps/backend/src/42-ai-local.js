@@ -147,7 +147,7 @@ async function ollamaStartServer(at, signal) {
       return {
         ok: false,
         state: "failed",
-        error: "Ollama başlatıldı fakat belirlenen sürede yanıt vermedi. Lütfen Ollama uygulamasının arka planda çalıştığından emin olun.",
+        error: "Ollama started but did not respond within timeout. Please ensure Ollama is running in the background.",
       };
     })().finally(() => {
       ollamaStartInFlight = null;
@@ -190,7 +190,7 @@ async function ollamaEnsure(track, signal, { allowInstall = false } = {}) {
       return {
         ok: false,
         state: "missing",
-        error: bootstrap.detail || "Ollama kurulumu başarısız oldu. Lütfen https://ollama.com adresinden manuel kurmayı deneyin.",
+        error: bootstrap.detail || "Ollama installation failed. Please install manually from https://ollama.com.",
       };
     }
     at = bootstrap.path || (await findOllamaBinary());
@@ -198,7 +198,7 @@ async function ollamaEnsure(track, signal, { allowInstall = false } = {}) {
       return {
         ok: false,
         state: "missing",
-        error: "Ollama kuruldu fakat çalıştırılabilir dosya bulunamadı. Lütfen https://ollama.com adresini kontrol edin.",
+        error: "Ollama installed but executable was not found. Please verify https://ollama.com installation.",
       };
     }
   }

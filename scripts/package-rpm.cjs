@@ -11,11 +11,11 @@ const SOURCE_DIR = path.join(DIST, 'wide-linux-x64');
 const VERSION = require(path.join(ROOT, 'package.json')).version || '1.681126';
 
 if (!fs.existsSync(SOURCE_DIR)) {
-  console.log('[rpm] wide-linux-x64 bulunamadı, önce hazırlanıyor...');
+  console.log('[rpm] wide-linux-x64 not found, preparing first...');
   cp.execSync('node scripts/package-linux.cjs --dir-only', { stdio: 'inherit', cwd: ROOT });
 }
 
-console.log(`[rpm] RPM paketi hazırlanıyor (v${VERSION})...`);
+console.log(`[rpm] Preparing RPM package (v${VERSION})...`);
 
 const RPM_ROOT = path.join(DIST, '.rpm-staging');
 fs.rmSync(RPM_ROOT, { recursive: true, force: true });
@@ -95,7 +95,7 @@ try {
       const src = path.join(rpmsDir, f);
       const dest = path.join(DIST, f);
       fs.copyFileSync(src, dest);
-      console.log(`✓ [rpm] Başarıyla üretildi: ${dest} (${(fs.statSync(dest).size / (1024 * 1024)).toFixed(1)} MB)`);
+      console.log(`[rpm] Successfully built: ${dest} (${(fs.statSync(dest).size / (1024 * 1024)).toFixed(1)} MB)`);
     }
   }
 } finally {

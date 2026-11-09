@@ -48,7 +48,7 @@ import { CrashReportDialog } from "./components/CrashReportDialog";
 import { useTelemetry } from "./stores/telemetry";
 import { useDiagnostics } from "./stores/diagnostics";
 import { subscribeFindingsProject, useFindings } from "./stores/findings";
-import { SETTINGS_PATH, useEditor } from "./stores/editor";
+import { AI_CHAT_PATH, SETTINGS_PATH, useEditor } from "./stores/editor";
 import { subscribeAiEvents, subscribeAiPulls, useAi } from "./stores/ai";
 import { subscribeProxyTraffic } from "./stores/proxy";
 import { subscribeOast } from "./stores/oast";
@@ -201,7 +201,7 @@ export default function App() {
 
   const hasFileTab = useEditor((state) =>
     state.tabs.some(
-      (tab) => tab.kind === "file" || tab.kind === "catcher" || tab.kind === "pitcher" || tab.kind === "browser" || tab.kind === "scratchpad",
+      (tab) => tab.kind === "file" || tab.kind === "catcher" || tab.kind === "pitcher" || tab.kind === "browser" || tab.kind === "scratchpad" || tab.kind === "ai-chat",
     ),
   );
   const closeTab = useEditor((state) => state.closeTab);
@@ -475,6 +475,49 @@ export default function App() {
     bridge.requestPendingOpenPath();
     return off;
   }, []);
+
+  useEffect(() => {
+    let checking = false;
+    const checkActiveChat = () => {
+      if (checking) return;
+      checking = true;
+      void bridge.aiActiveChat().then((res) => {
+        checking = false;
+        const chat = res?.ok ? res.activeChat : null;
+        if (!chat || !chat.id) return;
+        const age = Date.now() - (chat.timestamp || 0);
+        if (age > 120000) return;
+        const curRoot = useWorkspace.getState().root;
+        const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+        const matchesRoot = !chat.root || !curRoot || norm(chat.root) === norm(curRoot);
+        if (!curRoot && chat.root) {
+          void useWorkspace.getState().openTarget(chat.root);
+        }
+        if (matchesRoot) {
+          const activePath = useEditor.getState().activePath;
+          const expectedPath = `${AI_CHAT_PATH}${chat.id}`;
+          if (activePath !== expectedPath) {
+            useEditor.getState().openAiChat(chat.id, chat.title || t("New conversation"));
+            setActiveSide("ai");
+          }
+        } else if (chat.root) {
+          void useWorkspace.getState().openTarget(chat.root);
+        }
+      }).catch(() => {
+        checking = false;
+      });
+    };
+
+    checkActiveChat();
+    const t1 = setTimeout(checkActiveChat, 500);
+    const t2 = setTimeout(checkActiveChat, 1500);
+    window.addEventListener("focus", checkActiveChat);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener("focus", checkActiveChat);
+    };
+  }, [root, t]);
 
   useEffect(() => {
     const offState = bridge.onBackendState(({ state }) => {

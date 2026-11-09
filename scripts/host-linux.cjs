@@ -63,7 +63,7 @@ function getBrowserSession() {
   browserSession = session.fromPartition('persist:wide-browser');
 
   browserSession.setCertificateVerifyProc((_request, callback) => {
-    callback(0); // 0 = SSL sertifikasını kabul et / güven
+    callback(0);
   });
 
   return browserSession;

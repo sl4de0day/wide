@@ -228,7 +228,7 @@ function systemPrompt(instructions = "", effort: AiEffort = "fast", activeFile?:
     it: "Italian", ja: "Japanese", ko: "Korean",
   };
   const langLine = language !== "en" && LANGUAGE_NAMES[language]
-    ? `Always respond in ${LANGUAGE_NAMES[language]}. Tüm yanıtlarda, teknik açıklamalarda ve özetlerde daima ${LANGUAGE_NAMES[language]} dilini kullan.`
+    ? `Always respond in ${LANGUAGE_NAMES[language]}. Use ${LANGUAGE_NAMES[language]} for all explanations, summaries, and responses.`
     : "";
 
   const openTabs = useEditor.getState().tabs
@@ -257,7 +257,7 @@ function systemPrompt(instructions = "", effort: AiEffort = "fast", activeFile?:
     "- Catcher: Control the intercepting proxy, check status, view captured traffic, and toggle intercept with `manage_catcher` and reveal with `open_tool_tab({ tab: 'catcher', subtool: 'proxy' })`.",
     "- Security: Trigger AST vulnerability scans with `run_security_scan` and CVE audits with `check_dependencies`.",
     "- Decoder: Encode/decode/hash data with `transform_data` and inspect errors with `get_diagnostics`.",
-    "NEVER tell the user 'I cannot click Pitcher/Catcher in the UI' or 'Pitcher/Catcher'ı doğrudan UI üzerinden tıklayamam'. You DO NOT need to click UI buttons; you operate them directly via your tools!",
+    "NEVER tell the user 'I cannot click Pitcher/Catcher in the UI' or . You DO NOT need to click UI buttons; you operate them directly via your tools!",
     "When the user asks you to write code, test an endpoint, or demonstrate Pitcher and Catcher, actively invoke your tools (send_http_request, manage_catcher, open_tool_tab, write_file, edit_file) instead of giving passive instructions.",
     "When the user asks you to write a script, create a file, implement code, fix a bug, or modify the project, DO NOT write the code in the chat window as a message. You MUST use write_file or edit_file to create or modify the actual files in the project workspace.",
     "If the user asks to write a script or code without naming a file, choose a sensible filename in the project and call write_file to create it on disk.",

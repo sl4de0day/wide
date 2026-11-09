@@ -8,6 +8,8 @@ const AI_KEYS_BACKUP_FILE = () =>
   node_path.join(electron.app.getPath("userData"), "ai-keys.json");
 const AI_SESSION_DIR = () =>
   node_path.join(electron.app.getPath("userData"), "ai-sessions");
+const AI_ACTIVE_CHAT_FILE = () =>
+  node_path.join(electron.app.getPath("userData"), "active-chat.json");
 
 const AI_PROVIDERS = new Set(["gemini", "deepseek", "claude"]);
 
@@ -312,5 +314,31 @@ function registerAiStoreHandlers() {
 
     }
     return { ok: true };
+  });
+
+  electron.ipcMain.handle("ai:activeChat", async (_event, payload) => {
+    const gate = await requireInstalled("ai-assistant");
+    if (gate) return gate;
+    const file = AI_ACTIVE_CHAT_FILE();
+    if (payload && typeof payload === "object" && payload.id) {
+      try {
+        const record = {
+          id: String(payload.id),
+          root: String(payload.root || ""),
+          title: String(payload.title || ""),
+          timestamp: Date.now(),
+        };
+        await writeFileAtomic(file, JSON.stringify(record, null, 2), "utf8");
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    }
+    try {
+      const data = await promises.readFile(file, "utf8");
+      return { ok: true, activeChat: JSON.parse(data) };
+    } catch {
+      return { ok: true, activeChat: null };
+    }
   });
 }

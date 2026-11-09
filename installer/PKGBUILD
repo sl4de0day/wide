@@ -16,7 +16,7 @@ depends=(
 )
 optdepends=(
   'git: Source control entegrasyonu'
-  'nodejs: Gelişmiş dil sunucuları ve npm araçları'
+  'nodejs: Language servers and npm tools'
   'python: Python analizi ve debug motoru'
 )
 provides=('wide' 'wide-ide')

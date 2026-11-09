@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Wide
 Comment=Security-first IDE for the web stack
-Exec=/home/sl4de/İndirilenler/wide-main/wide.sh %F
+Exec=/usr/bin/wide %F
 Icon=wide
 Terminal=false
 Type=Application

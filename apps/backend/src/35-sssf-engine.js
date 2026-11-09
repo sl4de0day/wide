@@ -1221,7 +1221,7 @@ capability ipc.default {
   audit always
 }
 `;
-const ROOT_SOURCES =  new Set(["dialog:openFolder", "workspace:openRecent"]);
+const ROOT_SOURCES =  new Set(["dialog:openFolder", "workspace:openRecent", "workspace:openTarget"]);
 
 const WORKFLOW_SOURCES =  new Set(["workflow:open", "workflow:create", "workflow:setFolders"]);
 const state = {

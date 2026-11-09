@@ -9,16 +9,16 @@ const DIST = path.join(ROOT, 'dist');
 const OUT_DIR = path.join(DIST, 'wide-linux-x64');
 const ELECTRON_DIST = path.join(ROOT, 'node_modules', 'electron', 'dist');
 
-console.log('== [1/5] Kontroller ve Hazırlık ==');
+console.log('== [1/5] Checks and Preparation ==');
 if (!fs.existsSync(ELECTRON_DIST)) {
-  console.error('Electron dağıtımı bulunamadı. Lütfen "npm install" çalıştırın.');
+  console.error('Electron distribution not found. Please run "npm install".');
   process.exit(1);
 }
 
 const mainOut = path.join(ROOT, 'out', 'main', 'index.js');
 const rendererOut = path.join(ROOT, 'out', 'renderer', 'index.html');
 if (!fs.existsSync(mainOut) || !fs.existsSync(rendererOut)) {
-  console.log('Derlenmiş dosyalar eksik, derleme başlatılıyor...');
+  console.log('Compiled files missing, building...');
   cp.execSync('npm run build:linux', { cwd: ROOT, stdio: 'inherit' });
 }
 
@@ -27,7 +27,7 @@ if (fs.existsSync(OUT_DIR)) {
 }
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-console.log('== [2/5] Electron Çalışma Zamanı Kopyalanıyor ==');
+console.log('== [2/5] Copying Electron Runtime ==');
 fs.cpSync(ELECTRON_DIST, OUT_DIR, { recursive: true });
 
 const origBinary = path.join(OUT_DIR, 'electron');
@@ -37,7 +37,7 @@ if (fs.existsSync(origBinary)) {
   fs.chmodSync(wideBinary, 0o755);
 }
 
-console.log('== [3/5] Uygulama Dosyaları ve Bağımlılıklar Paketleniyor ==');
+console.log('== [3/5] Packaging App Files and Dependencies ==');
 const APP_DIR = path.join(OUT_DIR, 'resources', 'app');
 fs.mkdirSync(APP_DIR, { recursive: true });
 
@@ -110,25 +110,25 @@ fs.chmodSync(launcherPath, 0o755);
 fs.copyFileSync(path.join(ROOT, 'wide.desktop'), path.join(OUT_DIR, 'wide.desktop'));
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(OUT_DIR, 'wide.png'));
 
-console.log('== [4/5] Taşınabilir Arşivler Üretiliyor ==');
+console.log('== [4/5] Creating Portable Archives ==');
 const tarGzName = `wide-${version}-linux-x64.tar.gz`;
 const tarGzPath = path.join(DIST, tarGzName);
 try {
   cp.execSync(`tar -czf "${tarGzPath}" -C "${DIST}" wide-linux-x64`, { stdio: 'inherit' });
-  console.log(`✓ Taşınabilir paket hazırlandı: ${tarGzName}`);
+  console.log(`Portable package created: ${tarGzName}`);
 } catch (e) {
-  console.warn('tar.gz oluşturulamadı:', e.message);
+  console.warn('Failed to create tar.gz:', e.message);
 }
 
 const tarZstName = `wide-${version}-linux-x64.tar.zst`;
 const tarZstPath = path.join(DIST, tarZstName);
 try {
   cp.execSync(`tar -cf - -C "${DIST}" wide-linux-x64 | zstd -T0 -19 -f -o "${tarZstPath}"`, { stdio: 'inherit' });
-  console.log(`✓ Yüksek sıkıştırmalı Zstandard paketi hazırlandı: ${tarZstName}`);
+  console.log(`Zstandard package created: ${tarZstName}`);
 } catch (e) {
 }
 
-console.log('== [5/5] Tamamlandı! ==');
-console.log(`Paket konumu: ${OUT_DIR}`);
-console.log(`Çalıştırmak için: ${launcherPath}`);
+console.log('== [5/5] Done ==');
+console.log(`Package location: ${OUT_DIR}`);
+console.log(`To run: ${launcherPath}`);
 

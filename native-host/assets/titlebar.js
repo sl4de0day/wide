@@ -58,22 +58,22 @@
 
     var btnMin = document.createElement("button");
     btnMin.className = "min";
-    btnMin.title = "Küçült";
-    btnMin.setAttribute("aria-label", "Küçült");
+    btnMin.title = "Minimize";
+    btnMin.setAttribute("aria-label", "Minimize");
     btnMin.innerHTML = SVG_MIN;
     btnMin.addEventListener("click", function () { cmd("minimize"); });
 
     var btnMax = document.createElement("button");
     btnMax.className = "max";
-    btnMax.title = "Büyüt";
-    btnMax.setAttribute("aria-label", "Büyüt");
+    btnMax.title = "Maximize";
+    btnMax.setAttribute("aria-label", "Maximize");
     btnMax.innerHTML = SVG_MAX;
     btnMax.addEventListener("click", function () { cmd("maximize"); });
 
     var btnClose = document.createElement("button");
     btnClose.className = "close";
-    btnClose.title = "Kapat";
-    btnClose.setAttribute("aria-label", "Kapat");
+    btnClose.title = "Close";
+    btnClose.setAttribute("aria-label", "Close");
     btnClose.innerHTML = SVG_CLOSE;
     btnClose.addEventListener("click", function () { cmd("close"); });
 
@@ -85,7 +85,7 @@
     function updateMaxIcon() {
       var isMax = (window.outerWidth >= screen.availWidth && window.outerHeight >= screen.availHeight);
       btnMax.innerHTML = isMax ? SVG_RESTORE : SVG_MAX;
-      btnMax.title = isMax ? "Geri Yükle" : "Büyüt";
+      btnMax.title = isMax ? "Geri Yükle" : "Maximize";
       btnMax.setAttribute("aria-label", btnMax.title);
     }
     window.addEventListener("resize", updateMaxIcon);

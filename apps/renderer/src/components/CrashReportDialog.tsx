@@ -15,16 +15,16 @@ export function CrashReportDialog() {
         <div className="flex items-center gap-3 text-status-error">
           <Bug className="size-6" strokeWidth={1.5} />
           <h2 className="text-[14px] font-semibold text-fg-bright">
-            Önceki oturumda bir çökme tespit edildi
+            A crash was detected from the previous session
           </h2>
         </div>
         
         <p className="text-[12px] leading-relaxed text-fg-dim">
-          Görünüşe göre Wide beklenmeyen bir hatayla karşılaştı ve kapandı. Bu hatanın detaylarını anonim bir şekilde bize göndererek uygulamanın daha kararlı hale gelmesine yardımcı olabilirsiniz.
+          It appears Wide encountered an unexpected error and closed. You can help improve stability by submitting this anonymous report.
         </p>
 
         <div className="max-h-40 overflow-y-auto rounded-md bg-canvas p-3 text-[11px] font-mono text-fg-faint">
-          <div className="mb-1 font-semibold text-fg">Tür: {pendingCrash.kind}</div>
+          <div className="mb-1 font-semibold text-fg">Type: {pendingCrash.kind}</div>
           <div className="whitespace-pre-wrap">{pendingCrash.detail}</div>
         </div>
 
@@ -43,7 +43,7 @@ export function CrashReportDialog() {
             onClick={() => void submitPending()}
             className="rounded-md bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors duration-100 hover:bg-accent-hover disabled:opacity-50"
           >
-            {isSending ? "Gönderiliyor..." : "Raporu Gönder"}
+            {isSending ? "Sending..." : "Send Report"}
           </button>
         </div>
       </div>

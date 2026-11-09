@@ -78,9 +78,9 @@ depend = libnotify
 depend = libsecret
 depend = libxss
 depend = libxtst
-optdepend = git: Source control entegrasyonu
-optdepend = nodejs: Gelişmiş dil sunucuları ve npm araçları
-optdepend = python: Python analizi ve debug motoru
+optdepend = git: Source control integration
+optdepend = nodejs: Language servers and npm tools
+optdepend = python: Python analysis and debugging engine
 `;
 
 fs.writeFileSync(path.join(STAGE, '.PKGINFO'), pkginfoContent.replace(/\r\n/g, '\n'), 'utf8');

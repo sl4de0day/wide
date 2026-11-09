@@ -79,7 +79,7 @@ mock.__setBridge({
 
 require(path.resolve(__dirname, '..', 'out', 'main', 'index.js'));
 
-const ROOT_SOURCES = new Set(['dialog:openFolder', 'workspace:openRecent']);
+const ROOT_SOURCES = new Set(['dialog:openFolder', 'workspace:openRecent', 'workspace:openTarget']);
 const NEEDS_ROOT = /^(fs:|project:|search:|ts:|engine:|codeberg:)/;
 let rootGate = null;
 

@@ -13,11 +13,11 @@ const DEB_NAME = `wide-ide_${VERSION}_amd64.deb`;
 const DEB_OUT = path.join(DIST, DEB_NAME);
 
 if (!fs.existsSync(SOURCE_DIR)) {
-  console.log('[deb] wide-linux-x64 bulunamadı, önce hazırlanıyor...');
+  console.log('[deb] wide-linux-x64 not found, preparing first...');
   cp.execSync('node scripts/package-linux.cjs --dir-only', { stdio: 'inherit', cwd: ROOT });
 }
 
-console.log(`[deb] Debian paketi hazırlanıyor: ${DEB_NAME}...`);
+console.log(`[deb] Preparing Debian package: ${DEB_NAME}...`);
 
 const STAGE = path.join(DIST, '.deb-staging');
 fs.rmSync(STAGE, { recursive: true, force: true });
@@ -113,5 +113,5 @@ cp.execSync(`ar -rcs "${DEB_OUT}" "${debianBinary}" "${controlTarGz}" "${dataTar
 
 fs.rmSync(STAGE, { recursive: true, force: true });
 
-console.log(`✓ [deb] Başarıyla üretildi: ${DEB_OUT} (${(fs.statSync(DEB_OUT).size / (1024 * 1024)).toFixed(1)} MB)`);
+console.log(`[deb] Successfully built: ${DEB_OUT} (${(fs.statSync(DEB_OUT).size / (1024 * 1024)).toFixed(1)} MB)`);
 

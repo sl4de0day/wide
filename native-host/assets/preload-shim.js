@@ -317,6 +317,7 @@
     aiSession: function (id) { return invoke("ai:session", id); },
     aiNewSession: function (root) { return invoke("ai:newSession", root); },
     aiSaveSession: function (id, root, messages) { return invoke("ai:saveSession", id, root, messages); },
+    aiActiveChat: function (payload) { return invoke("ai:activeChat", payload); },
     aiDeleteSession: function (id) { return invoke("ai:deleteSession", id); },
     aiSend: function (request) { return invoke("ai:send", request); },
     aiComplete: function (prefix, suffix, language) { return invoke("ai:complete", prefix, suffix, language); },

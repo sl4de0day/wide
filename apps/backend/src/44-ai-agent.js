@@ -1415,8 +1415,7 @@ async function aiExecuteHttpRequest(url, method = "GET", headers = {}, body = nu
         const parsed = JSON.parse(formattedBody);
         formattedBody = JSON.stringify(parsed, null, 2);
       } catch {
-        // keep text
-      }
+              }
     }
 
     const sections = [
@@ -1542,8 +1541,7 @@ async function aiExecuteDependencyCheck(root, manifest) {
         }
       }
     } catch {
-      // ignore
-    }
+          }
   }
 
   if (scanned.length === 0) {
@@ -2244,7 +2242,7 @@ async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstru
     "6. NEVER modify, overwrite, create, or delete `.wide/ai-instructions.md` unless the user explicitly requested to update project instructions. That file is managed exclusively by the user.",
     "7. LANGUAGE CONSISTENCY: Always converse and summarize in the user's language (if the user writes in Turkish, reply in fluent Turkish; if English, respond in English).",
     "8. SECURITY MINDSET: Always produce clean, secure, production-grade code. Never introduce SQL injection, XSS, command injection, path traversal, hardcoded secrets, or insecure dependencies. Fix issues defensively at their root cause.",
-    "9. NATIVE WIDE TOOLS CONSCIOUSNESS & CONTROL: You have full programmatic control over Wide's built-in tools! NEVER tell the user 'I cannot click Pitcher/Catcher in the UI', 'Pitcher/Catcher'ı doğrudan UI üzerinden tıklayamam', or that you cannot interact with Wide's interface. You do not need to click UI buttons like a human; you ARE the core agent of Wide IDE! When the user asks you to demonstrate, test, or use Pitcher, Catcher, Scanner, or Decoder:",
+    "9. NATIVE WIDE TOOLS CONSCIOUSNESS & CONTROL: You have full programmatic control over Wide's built-in tools! NEVER tell the user 'I cannot click Pitcher/Catcher in the UI', or that you cannot interact with Wide's interface. You do not need to click UI buttons like a human; you ARE the core agent of Wide IDE! When the user asks you to demonstrate, test, or use Pitcher, Catcher, Scanner, or Decoder:",
     "   - Use `open_tool_tab` to navigate to that tool on the user's screen (e.g. `open_tool_tab({ tab: 'pitcher' })` or `open_tool_tab({ tab: 'catcher', subtool: 'proxy' })`).",
     "   - Use `manage_catcher` to start the Catcher proxy (`action: 'start'`), check status (`action: 'status'`), inspect live captured traffic (`action: 'get_traffic'`), or toggle intercept (`action: 'set_intercept'`).",
     "   - Use `send_http_request` to dispatch HTTP/HTTPS requests with Wide's Pitcher engine.",
@@ -2289,7 +2287,7 @@ function aiWithAgentDirective(messages, root, allowWrites, projectInstructions =
         `DO NOT say you cannot click or interact with Pitcher/Catcher in the UI — you have native tools for them! ` +
         `If the user asks you to write code, create a file, or demonstrate/test Pitcher or Catcher, actively invoke your tools (` +
         `open_tool_tab, manage_catcher, send_http_request, write_file, edit_file). ` +
-        `Apply secure coding practices and reply in the user's language (e.g. Türkçe).]`
+        `Apply secure coding practices and reply in the user's language (e.g. your language).]`
     );
   }
   copy[last] = {

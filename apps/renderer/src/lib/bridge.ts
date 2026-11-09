@@ -1284,6 +1284,7 @@ export interface HostApi {
   aiSession(id: string): Promise<Ok<{ session?: AiSession }>>;
   aiNewSession(root: string): Promise<Ok<{ session?: AiSession }>>;
   aiSaveSession(id: string, root: string, messages: AiMessage[]): Promise<Ok<{ session?: AiSessionMeta }>>;
+  aiActiveChat(payload?: { id: string; root: string; title: string }): Promise<Ok<{ activeChat?: { id: string; root: string; title: string; timestamp: number } | null }>>;
   aiDeleteSession(id: string): Promise<Ok>;
   aiSend(request: {
     id: string;
@@ -1670,6 +1671,7 @@ const fallback = {
   aiSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiNewSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSaveSession: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiActiveChat: async () => (warn(), { ok: false, error: "No bridge" }),
   aiDeleteSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSend: async () => (warn(), { ok: false, error: "No bridge" }),
   aiComplete: async () => (warn(), { ok: false, error: "No bridge" }),
