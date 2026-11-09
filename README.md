@@ -1,7 +1,7 @@
 <p align="center">
   <img src="assets/wide-logo.png" alt="Wide IDE" width="128">
   <h1 align="center">Wide IDE</h1>
-  <p align="center">Security-first IDE with real-time vulnerability detection, built-in pentest tools, and AI agents</p>
+  <p align="center">Security-first IDE with built-in pentest tools and AI agents for the Wide ecosystem</p>
 </p>
 
 <p align="center">
