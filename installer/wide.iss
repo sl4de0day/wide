@@ -1,7 +1,7 @@
 #define AppName "Wide"
 #define AppVersion "1.681126"
 #define AppPublisher "sl4de"
-#define AppRepo "https://github.com/sl4de0day/wide"
+#define AppRepo "https://github.com/sl4de0day/wide-ide"
 
 [Setup]
 AppId={{8F2A1C7E-3D5B-4A9E-B6C2-0D1E2F3A4B5C}

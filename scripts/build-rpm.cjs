@@ -21,7 +21,7 @@ section: "devel"
 priority: "optional"
 maintainer: "sl4de <sl4de0day@github>"
 description: "Security-first IDE for the web stack\\n Wide provides real-time vulnerability detection, built-in Catcher proxy & Pitcher API client."
-homepage: "https://github.com/sl4de0day/wide"
+homepage: "https://github.com/sl4de0day/wide-ide"
 license: "GPL-3.0-or-later"
 depends:
   - gtk3

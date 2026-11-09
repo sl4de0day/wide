@@ -3,8 +3,8 @@
 const DISCORD_CLIENT_ID = "1565739058045653133";
 const DISCORD_RECONNECT_INTERVAL_MS = 15000;
 const DISCORD_UPDATE_DEBOUNCE_MS = 1500;
-const DISCORD_DEFAULT_LOGO = "https://raw.githubusercontent.com/sl4de0day/wide/main/assets/logo.png";
-const DISCORD_REPO_URL = "https://github.com/sl4de0day/wide";
+const DISCORD_DEFAULT_LOGO = "https://raw.githubusercontent.com/sl4de0day/wide-ide/main/assets/logo.png";
+const DISCORD_REPO_URL = "https://github.com/sl4de0day/wide-ide";
 
 let discordSocket = null;
 let discordConnected = false;

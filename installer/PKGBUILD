@@ -3,7 +3,7 @@ pkgver=1.681126
 pkgrel=1
 pkgdesc="Security-first IDE for the web stack — real-time vulnerability detection, built-in Catcher proxy & Pitcher API client"
 arch=('x86_64')
-url="https://github.com/sl4de0day/wide"
+url="https://github.com/sl4de0day/wide-ide"
 license=('GPL-3.0-or-later')
 depends=(
   'gtk3'

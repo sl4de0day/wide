@@ -3639,7 +3639,7 @@ function registerSecScanHandlers() {
           tool: {
             driver: {
               name: "Wide",
-              informationUri: "https://github.com/sl4de0day/wide",
+              informationUri: "https://github.com/sl4de0day/wide-ide",
               version: WIDE_VERSION,
               rules: [...rules.values()],
             },

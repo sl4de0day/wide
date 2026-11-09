@@ -14,7 +14,7 @@ import { useUpdate } from "@/stores/update";
 
 const ABOUT_DESCRIPTION =
   "Wide is an IDE that unifies web development and web security in a single ecosystem. It detects vulnerabilities in real time as you code, enabling secure development from line one, while providing built-in tools to execute full-scale, professional web penetration tests. Whether you are a web pentester, bug bounty hunter, or web developer, Wide is the only tool you need.";
-const ABOUT_REPO_URL = "https://github.com/sl4de0day/wide";
+const ABOUT_REPO_URL = "https://github.com/sl4de0day/wide-ide";
 
 const THEME_PREVIEW_LINES: { token: string; width: number }[][] = [
   [
@@ -430,7 +430,7 @@ export function SettingsView() {
                 onClick={() => void bridge.openExternal(ABOUT_REPO_URL)}
                 className="font-mono text-accent transition-colors duration-100 hover:underline"
               >
-                sl4de0day/wide
+                sl4de0day/wide-ide
               </button>
             </div>
           </div>

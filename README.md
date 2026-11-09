@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sl4de0day/wide/releases/latest">Download</a> ·
+  <a href="https://github.com/sl4de0day/wide-ide/releases/latest">Download</a> ·
   <a href="#building-from-source">Build</a> ·
-  <a href="https://github.com/sl4de0day/wide/releases">Changelog</a> ·
+  <a href="https://github.com/sl4de0day/wide-ide/releases">Changelog</a> ·
   <a href="LICENSE">License</a>
 </p>
 
@@ -31,12 +31,12 @@ Wide is a high-performance cross-platform application designed for speed and min
 ## Installation
 
 ### Windows
-Download the latest `Wide-Setup-*.exe` from the [Releases](https://github.com/sl4de0day/wide/releases/latest) page and run it. Wide installs per user, so no administrator rights are required, and it updates itself automatically from GitHub Releases — you never download a new installer by hand.
+Download the latest `Wide-Setup-*.exe` from the [Releases](https://github.com/sl4de0day/wide-ide/releases/latest) page and run it. Wide installs per user, so no administrator rights are required, and it updates itself automatically from GitHub Releases — you never download a new installer by hand.
 
 The [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) is required; the installer provisions it if it is missing.
 
 ### Linux
-Download the package corresponding to your Linux distribution from [Releases](https://github.com/sl4de0day/wide/releases/latest):
+Download the package corresponding to your Linux distribution from [Releases](https://github.com/sl4de0day/wide-ide/releases/latest):
 - **Universal (.AppImage):**
   ```bash
   chmod +x Wide-*-x86_64.AppImage
