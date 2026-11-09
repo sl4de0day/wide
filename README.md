@@ -1,11 +1,16 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Wide" width="720">
+  <img src="assets/wide-logo.png" alt="Wide IDE" width="128">
+  <h1 align="center">Wide IDE</h1>
+  <p align="center">Security-first IDE with real-time vulnerability detection, built-in pentest tools, and AI agents</p>
 </p>
 
 <p align="center">
   <a href="https://github.com/sl4de0day/wide-ide/releases/latest">Download</a> ·
   <a href="#building-from-source">Build</a> ·
   <a href="https://github.com/sl4de0day/wide-ide/releases">Changelog</a> ·
+  <a href="https://github.com/sl4de0day/wide-cli">Wide CLI</a> ·
+  <a href="https://github.com/sl4de0day/wide-app">Wide App</a> ·
+  <a href="https://github.com/sl4de0day/wide-sdk">Wide SDK</a> ·
   <a href="LICENSE">License</a>
 </p>
 
