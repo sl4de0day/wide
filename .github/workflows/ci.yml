@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Install renderer dependencies
+        run: npm --prefix apps/renderer install
+
+      - name: Typecheck renderer
+        run: npm run typecheck
+
+      - name: Build backend bundle
+        run: npm run build:backend
+
+      - name: Build renderer
+        run: npm run build:renderer
