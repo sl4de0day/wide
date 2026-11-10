@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const cp = require('node:child_process');
 const fs = require('node:fs');
@@ -7,7 +7,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
-const VERSION = '1.791126';
+const VERSION = '1.8101126';
 const RPM_NAME = `wide-ide-${VERSION}-1.x86_64.rpm`;
 const RPM_OUT = path.join(DIST, RPM_NAME);
 const NFPM = 'C:\\Users\\yusuf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\goreleaser.nfpm_Microsoft.Winget.Source_8wekyb3d8bbwe\\nfpm.exe';

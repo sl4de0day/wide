@@ -143,6 +143,8 @@
     securityLoadRules: function (root) { return invoke("security:loadRules", root); },
     securityUpdateRules: function () { return invoke("security:updateRules"); },
     securityRulesPath: function (root) { return invoke("security:rulesPath", root); },
+    securityLoadAgentRules: function (root) { return invoke("security:loadAgentRules", root); },
+    securityAgentRulesPath: function (root) { return invoke("security:agentRulesPath", root); },
     decisionConsensus: function (options) { return invoke("decision:consensus", options); },
     decisionClaim: function (options) { return invoke("decision:claim", options); },
     decisionScore: function (options) { return invoke("decision:score", options); },

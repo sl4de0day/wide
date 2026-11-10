@@ -347,6 +347,79 @@ const AI_TOOLS = [
       required: ["holderId"]
     }
   },
+  {
+    name: "browser_navigate",
+    description: "Navigate the autonomous browser to a URL. Opens the live read-only screencast tab in Wide IDE, loads the page, and returns page title and interactive element snapshot.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The full http or https URL to navigate to." }
+      },
+      required: ["url"]
+    }
+  },
+  {
+    name: "browser_click",
+    description: "Click an interactive element on the page by CSS selector, element index, or visible text. Updates the live screencast stream.",
+    parameters: {
+      type: "object",
+      properties: {
+        selector: { type: "string", description: "CSS selector of the element." },
+        element_id: { type: "number", description: "Numeric index of the element from the DOM snapshot." },
+        text: { type: "string", description: "Visible text of the element." }
+      },
+      required: []
+    }
+  },
+  {
+    name: "browser_type",
+    description: "Type text into an input field or interactive element on the active page. Updates the live screencast stream.",
+    parameters: {
+      type: "object",
+      properties: {
+        selector: { type: "string", description: "CSS selector of the input field." },
+        element_id: { type: "number", description: "Numeric index of the input element." },
+        text: { type: "string", description: "The text to type into the field." },
+        clear: { type: "boolean", description: "Whether to clear existing text before typing." },
+        submit: { type: "boolean", description: "Whether to simulate pressing Enter after typing." }
+      },
+      required: ["text"]
+    }
+  },
+  {
+    name: "browser_extract",
+    description: "Extract structured content, text, or DOM interactive elements from the active browser page.",
+    parameters: {
+      type: "object",
+      properties: {
+        selector: { type: "string", description: "Optional selector to scope extraction." },
+        mode: {
+          type: "string",
+          enum: ["text", "dom_tree", "links", "inputs", "html"],
+          description: "Extraction mode. Default is 'text'."
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: "browser_screenshot",
+    description: "Capture a visual snapshot of the current browser page and push it to the live stream.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: "browser_close",
+    description: "Close the active autonomous browser session.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: []
+    }
+  },
 ];
 
 const AI_WRITE_TOOLS = new Set(["write_file", "edit_file", "create_dir", "delete_file", "run_command"]);
@@ -434,6 +507,20 @@ const AI_TOOL_NAME_ALIASES = {
   stop_proxy: "manage_catcher",
   proxy_status: "manage_catcher",
   catcher_status: "manage_catcher",
+  navigate: "browser_navigate",
+  goto: "browser_navigate",
+  browse: "browser_navigate",
+  click: "browser_click",
+  click_element: "browser_click",
+  type: "browser_type",
+  type_text: "browser_type",
+  fill: "browser_type",
+  fill_input: "browser_type",
+  extract: "browser_extract",
+  extract_text: "browser_extract",
+  screenshot: "browser_screenshot",
+  capture_screen: "browser_screenshot",
+  close_browser: "browser_close",
 };
 
 const AI_KNOWN_TOOL_NAMES = new Set([
@@ -565,6 +652,27 @@ function aiNormalizeToolCall(rawName, rawInput) {
     if (input.intercept === undefined && src.enabled !== undefined) {
       input.intercept = Boolean(src.enabled);
     }
+  }
+
+  if (name === "browser_navigate") {
+    if (input.url === undefined) {
+      const aliasUrl = src.target ?? src.uri ?? src.address ?? src.link ?? src.endpoint;
+      if (aliasUrl !== undefined) input.url = String(aliasUrl);
+    }
+  }
+
+  if (name === "browser_click") {
+    if (input.selector === undefined && src.target !== undefined) input.selector = String(src.target);
+    if (input.element_id === undefined && src.index !== undefined) input.element_id = Number(src.index);
+  }
+
+  if (name === "browser_type") {
+    if (input.text === undefined) {
+      const aliasText = src.value ?? src.content ?? src.input ?? src.query;
+      if (aliasText !== undefined) input.text = String(aliasText);
+    }
+    if (input.selector === undefined && src.target !== undefined) input.selector = String(src.target);
+    if (input.element_id === undefined && src.index !== undefined) input.element_id = Number(src.index);
   }
 
   if (name === "edit_file" && input.find === undefined && typeof input.content === "string") {
@@ -1537,6 +1645,50 @@ async function aiExecuteSecurityScan(root, filePath, minSeverity = "info") {
   }
 }
 
+async function aiLoadAgentRules(root) {
+  if (root) {
+    const wsAgentFile = node_path.join(root, ".wide", "agent-rules.json");
+    try {
+      const raw = JSON.parse(await promises.readFile(wsAgentFile, "utf8"));
+      const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
+      if (list.length > 0) return { source: wsAgentFile, rules: list };
+    } catch {
+      void 0;
+    }
+    const wsFile = node_path.join(root, ".wide", "rules.json");
+    try {
+      const raw = JSON.parse(await promises.readFile(wsFile, "utf8"));
+      const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
+      const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
+      if (filtered.length > 0) return { source: wsFile, rules: filtered };
+    } catch {
+      void 0;
+    }
+  }
+  const cacheFile = node_path.join(node_os.homedir(), ".wide", "rules", "rules.json");
+  try {
+    const raw = JSON.parse(await promises.readFile(cacheFile, "utf8"));
+    const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
+    const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
+    if (filtered.length > 0) return { source: cacheFile, rules: filtered };
+  } catch {
+    void 0;
+  }
+  return {
+    source: "embedded",
+    rules: [
+      { id: "wide/cwe078-ai-unsafe-tool-exec", cwe: "CWE-78", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:exec|execSync|spawn|subprocess\\.run|os\\.system)\\s*\\(\\s*(?:toolCall|tool_call|args|arguments|response\\.command|patch\\.command)", message: "Executing raw system command directly from AI tool call response without argument validation.", remediation: "Whitelist allowed commands and run them in an isolated sandbox with fixed arguments." },
+      { id: "wide/cwe079-ai-prompt-injection", cwe: "CWE-79", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:prompt|instruction|query|input)\\s*[:=]\\s*(?:f?[\"'].*?\\{|`.*?\\$\\{).*(?:req\\.|params\\.|body\\.|userInput|user_input|request\\.)", message: "Untrusted user input concatenated directly into LLM prompt template without sanitization.", remediation: "Use structured multi-turn message roles or sanitize prompt inputs before sending to the model." },
+      { id: "wide/cwe095-ai-unconstrained-eval", cwe: "CWE-95", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:eval|Function|vm\\.runInContext|compile)\\s*\\(\\s*(?:toolOutput|tool_output|response\\.text|aiResult|ai_output|completion)", message: "Evaluating raw executable code returned by LLM without sandboxing or static verification." },
+      { id: "wide/cwe306-ai-unauthenticated-mcp-registration", cwe: "CWE-306", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:registerMcpServer|addMcpServer|mcpClient\\.connect)\\s*\\(\\s*(?:url|endpoint|serverConfig)\\s*\\)", message: "Model Context Protocol server registered without identity verification or authorization signature.", remediation: "Verify server host authorization and enforce cryptographic signature checks prior to registering external toolsets." },
+      { id: "wide/cwe400-ai-unbounded-agent-loop", cwe: "CWE-400", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "while\\s*\\(\\s*(?:true|1|!done|!finished|!settled)\\s*\\)\\s*\\{(?![^}]*\\b(?:maxRounds|maxSteps|maxIterations|round\\s*>=|step\\s*>=)\\b)", message: "Autonomous agent execution loop lacks explicit termination boundary or maximum step limit.", remediation: "Enforce a strict step threshold or cancellation budget to prevent runaway agent execution loops." },
+      { id: "wide/cwe770-ai-unbounded-context-accumulation", cwe: "CWE-770", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:history|messages|chatContext)\\.push\\s*\\(.*\\)(?![^;]*(?:slice|shift|trim|truncate|maxTokens|maxHistory))", message: "LLM conversation context accumulates without token limits or sliding window truncation.", remediation: "Prune chat context using sliding window truncation or token counting before appending turns." },
+      { id: "wide/cwe798-ai-prompt-secret-leak", cwe: "CWE-798", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:systemPrompt|systemMessage|system_prompt)\\s*[:=].*?(?:process\\.env\\.(?:[A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH))|apiKey|api_key|secret)", message: "Sensitive secrets or private API credentials embedded in prompt context.", remediation: "Strip private credentials from prompt text and provide secrets through isolated backend proxy channels." },
+      { id: "wide/cwe829-ai-unvalidated-patch-apply", cwe: "CWE-829", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:applyPatch|gitApply|applyDiff|writePatch)\\s*\\(\\s*(?:aiPatch|llmResponse|output\\.patch|modelDiff)", message: "Applying LLM-generated patch directly to codebase without path traversal or integrity checks.", remediation: "Validate destination file paths are strictly within workspace bounds and run static scans before applying patches." }
+    ]
+  };
+}
+
 async function aiExecuteDependencyCheck(root, manifest) {
   if (!root) return "No project workspace is currently open.";
 
@@ -1713,6 +1865,417 @@ ${!isRunning ? "\nTip: To start the proxy, invoke `manage_catcher` with action: 
   }
 
   return `Unknown Catcher action: '${action}'. Supported actions: 'status', 'start', 'stop', 'get_traffic', 'set_intercept'.`;
+}
+
+const aiBrowserSession = {
+  url: "about:blank",
+  title: "AI Autonomous Browser",
+  status: 200,
+  elements: [],
+  textContent: "",
+  rawHtml: "",
+  formInputs: {},
+  lastAction: "Ready",
+  lastTarget: "",
+  activeHighlightId: 0,
+  history: []
+};
+
+function aiEscapeXml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function aiGenerateBrowserScreencastFrame() {
+  const currentUrl = aiBrowserSession.url || "about:blank";
+  const currentTitle = aiBrowserSession.title || "AI Browser";
+  const elements = aiBrowserSession.elements || [];
+  const status = aiBrowserSession.status || 200;
+  const lastAction = aiBrowserSession.lastAction || "Idle";
+  const highlightId = aiBrowserSession.activeHighlightId || 0;
+
+  const width = 1280;
+  const height = 800;
+
+  let elementsSvg = "";
+  let y = 140;
+  const maxElements = 14;
+
+  const visibleElements = elements.slice(0, maxElements);
+  for (const elem of visibleElements) {
+    const isHighlighted = elem.index === highlightId;
+    const isInput = elem.tag === "input" || elem.tag === "textarea";
+    const isButton = elem.tag === "button" || elem.role === "button";
+    const isLink = elem.tag === "a" || Boolean(elem.href);
+
+    const val = aiBrowserSession.formInputs[elem.name || String(elem.index)] || elem.value || "";
+    const label = elem.text || elem.placeholder || elem.name || elem.tag;
+
+    if (isInput) {
+      elementsSvg += `
+        <g transform="translate(60, ${y})">
+          <rect width="400" height="36" rx="6" fill="#181825" stroke="${isHighlighted ? "#f59e0b" : "#45475a"}" stroke-width="${isHighlighted ? "2" : "1"}"/>
+          <text x="14" y="23" fill="#6c7086" font-size="12" font-family="monospace">[${elem.index}] ${aiEscapeXml(elem.name || "input")}:</text>
+          <text x="120" y="23" fill="#cdd6f4" font-size="13" font-family="sans-serif">${aiEscapeXml(val || elem.placeholder || "(empty)")}</text>
+          ${isHighlighted ? `<circle cx="390" cy="18" r="4" fill="#f59e0b" />` : ""}
+        </g>
+      `;
+      y += 48;
+    } else if (isButton) {
+      elementsSvg += `
+        <g transform="translate(60, ${y})">
+          <rect width="180" height="34" rx="6" fill="${isHighlighted ? "#38bdf8" : "#313244"}" stroke="${isHighlighted ? "#0284c7" : "#585b70"}" stroke-width="1"/>
+          <text x="90" y="22" fill="${isHighlighted ? "#0f172a" : "#cdd6f4"}" font-size="13" font-weight="600" text-anchor="middle" font-family="sans-serif">[${elem.index}] ${aiEscapeXml(label.slice(0, 18))}</text>
+        </g>
+      `;
+      y += 46;
+    } else if (isLink) {
+      elementsSvg += `
+        <g transform="translate(60, ${y})">
+          <text x="0" y="16" fill="#38bdf8" text-decoration="underline" font-size="13" font-family="sans-serif">[${elem.index}] ${aiEscapeXml(label.slice(0, 45))}</text>
+        </g>
+      `;
+      y += 30;
+    } else {
+      elementsSvg += `
+        <g transform="translate(60, ${y})">
+          <text x="0" y="16" fill="#a6adc8" font-size="13" font-family="sans-serif">${aiEscapeXml(label.slice(0, 60))}</text>
+        </g>
+      `;
+      y += 28;
+    }
+    if (y > 700) break;
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <rect width="${width}" height="${height}" fill="#11111b" />
+    <rect x="0" y="0" width="${width}" height="76" fill="#1e1e2e" />
+    <circle cx="24" cy="28" r="6" fill="#f38ba8" />
+    <circle cx="44" cy="28" r="6" fill="#f9e2af" />
+    <circle cx="64" cy="28" r="6" fill="#a6e3a1" />
+    <rect x="100" y="12" width="760" height="32" rx="6" fill="#181825" stroke="#313244" stroke-width="1" />
+    <text x="116" y="33" fill="#a6adc8" font-size="12" font-family="monospace">[HTTPS] ${aiEscapeXml(currentUrl)}</text>
+    <rect x="880" y="12" width="160" height="32" rx="6" fill="#0284c7" />
+    <text x="960" y="32" fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle" font-family="sans-serif">AI AUTONOMOUS</text>
+    <rect x="1055" y="12" width="130" height="32" rx="6" fill="#181825" stroke="#f59e0b" stroke-width="1" />
+    <text x="1120" y="32" fill="#f59e0b" font-size="11" font-weight="600" text-anchor="middle" font-family="sans-serif">READ ONLY</text>
+    <rect x="0" y="52" width="${width}" height="24" fill="#181825" />
+    <text x="24" y="68" fill="#6c7086" font-size="11" font-family="sans-serif">Last Action: <tspan fill="#38bdf8">${aiEscapeXml(lastAction)}</tspan> | Status: <tspan fill="#a6e3a1">${status} OK</tspan></text>
+    <rect x="40" y="90" width="1200" height="680" rx="8" fill="#181825" stroke="#313244" stroke-width="1" />
+    <text x="60" y="124" fill="#cdd6f4" font-size="18" font-weight="700" font-family="sans-serif">${aiEscapeXml(currentTitle)}</text>
+    ${elementsSvg}
+  </svg>`;
+
+  return "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
+}
+
+function aiParseHtmlPage(rawHtml) {
+  const clean = String(rawHtml || "")
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+    .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "");
+
+  const titleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(clean);
+  const title = titleMatch ? titleMatch[1].trim() : "Untitled Page";
+
+  const elements = [];
+  let index = 1;
+
+  const inputRegex = /<(input|textarea)\b([^>]*)>/gi;
+  let match;
+  while ((match = inputRegex.exec(clean)) !== null && elements.length < 50) {
+    const tag = match[1].toLowerCase();
+    const attrsStr = match[2];
+    const nameMatch = /\bname=["']([^"']*)["']/i.exec(attrsStr);
+    const typeMatch = /\btype=["']([^"']*)["']/i.exec(attrsStr);
+    const valMatch = /\bvalue=["']([^"']*)["']/i.exec(attrsStr);
+    const phMatch = /\bplaceholder=["']([^"']*)["']/i.exec(attrsStr);
+    elements.push({
+      index: index++,
+      tag,
+      role: "textbox",
+      name: nameMatch ? nameMatch[1] : "",
+      type: typeMatch ? typeMatch[1] : "text",
+      value: valMatch ? valMatch[1] : "",
+      placeholder: phMatch ? phMatch[1] : "",
+      text: phMatch ? phMatch[1] : ""
+    });
+  }
+
+  const btnRegex = /<button\b([^>]*)>([\s\S]*?)<\/button>/gi;
+  while ((match = btnRegex.exec(clean)) !== null && elements.length < 75) {
+    const text = match[2].replace(/<[^>]+>/g, "").trim();
+    elements.push({
+      index: index++,
+      tag: "button",
+      role: "button",
+      text: text || "Button"
+    });
+  }
+
+  const aRegex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  while ((match = aRegex.exec(clean)) !== null && elements.length < 100) {
+    const attrsStr = match[1];
+    const hrefMatch = /\bhref=["']([^"']*)["']/i.exec(attrsStr);
+    const text = match[2].replace(/<[^>]+>/g, "").trim();
+    if (hrefMatch && text) {
+      elements.push({
+        index: index++,
+        tag: "a",
+        role: "link",
+        href: hrefMatch[1],
+        text
+      });
+    }
+  }
+
+  const textContent = clean.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return { title, elements, textContent };
+}
+
+function aiFetchUrl(targetUrl) {
+  return new Promise((resolve) => {
+    try {
+      const parsed = new URL(targetUrl);
+      const mod = parsed.protocol === "https:" ? node_https : node_http;
+      const req = mod.get(targetUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Wide/1.8101126",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*;q=0.8"
+        },
+        timeout: 10000
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          const next = new URL(res.headers.location, targetUrl).toString();
+          return resolve(aiFetchUrl(next));
+        }
+        let body = "";
+        res.on("data", (chunk) => {
+          if (body.length < 2 * 1024 * 1024) body += chunk;
+        });
+        res.on("end", () => {
+          resolve({ ok: true, status: res.statusCode || 200, body, url: targetUrl });
+        });
+      });
+      req.on("error", (err) => resolve({ ok: false, status: 500, error: String(err && err.message || err), url: targetUrl }));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve({ ok: false, status: 504, error: "Request timed out after 10000ms", url: targetUrl });
+      });
+    } catch (err) {
+      resolve({ ok: false, status: 400, error: String(err && err.message || err), url: targetUrl });
+    }
+  });
+}
+
+async function aiExecuteBrowserNavigate(url, send) {
+  const cleanUrl = String(url || "").trim();
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    return "Error: browser_navigate requires a valid http or https URL.";
+  }
+
+  aiBrowserSession.lastAction = "Navigating to " + cleanUrl;
+  aiBrowserSession.lastTarget = cleanUrl;
+  aiBrowserSession.activeHighlightId = 0;
+
+  const res = await aiFetchUrl(cleanUrl);
+  if (!res.ok) {
+    aiBrowserSession.status = res.status;
+    aiBrowserSession.url = cleanUrl;
+    aiBrowserSession.title = "Navigation Failed";
+    aiBrowserSession.lastAction = "Failed: " + (res.error || "HTTP error");
+    const frame = aiGenerateBrowserScreencastFrame();
+    if (typeof send === "function") {
+      send({ type: "browser_action", action: "browser_navigate: failed", url: cleanUrl, frame, target: cleanUrl, timestamp: Date.now() });
+    }
+    return "Failed to load " + cleanUrl + ": " + (res.error || "status " + res.status);
+  }
+
+  aiBrowserSession.url = res.url;
+  aiBrowserSession.status = res.status;
+  aiBrowserSession.rawHtml = res.body;
+
+  const parsed = aiParseHtmlPage(res.body);
+  aiBrowserSession.title = parsed.title;
+  aiBrowserSession.elements = parsed.elements;
+  aiBrowserSession.textContent = parsed.textContent;
+  aiBrowserSession.history.push(res.url);
+
+  const frame = aiGenerateBrowserScreencastFrame();
+  if (typeof send === "function") {
+    send({ type: "browser_action", action: "browser_navigate: " + res.url, url: res.url, frame, target: res.url, timestamp: Date.now() });
+  }
+
+  const elementsSummary = parsed.elements.slice(0, 20).map((el) => {
+    if (el.tag === "input" || el.tag === "textarea") {
+      return `[${el.index}] <${el.tag}> name="${el.name}" placeholder="${el.placeholder}"`;
+    }
+    if (el.tag === "button") {
+      return `[${el.index}] <button> "${el.text}"`;
+    }
+    if (el.tag === "a") {
+      return `[${el.index}] <a> href="${el.href}" text="${el.text}"`;
+    }
+    return `[${el.index}] <${el.tag}> ${el.text}`;
+  }).join("\n");
+
+  return [
+    `Navigated to ${res.url} (${res.status} OK)`,
+    `Page Title: ${parsed.title}`,
+    "",
+    "Interactive Elements:",
+    elementsSummary || "(no interactive elements found)",
+    "",
+    "Text Preview:",
+    parsed.textContent.slice(0, 500) + (parsed.textContent.length > 500 ? "..." : "")
+  ].join("\n");
+}
+
+async function aiExecuteBrowserClick(selector, element_id, text, send) {
+  const elements = aiBrowserSession.elements || [];
+  let target = null;
+
+  if (typeof element_id === "number") {
+    target = elements.find((e) => e.index === element_id);
+  }
+  if (!target && selector) {
+    const selClean = String(selector).toLowerCase();
+    target = elements.find((e) => e.name?.toLowerCase() === selClean || e.tag === selClean);
+  }
+  if (!target && text) {
+    const txtClean = String(text).toLowerCase();
+    target = elements.find((e) => e.text?.toLowerCase().includes(txtClean));
+  }
+
+  if (!target) {
+    return `Element not found for selector='${selector || ""}', id=${element_id ?? ""}, text='${text || ""}'. Available elements: ${elements.slice(0, 10).map((e) => `[${e.index}] ${e.tag} ${e.text || e.name || ""}`).join(", ")}`;
+  }
+
+  aiBrowserSession.activeHighlightId = target.index;
+  aiBrowserSession.lastAction = "Clicked " + (target.text || target.name || target.tag);
+  aiBrowserSession.lastTarget = `[${target.index}] ${target.tag}`;
+
+  if (target.href) {
+    let nextUrl = target.href;
+    try {
+      nextUrl = new URL(target.href, aiBrowserSession.url).toString();
+    } catch {
+      void 0;
+    }
+    return await aiExecuteBrowserNavigate(nextUrl, send);
+  }
+
+  const frame = aiGenerateBrowserScreencastFrame();
+  if (typeof send === "function") {
+    send({ type: "browser_action", action: "browser_click: " + (target.text || target.tag), url: aiBrowserSession.url, frame, target: `[${target.index}] ${target.tag}`, timestamp: Date.now() });
+  }
+
+  return `Successfully clicked element [${target.index}] <${target.tag}> "${target.text || target.name || ""}". Updated live screencast.`;
+}
+
+async function aiExecuteBrowserType(selector, element_id, text, clear, submit, send) {
+  const elements = aiBrowserSession.elements || [];
+  let target = null;
+
+  if (typeof element_id === "number") {
+    target = elements.find((e) => e.index === element_id && (e.tag === "input" || e.tag === "textarea"));
+  }
+  if (!target && selector) {
+    const selClean = String(selector).toLowerCase();
+    target = elements.find((e) => e.name?.toLowerCase() === selClean || e.tag === selClean);
+  }
+  if (!target) {
+    target = elements.find((e) => e.tag === "input" || e.tag === "textarea") || elements[0];
+  }
+
+  if (!target) {
+    return "No input element found on the active page to type into.";
+  }
+
+  const key = target.name || String(target.index);
+  const existing = clear ? "" : (aiBrowserSession.formInputs[key] || "");
+  const nextVal = existing + text;
+  aiBrowserSession.formInputs[key] = nextVal;
+  target.value = nextVal;
+
+  aiBrowserSession.activeHighlightId = target.index;
+  aiBrowserSession.lastAction = `Typed "${text}" into [${target.index}] ${target.name || target.tag}`;
+  aiBrowserSession.lastTarget = `[${target.index}] ${target.name || target.tag}`;
+
+  const frame = aiGenerateBrowserScreencastFrame();
+  if (typeof send === "function") {
+    send({ type: "browser_action", action: `browser_type: "${text}" into ${target.name || target.tag}`, url: aiBrowserSession.url, frame, target: `[${target.index}] ${target.name || target.tag}`, timestamp: Date.now() });
+  }
+
+  if (submit) {
+    aiBrowserSession.lastAction = "Submitted form with input: " + nextVal;
+    if (typeof send === "function") {
+      send({ type: "browser_action", action: "browser_submit: " + nextVal, url: aiBrowserSession.url, frame: aiGenerateBrowserScreencastFrame(), target: target.name || target.tag, timestamp: Date.now() });
+    }
+    return `Typed "${text}" into element [${target.index}] ${target.name || target.tag} (current value: "${nextVal}") and submitted. Updated live screencast.`;
+  }
+
+  return `Typed "${text}" into element [${target.index}] ${target.name || target.tag}. Current value: "${nextVal}". Updated live screencast.`;
+}
+
+async function aiExecuteBrowserExtract(selector, mode, send) {
+  const reqMode = mode || "text";
+  const frame = aiGenerateBrowserScreencastFrame();
+  if (typeof send === "function") {
+    send({ type: "browser_action", action: "browser_extract: " + reqMode, url: aiBrowserSession.url, frame, target: selector || "document", timestamp: Date.now() });
+  }
+
+  if (reqMode === "html") {
+    return aiBrowserSession.rawHtml ? aiBrowserSession.rawHtml.slice(0, 10000) : "about:blank";
+  }
+  if (reqMode === "links") {
+    const links = (aiBrowserSession.elements || []).filter((e) => e.href);
+    return JSON.stringify(links, null, 2);
+  }
+  if (reqMode === "inputs") {
+    const inputs = (aiBrowserSession.elements || []).filter((e) => e.tag === "input" || e.tag === "textarea");
+    return JSON.stringify(inputs, null, 2);
+  }
+  if (reqMode === "dom_tree") {
+    return JSON.stringify(aiBrowserSession.elements || [], null, 2);
+  }
+  return aiBrowserSession.textContent || "(empty page)";
+}
+
+async function aiExecuteBrowserScreenshot(send) {
+  const frame = aiGenerateBrowserScreencastFrame();
+  if (typeof send === "function") {
+    send({ type: "browser_action", action: "browser_screenshot", url: aiBrowserSession.url, frame, timestamp: Date.now() });
+  }
+  return JSON.stringify({
+    ok: true,
+    url: aiBrowserSession.url,
+    title: aiBrowserSession.title,
+    framePreview: frame.slice(0, 100) + "..."
+  });
+}
+
+async function aiExecuteBrowserClose(send) {
+  aiBrowserSession.url = "about:blank";
+  aiBrowserSession.title = "AI Browser (Closed)";
+  aiBrowserSession.status = 200;
+  aiBrowserSession.elements = [];
+  aiBrowserSession.textContent = "";
+  aiBrowserSession.rawHtml = "";
+  aiBrowserSession.formInputs = {};
+  aiBrowserSession.lastAction = "Session closed";
+  aiBrowserSession.lastTarget = "";
+  aiBrowserSession.activeHighlightId = 0;
+
+  const frame = aiGenerateBrowserScreencastFrame();
+  if (typeof send === "function") {
+    send({ type: "browser_action", action: "browser_close", url: "about:blank", frame, timestamp: Date.now() });
+  }
+  return "Autonomous browser session closed.";
 }
 
 async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt = "") {
@@ -1991,6 +2554,30 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       const now = Date.now() / 1000.0;
       const ok = aiDecisionHub.claims.tryClaim(holderId, bid, lifetime, now, capacity);
       return JSON.stringify({ ok, occupancy: aiDecisionHub.claims.occupancy(now) });
+    }
+
+    if (name === "browser_navigate") {
+      return await aiExecuteBrowserNavigate(input.url, send);
+    }
+
+    if (name === "browser_click") {
+      return await aiExecuteBrowserClick(input.selector, input.element_id, input.text, send);
+    }
+
+    if (name === "browser_type") {
+      return await aiExecuteBrowserType(input.selector, input.element_id, input.text, input.clear, input.submit, send);
+    }
+
+    if (name === "browser_extract") {
+      return await aiExecuteBrowserExtract(input.selector, input.mode, send);
+    }
+
+    if (name === "browser_screenshot") {
+      return await aiExecuteBrowserScreenshot(send);
+    }
+
+    if (name === "browser_close") {
+      return await aiExecuteBrowserClose(send);
     }
 
     return `There is no tool called ${name}.`;
@@ -2336,6 +2923,13 @@ async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstru
     "   - Use `run_security_scan` to trigger AST & taint vulnerability scans.",
     "   - Use `transform_data` to encode/decode/hash data in CyberChef.",
     "   Actively call these tools to perform the actions directly!",
+    "10. AUTONOMOUS BROWSER CAPABILITY: You have a fully autonomous browser environment at your disposal!",
+    "    - Use `browser_navigate` to load target URLs, documentation, or local dev servers. Wide IDE opens a dedicated live stream tab (`wide://ai-browser`) where the user can watch your actions in real time while physical user inputs are locked so they cannot interfere with your session.",
+    "    - Use `browser_click` to click interactive buttons, links, or inputs by selector, index, or text.",
+    "    - Use `browser_type` to fill in input elements and search bars.",
+    "    - Use `browser_extract` to extract DOM elements, links, or text.",
+    "    - Use `browser_screenshot` to update the visual stream.",
+    "    - Use `browser_close` to terminate the session when done.",
     projectInstructions && !hasInstructionsInSystem
       ? `\n## Project AI Instructions (.wide/ai-instructions.md — Mandatory Project Rules)\n${projectInstructions}`
       : "",
@@ -2706,6 +3300,47 @@ function registerAiAgentHandlers() {
     if (gate) return gate;
     const result = await aiVerifyKey(provider, String(key ?? "").trim());
     return result;
+  });
+
+  electron.ipcMain.handle("ai:browser", async (_event, action, params = {}) => {
+    const act = String(action || "status").toLowerCase();
+    if (act === "navigate") {
+      const res = await aiExecuteBrowserNavigate(params.url, (ev) => {
+        if (_event?.sender && !_event.sender.isDestroyed()) _event.sender.send("ai:event", ev);
+      });
+      return { ok: true, result: res, session: aiBrowserSession };
+    }
+    if (act === "click") {
+      const res = await aiExecuteBrowserClick(params.selector, params.element_id, params.text, (ev) => {
+        if (_event?.sender && !_event.sender.isDestroyed()) _event.sender.send("ai:event", ev);
+      });
+      return { ok: true, result: res, session: aiBrowserSession };
+    }
+    if (act === "type") {
+      const res = await aiExecuteBrowserType(params.selector, params.element_id, params.text, params.clear, params.submit, (ev) => {
+        if (_event?.sender && !_event.sender.isDestroyed()) _event.sender.send("ai:event", ev);
+      });
+      return { ok: true, result: res, session: aiBrowserSession };
+    }
+    if (act === "extract") {
+      const res = await aiExecuteBrowserExtract(params.selector, params.mode, (ev) => {
+        if (_event?.sender && !_event.sender.isDestroyed()) _event.sender.send("ai:event", ev);
+      });
+      return { ok: true, result: res, session: aiBrowserSession };
+    }
+    if (act === "screenshot") {
+      const res = await aiExecuteBrowserScreenshot((ev) => {
+        if (_event?.sender && !_event.sender.isDestroyed()) _event.sender.send("ai:event", ev);
+      });
+      return { ok: true, result: res, session: aiBrowserSession };
+    }
+    if (act === "close") {
+      const res = await aiExecuteBrowserClose((ev) => {
+        if (_event?.sender && !_event.sender.isDestroyed()) _event.sender.send("ai:event", ev);
+      });
+      return { ok: true, result: res, session: aiBrowserSession };
+    }
+    return { ok: true, session: aiBrowserSession };
   });
 }
 

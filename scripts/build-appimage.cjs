@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const cp = require('node:child_process');
 const fs = require('node:fs');
@@ -8,7 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
 const SOURCE_DIR = path.join(DIST, 'wide-linux-x64');
-const VERSION = '1.791126';
+const VERSION = '1.8101126';
 const APPIMAGE_NAME = `Wide-${VERSION}-x86_64.AppImage`;
 const APPIMAGE_OUT = path.join(DIST, APPIMAGE_NAME);
 const STAGE = path.join(DIST, '.appimage-staging');

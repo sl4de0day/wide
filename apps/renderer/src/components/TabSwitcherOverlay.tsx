@@ -10,7 +10,7 @@ import { useWorkspace } from "@/stores/workspace";
 function getTabIcon(tab: Tab) {
   if (tab.kind === "catcher") return Radio;
   if (tab.kind === "pitcher") return Radio;
-  if (tab.kind === "browser") return Globe;
+  if (tab.kind === "browser" || tab.kind === "ai-browser") return Globe;
   if (tab.path === "wide://settings") return Settings;
   if (tab.path.startsWith("wide://ai/")) return Sparkles;
   if (tab.path.startsWith("wide://terminal")) return Terminal;

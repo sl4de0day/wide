@@ -28,6 +28,8 @@ export const POLICY_PATH = "wide://policy";
 
 export const BROWSER_PATH = "wide://browser";
 
+export const AI_BROWSER_PATH = "wide://ai-browser";
+
 export const CATCHER_PATH = "wide://catcher";
 
 export const PITCHER_PATH = "wide://pitcher";
@@ -78,7 +80,7 @@ export interface FileTab {
 }
 
 export interface VirtualTab {
-  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview" | "scratchpad";
+  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "ai-browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview" | "scratchpad";
   path: string;
   name: string;
   pinned?: boolean;
@@ -156,6 +158,7 @@ interface EditorState {
   openHttpResponse(): void;
   openPolicy(): void;
   openBrowser(): void;
+  openAiBrowser(): void;
 
   openCatcher(): void;
 
@@ -577,6 +580,19 @@ export const useEditor = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, { kind: "browser", path: BROWSER_PATH, name: "Browser" }],
         activePath: BROWSER_PATH,
+        panes,
+      };
+    }),
+
+  openAiBrowser: () =>
+    set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, AI_BROWSER_PATH);
+      if (state.tabs.some((tab) => tab.path === AI_BROWSER_PATH)) {
+        return { activePath: AI_BROWSER_PATH, panes };
+      }
+      return {
+        tabs: [...state.tabs, { kind: "ai-browser", path: AI_BROWSER_PATH, name: "AI Browser" }],
+        activePath: AI_BROWSER_PATH,
         panes,
       };
     }),

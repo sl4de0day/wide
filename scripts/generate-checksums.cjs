@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -13,7 +13,7 @@ if (fs.existsSync(oldExe)) {
   fs.unlinkSync(oldExe);
 }
 
-const files = fs.readdirSync(RELEASE).filter((f) => f.includes('1.791126'));
+const files = fs.readdirSync(RELEASE).filter((f) => f.includes('1.8101126'));
 files.sort();
 
 const sums = [];

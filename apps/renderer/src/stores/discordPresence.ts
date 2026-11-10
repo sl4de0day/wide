@@ -124,7 +124,7 @@ export function subscribeDiscordPresence(): () => void {
       } else if (activeTab.kind === "ai-chat") {
         details = "Chatting with AI Assistant";
         smallText = "AI Assistant";
-      } else if (activeTab.kind === "browser") {
+      } else if (activeTab.kind === "browser" || activeTab.kind === "ai-browser") {
         details = "Browsing Web Targets";
         smallText = "Security Browser";
       } else if (activeTab.kind === "catcher") {

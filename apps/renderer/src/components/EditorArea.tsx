@@ -70,6 +70,7 @@ const AiChatView = lazy(() => import("./AiChatView").then((m) => ({ default: m.A
 const CatcherView = lazy(() => import("./CatcherView").then((m) => ({ default: m.CatcherView })));
 const PitcherView = lazy(() => import("./pitcher/PitcherView").then((m) => ({ default: m.PitcherView })));
 const BrowserView = lazy(() => import("./BrowserView").then((m) => ({ default: m.BrowserView })));
+const AiBrowserView = lazy(() => import("./AiBrowserView").then((m) => ({ default: m.AiBrowserView })));
 const CyberChefView = lazy(() => import("./CyberChefView").then((m) => ({ default: m.CyberChefView })));
 const ScratchpadView = lazy(() => import("./ScratchpadView").then((m) => ({ default: m.ScratchpadView })));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((m) => ({ default: m.MarkdownPreview })));
@@ -114,7 +115,7 @@ function TabKindIcon({ kind }: { kind: Tab["kind"] }) {
   if (kind === "catcher") return <Radar className={iconClass} strokeWidth={1.75} />;
   if (kind === "pitcher") return <Send className={iconClass} strokeWidth={1.75} />;
   if (kind === "ai-chat") return <Sparkles className={iconClass} strokeWidth={1.75} />;
-  if (kind === "browser") return <Globe className={iconClass} strokeWidth={1.75} />;
+  if (kind === "browser" || kind === "ai-browser") return <Globe className={iconClass} strokeWidth={1.75} />;
   if (kind === "cyberchef") return <FlaskConical className={iconClass} strokeWidth={1.75} />;
   if (kind === "scratchpad") return <StickyNote className={iconClass} strokeWidth={1.75} />;
   if (kind === "settings") return <Settings className={iconClass} strokeWidth={1.75} />;
@@ -650,6 +651,7 @@ function TabContentRenderer({ tab, paneId }: { tab: Tab | null; paneId: string }
   if (tab.kind === "http") return <HttpResponse />;
   if (tab.kind === "policy") return <SssfView />;
   if (tab.kind === "browser") return <BrowserView />;
+  if (tab.kind === "ai-browser") return <AiBrowserView />;
   if (tab.kind === "catcher") return <CatcherView />;
   if (tab.kind === "pitcher") return <PitcherView />;
   if (tab.kind === "cyberchef") return <CyberChefView />;

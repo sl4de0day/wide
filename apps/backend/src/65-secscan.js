@@ -184,7 +184,7 @@ function registerSecScanHandlers() {
   async function updateRulesFromRemote() {
     await promises.mkdir(SEC_DEFAULT_CACHE_DIR, { recursive: true });
     return new Promise((resolve, reject) => {
-      node_https.get(SEC_REMOTE_RULES_URL, { headers: { "User-Agent": "Wide-IDE/1.791126" } }, (res) => {
+      node_https.get(SEC_REMOTE_RULES_URL, { headers: { "User-Agent": "Wide-IDE/1.8101126" } }, (res) => {
         if (res.statusCode !== 200) {
           reject(new Error(`Failed to download rules: HTTP ${res.statusCode}`));
           return;
@@ -3853,6 +3853,87 @@ function registerSecScanHandlers() {
     return {
       active: active || "embedded",
       workspace: wsPath,
+      cache: SEC_DEFAULT_CACHE_FILE,
+    };
+  });
+
+  electron.ipcMain.handle("security:loadAgentRules", async (_event, root) => {
+    if (root) {
+      const wsAgentFile = node_path.join(root, ".wide", "agent-rules.json");
+      try {
+        const raw = JSON.parse(await promises.readFile(wsAgentFile, "utf8"));
+        const rules = parseCustomRules(raw);
+        if (rules.length > 0) return { ok: true, source: wsAgentFile, count: rules.length, rules: raw };
+      } catch {
+        void 0;
+      }
+      const wsFile = node_path.join(root, ".wide", "rules.json");
+      try {
+        const raw = JSON.parse(await promises.readFile(wsFile, "utf8"));
+        const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
+        const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
+        if (filtered.length > 0) return { ok: true, source: wsFile, count: filtered.length, rules: filtered };
+      } catch {
+        void 0;
+      }
+    }
+    try {
+      const raw = JSON.parse(await promises.readFile(SEC_DEFAULT_CACHE_FILE, "utf8"));
+      const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
+      const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
+      if (filtered.length > 0) return { ok: true, source: SEC_DEFAULT_CACHE_FILE, count: filtered.length, rules: filtered };
+    } catch {
+      void 0;
+    }
+    const embeddedAgentRules = [
+      { id: "wide/cwe078-ai-unsafe-tool-exec", cwe: "CWE-78", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:exec|execSync|spawn|subprocess\\.run|os\\.system)\\s*\\(\\s*(?:toolCall|tool_call|args|arguments|response\\.command|patch\\.command)", message: "Executing raw system command directly from AI tool call response without argument validation.", remediation: "Whitelist allowed commands and run them in an isolated sandbox with fixed arguments." },
+      { id: "wide/cwe079-ai-prompt-injection", cwe: "CWE-79", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:prompt|instruction|query|input)\\s*[:=]\\s*(?:f?[\"'].*?\\{|`.*?\\$\\{).*(?:req\\.|params\\.|body\\.|userInput|user_input|request\\.)", message: "Untrusted user input concatenated directly into LLM prompt template without sanitization.", remediation: "Use structured multi-turn message roles or sanitize prompt inputs before sending to the model." },
+      { id: "wide/cwe095-ai-unconstrained-eval", cwe: "CWE-95", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:eval|Function|vm\\.runInContext|compile)\\s*\\(\\s*(?:toolOutput|tool_output|response\\.text|aiResult|ai_output|completion)", message: "Evaluating raw executable code returned by LLM without sandboxing or static verification.", remediation: "Parse responses into structured abstract syntax trees or validate against a strict AST schema before execution." },
+      { id: "wide/cwe306-ai-unauthenticated-mcp-registration", cwe: "CWE-306", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:registerMcpServer|addMcpServer|mcpClient\\.connect)\\s*\\(\\s*(?:url|endpoint|serverConfig)\\s*\\)", message: "Model Context Protocol server registered without identity verification or authorization signature.", remediation: "Verify server host authorization and enforce cryptographic signature checks prior to registering external toolsets." },
+      { id: "wide/cwe400-ai-unbounded-agent-loop", cwe: "CWE-400", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "while\\s*\\(\\s*(?:true|1|!done|!finished|!settled)\\s*\\)\\s*\\{(?![^}]*\\b(?:maxRounds|maxSteps|maxIterations|round\\s*>=|step\\s*>=)\\b)", message: "Autonomous agent execution loop lacks explicit termination boundary or maximum step limit.", remediation: "Enforce a strict step threshold or cancellation budget to prevent runaway agent execution loops." },
+      { id: "wide/cwe770-ai-unbounded-context-accumulation", cwe: "CWE-770", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:history|messages|chatContext)\\.push\\s*\\(.*\\)(?![^;]*(?:slice|shift|trim|truncate|maxTokens|maxHistory))", message: "LLM conversation context accumulates without token limits or sliding window truncation.", remediation: "Prune chat context using sliding window truncation or token counting before appending turns." },
+      { id: "wide/cwe798-ai-prompt-secret-leak", cwe: "CWE-798", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:systemPrompt|systemMessage|system_prompt)\\s*[:=].*?(?:process\\.env\\.(?:[A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH))|apiKey|api_key|secret)", message: "Sensitive secrets or private API credentials embedded in prompt context.", remediation: "Strip private credentials from prompt text and provide secrets through isolated backend proxy channels." },
+      { id: "wide/cwe829-ai-unvalidated-patch-apply", cwe: "CWE-829", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:applyPatch|gitApply|applyDiff|writePatch)\\s*\\(\\s*(?:aiPatch|llmResponse|output\\.patch|modelDiff)", message: "Applying LLM-generated patch directly to codebase without path traversal or integrity checks.", remediation: "Validate destination file paths are strictly within workspace bounds and run static scans before applying patches." }
+    ];
+    return {
+      ok: true,
+      source: "embedded",
+      count: embeddedAgentRules.length,
+      rules: embeddedAgentRules
+    };
+  });
+
+  electron.ipcMain.handle("security:agentRulesPath", async (_event, root) => {
+    const wsAgentPath = root ? node_path.join(root, ".wide", "agent-rules.json") : null;
+    const wsPath = root ? node_path.join(root, ".wide", "rules.json") : null;
+    let active = null;
+    if (wsAgentPath) {
+      try {
+        await promises.access(wsAgentPath);
+        active = wsAgentPath;
+      } catch {
+        void 0;
+      }
+    }
+    if (!active && wsPath) {
+      try {
+        await promises.access(wsPath);
+        active = wsPath;
+      } catch {
+        void 0;
+      }
+    }
+    if (!active) {
+      try {
+        await promises.access(SEC_DEFAULT_CACHE_FILE);
+        active = SEC_DEFAULT_CACHE_FILE;
+      } catch {
+        void 0;
+      }
+    }
+    return {
+      active: active || "embedded",
+      workspace: active === wsAgentPath ? wsAgentPath : (active === wsPath ? wsPath : null),
       cache: SEC_DEFAULT_CACHE_FILE,
     };
   });

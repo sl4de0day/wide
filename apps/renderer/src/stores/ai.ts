@@ -18,6 +18,7 @@ import { t } from "@/lib/i18n";
 import { basename } from "@/lib/utils";
 import { AI_CHAT_PATH, useEditor } from "./editor";
 import { useCatcher, type CatcherTool } from "./catcher";
+import { useAiBrowser } from "./aiBrowser";
 import { applyAiEdit, useAiEdits } from "./aiEdits";
 import { useWorkspace } from "./workspace";
 import { useSettings } from "./settings";
@@ -965,6 +966,11 @@ export function subscribeAiEvents(): () => void {
   return bridge.onAiEvent((event: AiEvent) => {
     if (event.type === "open_tool") {
       openWideToolTab(event.tool, event.subtool);
+      return;
+    }
+    if (event.type === "browser_action") {
+      useEditor.getState().openAiBrowser();
+      useAiBrowser.getState().recordAction(event);
       return;
     }
     if (event.type === "open") {

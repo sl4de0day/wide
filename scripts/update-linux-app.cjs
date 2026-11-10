@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -32,7 +32,7 @@ for (const [src, dest] of copyTargets) {
 }
 
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-const version = rootPkg.version || '1.791126';
+const version = rootPkg.version || '1.8101126';
 const pkg = {
   name: 'wide',
   version,

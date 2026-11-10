@@ -656,7 +656,8 @@ export type AiEvent =
   | { id: string; type: "open"; path: string; line: number }
   | { id: string; type: "file_read"; root?: string; path: string; content: string }
   | { id: string; type: "edit"; root?: string; path: string; oldContent?: string; content: string; existed?: boolean; added?: number; removed?: number }
-  | { id: string; type: "open_tool"; tool: string; subtool?: string };
+  | { id: string; type: "open_tool"; tool: string; subtool?: string }
+  | { id: string; type: "browser_action"; action: string; url?: string; frame?: string; target?: string; timestamp?: number };
 
 
 export interface AiSessionMeta {
@@ -958,6 +959,8 @@ export interface HostApi {
   securityLoadRules(root?: string): Promise<Ok<{ source?: string; count?: number }>>;
   securityUpdateRules(): Promise<Ok<{ count?: number }>>;
   securityRulesPath(root?: string): Promise<{ active: string; workspace: string | null; cache: string }>;
+  securityLoadAgentRules(root?: string): Promise<Ok<{ source?: string; count?: number; rules?: unknown[] }>>;
+  securityAgentRulesPath(root?: string): Promise<{ active: string; workspace: string | null; cache: string }>;
   decisionConsensus(options?: unknown): Promise<Ok<{ settled?: boolean; value?: number }>>;
   decisionClaim(options?: unknown): Promise<Ok<{ occupancy?: number }>>;
   decisionScore(options?: unknown): Promise<Ok<{ bestIndex?: number; score?: number; success?: boolean }>>;
@@ -1509,6 +1512,8 @@ const fallback = {
   securityLoadRules: async () => (warn(), { ok: false, error: "No bridge" }),
   securityUpdateRules: async () => (warn(), { ok: false, error: "No bridge" }),
   securityRulesPath: async () => (warn(), { active: "embedded", workspace: null, cache: "" }),
+  securityLoadAgentRules: async () => (warn(), { ok: false, error: "No bridge" }),
+  securityAgentRulesPath: async () => (warn(), { active: "embedded", workspace: null, cache: "" }),
   decisionConsensus: async () => (warn(), { ok: false, error: "No bridge" }),
   decisionClaim: async () => (warn(), { ok: false, error: "No bridge" }),
   decisionScore: async () => (warn(), { ok: false, error: "No bridge" }),

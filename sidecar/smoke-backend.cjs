@@ -301,6 +301,12 @@ async function checkCustomRules() {
   const rPath = await invoke('security:rulesPath', [dir]);
   report(rPath.result?.workspace !== null, 'security:rulesPath detects workspace rules path');
 
+  const agentLoaded = await invoke('security:loadAgentRules', [dir]);
+  report(agentLoaded.result?.ok === true && agentLoaded.result.count >= 1, 'security:loadAgentRules returns active agent rules');
+
+  const agentPath = await invoke('security:agentRulesPath', [dir]);
+  report(typeof agentPath.result?.active === 'string' && typeof agentPath.result?.cache === 'string', 'security:agentRulesPath returns paths');
+
   const cons = await invoke('decision:consensus', [{
     classesCount: 4,
     votes: [{ voterId: 1, choice: 2 }, { voterId: 2, choice: 2 }, { voterId: 3, choice: 0 }]
@@ -316,6 +322,18 @@ async function checkCustomRules() {
     threshold: 0.5
   }]);
   report(sc.result?.success === true && sc.result.bestIndex === 0, 'decision:score selects highest-scoring candidate');
+
+  const brStatus = await invoke('ai:browser', ['status', {}]);
+  report(brStatus.result?.ok === true && typeof brStatus.result?.session?.url === 'string', 'ai:browser reports status');
+
+  const brExtract = await invoke('ai:browser', ['extract', { mode: 'text' }]);
+  report(brExtract.result?.ok === true, 'ai:browser extracts text content');
+
+  const brShot = await invoke('ai:browser', ['screenshot', {}]);
+  report(brShot.result?.ok === true && typeof brShot.result?.result === 'string', 'ai:browser captures live screencast frame');
+
+  const brClose = await invoke('ai:browser', ['close', {}]);
+  report(brClose.result?.ok === true, 'ai:browser closes session');
 
   try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
   return failed;
