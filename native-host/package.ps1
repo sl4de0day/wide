@@ -3,9 +3,14 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $out  = Join-Path $root "dist\wide"
-$hostExe = Join-Path $root "native-host\build\bin\Release\wide.exe"
+$hostExe = Join-Path $root "native-host\target\release\wide.exe"
 
-if (-not (Test-Path $hostExe)) { throw "Build the host first (cmake --build …)." }
+if (-not (Test-Path $hostExe)) {
+  Push-Location (Join-Path $root "native-host")
+  & cargo build --release
+  Pop-Location
+}
+if (-not (Test-Path $hostExe)) { throw "Build the host first (cargo build --release)." }
 
 Write-Host "== clean =="
 

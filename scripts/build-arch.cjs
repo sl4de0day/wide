@@ -60,7 +60,7 @@ const pkginfoContent = `pkgname = wide-ide
 pkgbase = wide-ide
 xdata = pkgtype=pkg
 pkgver = ${VERSION}-1
-pkgdesc = Security-first IDE for the web stack — real-time vulnerability detection, built-in Catcher proxy & Pitcher API client
+pkgdesc = Security-first IDE for the web stack ï¿½ real-time vulnerability detection, built-in Catcher proxy & Pitcher API client
 url = https://github.com/sl4de0day/wide
 builddate = ${buildDate}
 packager = Unknown Packager
@@ -72,12 +72,11 @@ conflict = wide-ide
 provides = wide
 provides = wide-ide
 depend = gtk3
-depend = nss
+depend = webkit2gtk-4.1
+depend = libsoup3
 depend = alsa-lib
 depend = libnotify
 depend = libsecret
-depend = libxss
-depend = libxtst
 optdepend = git: Source control integration
 optdepend = nodejs: Language servers and npm tools
 optdepend = python: Python analysis and debugging engine

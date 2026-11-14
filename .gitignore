@@ -10,3 +10,5 @@ installer/src/
 installer/*.pkg.tar.*
 .vscode/
 scratch/
+
+native-host/target/
