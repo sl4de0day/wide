@@ -134,6 +134,9 @@ electron.app.whenReady().then(async () => {
   registerGrpcHandlers();
   registerDiscordRpcHandlers();
   registerDatabaseHandlers();
+  if (typeof electron.__markReady === "function") {
+    electron.__markReady();
+  }
   createWindow();
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();

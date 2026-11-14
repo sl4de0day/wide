@@ -11,12 +11,18 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tao::{
-    dpi::LogicalSize,
+    dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
-    window::WindowBuilder,
+    window::{Fullscreen, WindowBuilder},
 };
-use wry::WebViewBuilder;
+#[cfg(windows)]
+use tao::platform::windows::WindowExtWindows;
+use wry::{WebContext, WebViewBuilder};
+#[cfg(windows)]
+use wry::WebViewBuilderExtWindows;
+
+const BACKGROUND_COLOR: (u8, u8, u8) = (0x3B, 0x42, 0x52);
 
 fn b64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -160,6 +166,240 @@ mod dpapi {
     }
 }
 
+#[cfg(windows)]
+mod win_host {
+    use std::path::Path;
+    use std::ptr::{null, null_mut};
+
+    const HKEY_CURRENT_USER: isize = -2147483647isize;
+    const KEY_READ: u32 = 0x20019;
+    const KEY_WRITE: u32 = 0x20006;
+    const REG_BINARY: u32 = 3;
+    const IMAGE_ICON: u32 = 1;
+    const LR_LOADFROMFILE: u32 = 0x0010;
+    const WM_SETICON: u32 = 0x0080;
+    const ICON_SMALL: usize = 0;
+    const ICON_BIG: usize = 1;
+    const MONITOR_DEFAULTTONULL: u32 = 0;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct Point {
+        pub x: i32,
+        pub y: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct Rect {
+        pub left: i32,
+        pub top: i32,
+        pub right: i32,
+        pub bottom: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct WindowPlacement {
+        pub length: u32,
+        pub flags: u32,
+        pub show_cmd: u32,
+        pub pt_min_position: Point,
+        pub pt_max_position: Point,
+        pub rc_normal_position: Rect,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn IsZoomed(hwnd: isize) -> i32;
+        fn GetWindowPlacement(hwnd: isize, lpwndpl: *mut WindowPlacement) -> i32;
+        fn MonitorFromRect(lprc: *const Rect, dw_flags: u32) -> isize;
+        fn LoadImageW(
+            h_inst: isize,
+            name: *const u16,
+            img_type: u32,
+            cx: i32,
+            cy: i32,
+            fu_load: u32,
+        ) -> isize;
+        fn SendMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+        fn GetSystemMetrics(n_index: i32) -> i32;
+    }
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn RegOpenKeyExW(
+            hkey: isize,
+            subkey: *const u16,
+            options: u32,
+            sam_desired: u32,
+            phk_result: *mut isize,
+        ) -> i32;
+        fn RegCreateKeyExW(
+            hkey: isize,
+            subkey: *const u16,
+            reserved: u32,
+            class: *const u16,
+            options: u32,
+            sam_desired: u32,
+            sec_attrs: *const core::ffi::c_void,
+            phk_result: *mut isize,
+            disposition: *mut u32,
+        ) -> i32;
+        fn RegQueryValueExW(
+            hkey: isize,
+            value_name: *const u16,
+            reserved: *const u32,
+            val_type: *mut u32,
+            data: *mut u8,
+            cb_data: *mut u32,
+        ) -> i32;
+        fn RegSetValueExW(
+            hkey: isize,
+            value_name: *const u16,
+            reserved: u32,
+            val_type: u32,
+            data: *const u8,
+            cb_data: u32,
+        ) -> i32;
+        fn RegCloseKey(hkey: isize) -> i32;
+    }
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        let mut v: Vec<u16> = s.encode_utf16().collect();
+        v.push(0);
+        v
+    }
+
+    pub fn is_zoomed(hwnd: isize) -> bool {
+        if hwnd == 0 {
+            return false;
+        }
+        unsafe { IsZoomed(hwnd) != 0 }
+    }
+
+    pub fn read_window_placement() -> Option<WindowPlacement> {
+        let subkey = to_wide("Software\\Wide");
+        let name = to_wide("WindowPlacement");
+        let mut hkey: isize = 0;
+        let rc = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) };
+        if rc != 0 || hkey == 0 {
+            return None;
+        }
+        let mut wp = WindowPlacement {
+            length: std::mem::size_of::<WindowPlacement>() as u32,
+            flags: 0,
+            show_cmd: 0,
+            pt_min_position: Point { x: 0, y: 0 },
+            pt_max_position: Point { x: 0, y: 0 },
+            rc_normal_position: Rect { left: 0, top: 0, right: 0, bottom: 0 },
+        };
+        let mut val_type: u32 = 0;
+        let mut cb_data: u32 = std::mem::size_of::<WindowPlacement>() as u32;
+        let q = unsafe {
+            RegQueryValueExW(
+                hkey,
+                name.as_ptr(),
+                null(),
+                &mut val_type,
+                (&mut wp as *mut WindowPlacement) as *mut u8,
+                &mut cb_data,
+            )
+        };
+        unsafe {
+            RegCloseKey(hkey);
+        }
+        if q != 0 || val_type != REG_BINARY || cb_data != wp.length {
+            return None;
+        }
+        Some(wp)
+    }
+
+    pub fn rect_on_monitor(rect: &Rect) -> bool {
+        if rect.right - rect.left < 400 || rect.bottom - rect.top < 300 {
+            return false;
+        }
+        unsafe { MonitorFromRect(rect as *const Rect, MONITOR_DEFAULTTONULL) != 0 }
+    }
+
+    pub fn write_window_placement(hwnd: isize) {
+        if hwnd == 0 {
+            return;
+        }
+        let mut wp = WindowPlacement {
+            length: std::mem::size_of::<WindowPlacement>() as u32,
+            flags: 0,
+            show_cmd: 0,
+            pt_min_position: Point { x: 0, y: 0 },
+            pt_max_position: Point { x: 0, y: 0 },
+            rc_normal_position: Rect { left: 0, top: 0, right: 0, bottom: 0 },
+        };
+        let ok = unsafe { GetWindowPlacement(hwnd, &mut wp) };
+        if ok == 0 {
+            return;
+        }
+        if wp.show_cmd == 2 {
+            wp.show_cmd = 1;
+        }
+        let subkey = to_wide("Software\\Wide");
+        let name = to_wide("WindowPlacement");
+        let mut hkey: isize = 0;
+        let mut disp: u32 = 0;
+        let rc = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                null(),
+                0,
+                KEY_WRITE,
+                null_mut(),
+                &mut hkey,
+                &mut disp,
+            )
+        };
+        if rc != 0 || hkey == 0 {
+            return;
+        }
+        unsafe {
+            RegSetValueExW(
+                hkey,
+                name.as_ptr(),
+                0,
+                REG_BINARY,
+                (&wp as *const WindowPlacement) as *const u8,
+                wp.length,
+            );
+            RegCloseKey(hkey);
+        }
+    }
+
+    pub fn apply_window_icon(hwnd: isize, assets_dir: &Path) {
+        if hwnd == 0 {
+            return;
+        }
+        let ico = assets_dir.join("wide.ico");
+        if !ico.exists() {
+            return;
+        }
+        let wide = to_wide(&ico.to_string_lossy());
+        unsafe {
+            let sm_cx = GetSystemMetrics(49).max(16);
+            let sm_cy = GetSystemMetrics(50).max(16);
+            let big_cx = GetSystemMetrics(11).max(32);
+            let big_cy = GetSystemMetrics(12).max(32);
+            let small_icon = LoadImageW(0, wide.as_ptr(), IMAGE_ICON, sm_cx, sm_cy, LR_LOADFROMFILE);
+            let big_icon = LoadImageW(0, wide.as_ptr(), IMAGE_ICON, big_cx, big_cy, LR_LOADFROMFILE);
+            if small_icon != 0 {
+                SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small_icon);
+            }
+            if big_icon != 0 {
+                SendMessageW(hwnd, WM_SETICON, ICON_BIG, big_icon);
+            }
+        }
+    }
+}
+
 fn handle_crypto_protect(data_b64: &str) -> Value {
     let Some(raw) = b64_decode(data_b64) else {
         return json!({ "ok": false });
@@ -195,6 +435,7 @@ enum UserEvent {
     WindowDrag,
     WindowMinimize,
     WindowMaximize,
+    WindowFullscreen,
     WindowClose,
     OpenPath(String),
 }
@@ -223,6 +464,48 @@ fn get_exe_dir() -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn resolve_portable_root(exe_dir: &Path) -> Option<PathBuf> {
+    if exe_dir.join("portable").exists() || exe_dir.join("wide.portable").exists() {
+        return Some(exe_dir.to_path_buf());
+    }
+    if let Ok(env_val) = std::env::var("WIDE_PORTABLE") {
+        let trimmed = env_val.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+    None
+}
+
+fn resolve_webview_user_data_dir(exe_dir: &Path) -> PathBuf {
+    if let Some(root) = resolve_portable_root(exe_dir) {
+        return root.join("data").join("WebView2");
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            if !local.trim().is_empty() {
+                return PathBuf::from(local).join("wide").join("WebView2");
+            }
+        }
+        return std::env::temp_dir().join("wide").join("WebView2");
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            if !xdg.trim().is_empty() {
+                return PathBuf::from(xdg).join("wide").join("webview");
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.trim().is_empty() {
+                return PathBuf::from(home).join(".local").join("share").join("wide").join("webview");
+            }
+        }
+        std::env::temp_dir().join("wide").join("webview")
+    }
 }
 
 fn resolve_renderer_dir(exe_dir: &Path) -> PathBuf {
@@ -281,7 +564,7 @@ fn resolve_assets_dir(exe_dir: &Path) -> PathBuf {
     direct_assets
 }
 
-fn handle_open_dialog(params: &Value) -> Value {
+fn handle_open_dialog(params: &Value, owner_hwnd: isize) -> Value {
     let props: Vec<String> = params
         .get("properties")
         .and_then(|v| v.as_array())
@@ -297,29 +580,42 @@ fn handle_open_dialog(params: &Value) -> Value {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let ps_script = r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.Application]::EnableVisualStyles()
-if ($env:WIDE_DLG_DIR -eq '1') {
-  $d = New-Object System.Windows.Forms.FolderBrowserDialog
-  if ($env:WIDE_DLG_TITLE) { $d.Description = $env:WIDE_DLG_TITLE }
-  if ($env:WIDE_DLG_DEFAULT -and (Test-Path $env:WIDE_DLG_DEFAULT)) { $d.SelectedPath = $env:WIDE_DLG_DEFAULT }
-  $r = $d.ShowDialog()
-  if ($r -eq [System.Windows.Forms.DialogResult]::OK -and $d.SelectedPath) {
-    @{ canceled = $false; filePaths = @($d.SelectedPath) } | ConvertTo-Json -Compress
+$owner = $null
+if ($env:WIDE_DLG_HWND -and $env:WIDE_DLG_HWND -ne '0') {
+  try {
+    $nw = New-Object System.Windows.Forms.NativeWindow
+    $nw.AssignHandle([IntPtr]::new([int64]$env:WIDE_DLG_HWND))
+    $owner = $nw
+  } catch { $owner = $null }
+}
+try {
+  if ($env:WIDE_DLG_DIR -eq '1') {
+    $d = New-Object System.Windows.Forms.FolderBrowserDialog
+    if ($env:WIDE_DLG_TITLE) { $d.Description = $env:WIDE_DLG_TITLE }
+    if ($env:WIDE_DLG_DEFAULT -and (Test-Path -LiteralPath $env:WIDE_DLG_DEFAULT)) { $d.SelectedPath = $env:WIDE_DLG_DEFAULT }
+    $r = if ($owner) { $d.ShowDialog($owner) } else { $d.ShowDialog() }
+    if ($r -eq [System.Windows.Forms.DialogResult]::OK -and $d.SelectedPath) {
+      @{ canceled = $false; filePaths = @($d.SelectedPath) } | ConvertTo-Json -Compress
+    } else {
+      '{"canceled":true,"filePaths":[]}'
+    }
   } else {
-    '{"canceled":true,"filePaths":[]}'
+    $d = New-Object System.Windows.Forms.OpenFileDialog
+    if ($env:WIDE_DLG_TITLE) { $d.Title = $env:WIDE_DLG_TITLE }
+    if ($env:WIDE_DLG_DEFAULT -and (Test-Path -LiteralPath $env:WIDE_DLG_DEFAULT)) { $d.InitialDirectory = $env:WIDE_DLG_DEFAULT }
+    if ($env:WIDE_DLG_MULTI -eq '1') { $d.Multiselect = $true }
+    $r = if ($owner) { $d.ShowDialog($owner) } else { $d.ShowDialog() }
+    if ($r -eq [System.Windows.Forms.DialogResult]::OK -and $d.FileNames.Count -gt 0) {
+      @{ canceled = $false; filePaths = @($d.FileNames) } | ConvertTo-Json -Compress
+    } else {
+      '{"canceled":true,"filePaths":[]}'
+    }
   }
-} else {
-  $d = New-Object System.Windows.Forms.OpenFileDialog
-  if ($env:WIDE_DLG_TITLE) { $d.Title = $env:WIDE_DLG_TITLE }
-  if ($env:WIDE_DLG_DEFAULT -and (Test-Path $env:WIDE_DLG_DEFAULT)) { $d.InitialDirectory = $env:WIDE_DLG_DEFAULT }
-  if ($env:WIDE_DLG_MULTI -eq '1') { $d.Multiselect = $true }
-  $r = $d.ShowDialog()
-  if ($r -eq [System.Windows.Forms.DialogResult]::OK -and $d.FileNames.Count -gt 0) {
-    @{ canceled = $false; filePaths = @($d.FileNames) } | ConvertTo-Json -Compress
-  } else {
-    '{"canceled":true,"filePaths":[]}'
-  }
+} finally {
+  if ($owner) { try { $owner.ReleaseHandle() } catch {} }
 }
 "#;
         let mut cmd = Command::new("powershell.exe");
@@ -328,6 +624,7 @@ if ($env:WIDE_DLG_DIR -eq '1') {
         cmd.env("WIDE_DLG_MULTI", if multi { "1" } else { "0" });
         cmd.env("WIDE_DLG_TITLE", title);
         cmd.env("WIDE_DLG_DEFAULT", default_path);
+        cmd.env("WIDE_DLG_HWND", owner_hwnd.to_string());
         cmd.creation_flags(CREATE_NO_WINDOW);
         if let Ok(out) = cmd.output() {
             let txt = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -340,7 +637,7 @@ if ($env:WIDE_DLG_DIR -eq '1') {
 
     #[cfg(not(windows))]
     {
-        let _ = (is_dir, multi, title, default_path);
+        let _ = (is_dir, multi, title, default_path, owner_hwnd);
         json!({ "canceled": true, "filePaths": [] })
     }
 }
@@ -378,6 +675,7 @@ fn handle_trash_item(raw_path: &str) -> Value {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let norm = raw_path.replace('/', "\\");
         let ps_script = r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName Microsoft.VisualBasic
 $p = $env:WIDE_TRASH_PATH
 if (-not (Test-Path -LiteralPath $p)) { throw 'Path not found' }
@@ -458,34 +756,47 @@ fn resolve_sidecar_script(exe_dir: &Path) -> PathBuf {
 
 fn build_preload_script(assets_dir: &Path) -> String {
     let bridge_shim = r#"
-window.chrome = window.chrome || {};
-window.__wideIpcListeners = window.__wideIpcListeners || new Set();
-window.chrome.webview = {
-  postMessage: function(data) {
-    if (window.ipc && window.ipc.postMessage) {
-      window.ipc.postMessage(typeof data === "string" ? data : JSON.stringify(data));
+(function() {
+  if (window.__wideIpcBridgeInstalled) return;
+  window.__wideIpcBridgeInstalled = true;
+  var nativeWebview = window.chrome && window.chrome.webview;
+  var nativePost = nativeWebview && typeof nativeWebview.postMessage === "function"
+    ? nativeWebview.postMessage.bind(nativeWebview)
+    : null;
+  window.chrome = window.chrome || {};
+  window.__wideIpcListeners = window.__wideIpcListeners || new Set();
+  window.chrome.webview = {
+    postMessage: function(data) {
+      var payload = typeof data === "string" ? data : JSON.stringify(data);
+      if (nativePost) {
+        nativePost(payload);
+      }
+    },
+    addEventListener: function(event, fn) {
+      if (event === "message") window.__wideIpcListeners.add(fn);
+    },
+    removeEventListener: function(event, fn) {
+      if (event === "message") window.__wideIpcListeners.delete(fn);
     }
-  },
-  addEventListener: function(event, fn) {
-    if (event === "message") window.__wideIpcListeners.add(fn);
-  },
-  removeEventListener: function(event, fn) {
-    if (event === "message") window.__wideIpcListeners.delete(fn);
-  }
-};
-window.__wideDispatchMessage = function(raw) {
-  var msg = typeof raw === "string" ? JSON.parse(raw) : raw;
-  window.__wideIpcListeners.forEach(function(fn) {
-    try { fn({ data: msg }); } catch (e) { console.error(e); }
-  });
-};
+  };
+  window.__wideDispatchMessage = function(raw) {
+    var msg = typeof raw === "string" ? JSON.parse(raw) : raw;
+    window.__wideIpcListeners.forEach(function(fn) {
+      try { fn({ data: msg }); } catch (e) { console.error(e); }
+    });
+  };
+})();
 "#;
-
-    let engine_preview = fs::read_to_string(assets_dir.join("engine-preview.js")).unwrap_or_default();
-    let preload_shim = fs::read_to_string(assets_dir.join("preload-shim.js")).unwrap_or_default();
-    let titlebar = fs::read_to_string(assets_dir.join("titlebar.js")).unwrap_or_default();
-
-    format!("{}\n{}\n{}\n{}", bridge_shim, engine_preview, preload_shim, titlebar)
+    let mut script = String::from(bridge_shim);
+    for asset_name in ["engine-preview.js", "preload-shim.js", "titlebar.js"] {
+        let path = assets_dir.join(asset_name);
+        if let Ok(content) = fs::read_to_string(&path) {
+            script.push('\n');
+            script.push_str(&content);
+            script.push('\n');
+        }
+    }
+    script
 }
 
 struct Sidecar {
@@ -511,6 +822,7 @@ impl Sidecar {
 
         let mut cmd = Command::new(node_bin);
         cmd.arg(&script);
+        cmd.current_dir(&self.exe_dir);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::inherit());
@@ -594,21 +906,92 @@ fn parse_cli_open_path() -> Option<String> {
     None
 }
 
+fn window_is_maximized(window: &tao::window::Window) -> bool {
+    #[cfg(windows)]
+    {
+        return win_host::is_zoomed(window.hwnd());
+    }
+    #[cfg(not(windows))]
+    {
+        window.is_maximized()
+    }
+}
+
+fn emit_window_state(webview: &wry::WebView, window: &tao::window::Window) {
+    let maximized = window_is_maximized(window);
+    let fullscreen = window.fullscreen().is_some();
+    let ev = json!({
+        "type": "event",
+        "channel": "host:windowState",
+        "payload": {
+            "maximized": maximized,
+            "fullscreen": fullscreen
+        }
+    });
+    let script = format!(
+        "if (window.__wideDispatchMessage) window.__wideDispatchMessage({});",
+        ev.to_string()
+    );
+    let _ = webview.evaluate_script(&script);
+}
+
+fn save_window_state(window: &tao::window::Window) {
+    #[cfg(windows)]
+    win_host::write_window_placement(window.hwnd());
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exe_dir = get_exe_dir();
     let renderer_dir = resolve_renderer_dir(&exe_dir);
     let assets_dir = resolve_assets_dir(&exe_dir);
+    let webview_data_dir = resolve_webview_user_data_dir(&exe_dir);
+    let _ = fs::create_dir_all(&webview_data_dir);
     let pending_open_path = parse_cli_open_path();
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let window = WindowBuilder::new()
+    let mut wb = WindowBuilder::new()
         .with_title("Wide IDE")
         .with_decorations(false)
         .with_inner_size(LogicalSize::new(1440.0, 900.0))
-        .with_min_inner_size(LogicalSize::new(720.0, 480.0))
-        .build(&event_loop)?;
+        .with_min_inner_size(LogicalSize::new(720.0, 480.0));
+
+    #[cfg(windows)]
+    {
+        if let Some(wp) = win_host::read_window_placement() {
+            if win_host::rect_on_monitor(&wp.rc_normal_position) {
+                let w = (wp.rc_normal_position.right - wp.rc_normal_position.left) as u32;
+                let h = (wp.rc_normal_position.bottom - wp.rc_normal_position.top) as u32;
+                wb = wb
+                    .with_position(PhysicalPosition::new(
+                        wp.rc_normal_position.left,
+                        wp.rc_normal_position.top,
+                    ))
+                    .with_inner_size(PhysicalSize::new(w, h));
+            }
+            wb = wb.with_maximized(wp.show_cmd == 3);
+        } else {
+            wb = wb.with_maximized(true);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        wb = wb.with_maximized(true);
+    }
+
+    let window = wb.build(&event_loop)?;
+
+    #[cfg(windows)]
+    let owner_hwnd: isize = {
+        let hwnd = window.hwnd();
+        win_host::apply_window_icon(hwnd, &assets_dir);
+        hwnd
+    };
+    #[cfg(not(windows))]
+    let owner_hwnd: isize = 0;
 
     let sidecar = Sidecar::new(proxy.clone(), exe_dir);
     sidecar.spawn();
@@ -666,6 +1049,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "maximize" => {
                         let _ = proxy_for_ipc.send_event(UserEvent::WindowMaximize);
                     }
+                    "fullscreen" => {
+                        let _ = proxy_for_ipc.send_event(UserEvent::WindowFullscreen);
+                    }
                     "close" => {
                         let _ = proxy_for_ipc.send_event(UserEvent::WindowClose);
                     }
@@ -689,15 +1075,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let preload_init = build_preload_script(&assets_dir);
+    let mut web_context = WebContext::new(Some(webview_data_dir));
 
-    let webview = WebViewBuilder::new()
+    let mut wv_builder = WebViewBuilder::new_with_web_context(&mut web_context)
+        .with_background_color((BACKGROUND_COLOR.0, BACKGROUND_COLOR.1, BACKGROUND_COLOR.2, 255))
         .with_custom_protocol("app".into(), protocol_handler)
         .with_initialization_script(&preload_init)
         .with_ipc_handler(ipc_handler)
-        .with_url("app://localhost/index.html")
-        .build(&window)?;
+        .with_url("app://local/index.html");
+
+    #[cfg(windows)]
+    {
+        wv_builder = wv_builder.with_https_scheme(true);
+    }
+
+    let webview = wv_builder.build(&window)?;
 
     let sidecar_main = sidecar.clone();
+    let mut last_win_state = (window_is_maximized(&window), window.fullscreen().is_some());
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -705,169 +1100,173 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::UserEvent(ue) => match ue {
                 UserEvent::SidecarLine(line) => {
-                    if line.starts_with("{\"type\":") {
-                        let script = format!(
-                            "if (window.__wideDispatchMessage) window.__wideDispatchMessage({});",
-                            line
-                        );
-                        let _ = webview.evaluate_script(&script);
-                    } else if let Ok(msg) = serde_json::from_str::<Value>(&line) {
-                        let t = msg.get("t").and_then(|v| v.as_str()).unwrap_or("");
-                        if t == "reply" {
-                            let rep = json!({
-                                "type": "reply",
-                                "replyId": msg.get("id"),
-                                "result": msg.get("result"),
-                                "error": msg.get("error")
-                            });
-                            let script = format!(
-                                "if (window.__wideDispatchMessage) window.__wideDispatchMessage({});",
-                                rep.to_string()
-                            );
-                            let _ = webview.evaluate_script(&script);
-                        } else if t == "host" {
-                            let id = msg.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-                            let method = msg.get("channel")
-                                .or_else(|| msg.get("method"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            if method == "webview:eval" {
-                                if let Some(code) = msg.get("params").and_then(|p| p.get("code")).and_then(|c| c.as_str()) {
-                                    let _ = webview.evaluate_script(code);
-                                }
+                    if let Ok(msg) = serde_json::from_str::<Value>(&line) {
+                        if msg.get("type").is_some() {
+                            if let Ok(serialized) = serde_json::to_string(&msg) {
+                                let script = format!(
+                                    "if (window.__wideDispatchMessage) window.__wideDispatchMessage({});",
+                                    serialized
+                                );
+                                let _ = webview.evaluate_script(&script);
+                            }
+                        } else {
+                            let t = msg.get("t").and_then(|v| v.as_str()).unwrap_or("");
+                            if t == "reply" {
                                 let rep = json!({
-                                    "t": "hostReply",
-                                    "id": id,
-                                    "result": Value::Null
+                                    "type": "reply",
+                                    "replyId": msg.get("id"),
+                                    "result": msg.get("result"),
+                                    "error": msg.get("error")
                                 });
-                                sidecar_main.send(rep.to_string());
-                            } else if method == "window:setTitle" {
-                                if let Some(new_title) = msg.get("params").and_then(|p| p.get("title")).and_then(|s| s.as_str()) {
-                                    window.set_title(new_title);
-                                }
-                                let rep = json!({
-                                    "t": "hostReply",
-                                    "id": id,
-                                    "result": Value::Null
-                                });
-                                sidecar_main.send(rep.to_string());
-                            } else if method == "app:installUpdate" {
-                                let installer_path = msg.get("params")
-                                    .and_then(|p| p.get("path"))
-                                    .and_then(|s| s.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let path = PathBuf::from(&installer_path);
-                                if !installer_path.is_empty() && path.exists() {
+                                let script = format!(
+                                    "if (window.__wideDispatchMessage) window.__wideDispatchMessage({});",
+                                    rep.to_string()
+                                );
+                                let _ = webview.evaluate_script(&script);
+                            } else if t == "host" {
+                                let id = msg.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let method = msg.get("channel")
+                                    .or_else(|| msg.get("method"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                if method == "webview:eval" {
+                                    if let Some(code) = msg.get("params").and_then(|p| p.get("code")).and_then(|c| c.as_str()) {
+                                        let _ = webview.evaluate_script(code);
+                                    }
                                     let rep = json!({
                                         "t": "hostReply",
                                         "id": id,
-                                        "result": { "ok": true }
+                                        "result": Value::Null
                                     });
                                     sidecar_main.send(rep.to_string());
-                                    let path_clone = path.clone();
-                                    let sidecar_stop = sidecar_main.clone();
-                                    thread::spawn(move || {
-                                        thread::sleep(std::time::Duration::from_millis(500));
-                                        sidecar_stop.stop();
-                                        #[cfg(windows)]
-                                        {
-                                            use std::os::windows::process::CommandExt;
-                                            const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
-                                            let mut cmd = Command::new(&path_clone);
-                                            cmd.args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL"]);
-                                            cmd.creation_flags(CREATE_BREAKAWAY_FROM_JOB);
-                                            let _ = cmd.spawn();
-                                        }
-                                        #[cfg(not(windows))]
-                                        {
-                                            let _ = Command::new("chmod").args(["+x", path_clone.to_str().unwrap_or("")]).status();
-                                            let _ = Command::new(&path_clone).spawn();
-                                        }
-                                        std::process::exit(0);
+                                } else if method == "window:setTitle" {
+                                    if let Some(new_title) = msg.get("params").and_then(|p| p.get("title")).and_then(|s| s.as_str()) {
+                                        window.set_title(new_title);
+                                    }
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": Value::Null
                                     });
+                                    sidecar_main.send(rep.to_string());
+                                } else if method == "app:installUpdate" {
+                                    let installer_path = msg.get("params")
+                                        .and_then(|p| p.get("path"))
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    let path = PathBuf::from(&installer_path);
+                                    if !installer_path.is_empty() && path.exists() {
+                                        let rep = json!({
+                                            "t": "hostReply",
+                                            "id": id,
+                                            "result": { "ok": true }
+                                        });
+                                        sidecar_main.send(rep.to_string());
+                                        let path_clone = path.clone();
+                                        let sidecar_stop = sidecar_main.clone();
+                                        thread::spawn(move || {
+                                            thread::sleep(std::time::Duration::from_millis(500));
+                                            sidecar_stop.stop();
+                                            #[cfg(windows)]
+                                            {
+                                                use std::os::windows::process::CommandExt;
+                                                const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
+                                                let mut cmd = Command::new(&path_clone);
+                                                cmd.args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL"]);
+                                                cmd.creation_flags(CREATE_BREAKAWAY_FROM_JOB);
+                                                let _ = cmd.spawn();
+                                            }
+                                            #[cfg(not(windows))]
+                                            {
+                                                let _ = Command::new("chmod").args(["+x", path_clone.to_str().unwrap_or("")]).status();
+                                                let _ = Command::new(&path_clone).spawn();
+                                            }
+                                            std::process::exit(0);
+                                        });
+                                    } else {
+                                        let rep = json!({
+                                            "t": "hostReply",
+                                            "id": id,
+                                            "result": { "ok": false, "error": "The installer file could not be found." }
+                                        });
+                                        sidecar_main.send(rep.to_string());
+                                    }
+                                } else if method == "dialog:showOpenDialog" {
+                                    let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
+                                    let sidecar_clone = sidecar_main.clone();
+                                    thread::spawn(move || {
+                                        let result = handle_open_dialog(&params, owner_hwnd);
+                                        let rep = json!({
+                                            "t": "hostReply",
+                                            "id": id,
+                                            "result": result
+                                        });
+                                        sidecar_clone.send(rep.to_string());
+                                    });
+                                } else if method == "shell:showItemInFolder" {
+                                    if let Some(p) = msg.get("params").and_then(|p| p.get("path")).and_then(|u| u.as_str()) {
+                                        handle_show_in_folder(p);
+                                    }
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": Value::Null
+                                    });
+                                    sidecar_main.send(rep.to_string());
+                                } else if method == "shell:trashItem" {
+                                    let p = msg.get("params").and_then(|p| p.get("path")).and_then(|u| u.as_str()).unwrap_or("").to_string();
+                                    let sidecar_clone = sidecar_main.clone();
+                                    thread::spawn(move || {
+                                        let result = handle_trash_item(&p);
+                                        let rep = json!({
+                                            "t": "hostReply",
+                                            "id": id,
+                                            "result": result
+                                        });
+                                        sidecar_clone.send(rep.to_string());
+                                    });
+                                } else if method == "crypto:protect" {
+                                    let raw = msg.get("params").and_then(|p| p.get("data")).and_then(|d| d.as_str()).unwrap_or("");
+                                    let result = handle_crypto_protect(raw);
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": result
+                                    });
+                                    sidecar_main.send(rep.to_string());
+                                } else if method == "crypto:unprotect" {
+                                    let raw = msg.get("params").and_then(|p| p.get("data")).and_then(|d| d.as_str()).unwrap_or("");
+                                    let result = handle_crypto_unprotect(raw);
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": result
+                                    });
+                                    sidecar_main.send(rep.to_string());
+                                } else if method == "shell:openExternal" {
+                                    if let Some(url) = msg.get("params").and_then(|p| p.get("url")).and_then(|u| u.as_str()) {
+                                        #[cfg(windows)]
+                                        let _ = Command::new("cmd").args(["/c", "start", "", url]).spawn();
+                                        #[cfg(target_os = "macos")]
+                                        let _ = Command::new("open").arg(url).spawn();
+                                        #[cfg(target_os = "linux")]
+                                        let _ = Command::new("xdg-open").arg(url).spawn();
+                                    }
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": Value::Null
+                                    });
+                                    sidecar_main.send(rep.to_string());
                                 } else {
                                     let rep = json!({
                                         "t": "hostReply",
                                         "id": id,
-                                        "result": { "ok": false, "error": "The installer file could not be found." }
+                                        "result": Value::Null
                                     });
                                     sidecar_main.send(rep.to_string());
                                 }
-                            } else if method == "dialog:showOpenDialog" {
-                                let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
-                                let sidecar_clone = sidecar_main.clone();
-                                thread::spawn(move || {
-                                    let result = handle_open_dialog(&params);
-                                    let rep = json!({
-                                        "t": "hostReply",
-                                        "id": id,
-                                        "result": result
-                                    });
-                                    sidecar_clone.send(rep.to_string());
-                                });
-                            } else if method == "shell:showItemInFolder" {
-                                if let Some(p) = msg.get("params").and_then(|p| p.get("path")).and_then(|u| u.as_str()) {
-                                    handle_show_in_folder(p);
-                                }
-                                let rep = json!({
-                                    "t": "hostReply",
-                                    "id": id,
-                                    "result": Value::Null
-                                });
-                                sidecar_main.send(rep.to_string());
-                            } else if method == "shell:trashItem" {
-                                let p = msg.get("params").and_then(|p| p.get("path")).and_then(|u| u.as_str()).unwrap_or("").to_string();
-                                let sidecar_clone = sidecar_main.clone();
-                                thread::spawn(move || {
-                                    let result = handle_trash_item(&p);
-                                    let rep = json!({
-                                        "t": "hostReply",
-                                        "id": id,
-                                        "result": result
-                                    });
-                                    sidecar_clone.send(rep.to_string());
-                                });
-                            } else if method == "crypto:protect" {
-                                let raw = msg.get("params").and_then(|p| p.get("data")).and_then(|d| d.as_str()).unwrap_or("");
-                                let result = handle_crypto_protect(raw);
-                                let rep = json!({
-                                    "t": "hostReply",
-                                    "id": id,
-                                    "result": result
-                                });
-                                sidecar_main.send(rep.to_string());
-                            } else if method == "crypto:unprotect" {
-                                let raw = msg.get("params").and_then(|p| p.get("data")).and_then(|d| d.as_str()).unwrap_or("");
-                                let result = handle_crypto_unprotect(raw);
-                                let rep = json!({
-                                    "t": "hostReply",
-                                    "id": id,
-                                    "result": result
-                                });
-                                sidecar_main.send(rep.to_string());
-                            } else if method == "shell:openExternal" {
-                                if let Some(url) = msg.get("params").and_then(|p| p.get("url")).and_then(|u| u.as_str()) {
-                                    #[cfg(windows)]
-                                    let _ = Command::new("cmd").args(["/c", "start", "", url]).spawn();
-                                    #[cfg(target_os = "macos")]
-                                    let _ = Command::new("open").arg(url).spawn();
-                                    #[cfg(target_os = "linux")]
-                                    let _ = Command::new("xdg-open").arg(url).spawn();
-                                }
-                                let rep = json!({
-                                    "t": "hostReply",
-                                    "id": id,
-                                    "result": Value::Null
-                                });
-                                sidecar_main.send(rep.to_string());
-                            } else {
-                                let rep = json!({
-                                    "t": "hostReply",
-                                    "id": id,
-                                    "result": Value::Null
-                                });
-                                sidecar_main.send(rep.to_string());
                             }
                         }
                     }
@@ -893,9 +1292,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     window.set_minimized(true);
                 }
                 UserEvent::WindowMaximize => {
-                    window.set_maximized(!window.is_maximized());
+                    if window.fullscreen().is_some() {
+                        window.set_fullscreen(None);
+                    } else {
+                        let currently_max = window_is_maximized(&window);
+                        window.set_maximized(!currently_max);
+                    }
+                    last_win_state = (window_is_maximized(&window), window.fullscreen().is_some());
+                    emit_window_state(&webview, &window);
+                }
+                UserEvent::WindowFullscreen => {
+                    if window.fullscreen().is_some() {
+                        window.set_fullscreen(None);
+                    } else {
+                        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                    }
+                    last_win_state = (window_is_maximized(&window), window.fullscreen().is_some());
+                    emit_window_state(&webview, &window);
                 }
                 UserEvent::WindowClose => {
+                    save_window_state(&window);
                     sidecar_main.stop();
                     *control_flow = ControlFlow::Exit;
                 }
@@ -915,7 +1331,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
             Event::WindowEvent { event, .. } => match event {
+                WindowEvent::Resized(_) => {
+                    let cur = (window_is_maximized(&window), window.fullscreen().is_some());
+                    if cur != last_win_state {
+                        last_win_state = cur;
+                        emit_window_state(&webview, &window);
+                    }
+                }
                 WindowEvent::CloseRequested => {
+                    save_window_state(&window);
                     sidecar_main.stop();
                     *control_flow = ControlFlow::Exit;
                 }

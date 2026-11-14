@@ -1,5 +1,3 @@
-
-
 (function () {
   "use strict";
   if (window.__wideChrome) return;
@@ -17,18 +15,52 @@
     }
     return "";
   }
-  document.addEventListener("mousedown", function (e) {
-    if (e.button !== 0) return;
-    var target = e.target;
-    if (target && target.closest && target.closest("#hc-winctl")) return;
-    var region = regionOf(target);
-    if (region === "drag") { cmd("drag"); return; }
 
+  function isDragHit(e) {
+    var target = e.target;
+    if (target && target.closest && target.closest("#hc-winctl")) return false;
+    var region = regionOf(target);
+    if (region === "drag") {
+      var interactiveInRegion = target && target.closest &&
+        target.closest("button,a,input,select,textarea,[role='button'],[contenteditable]");
+      return !interactiveInRegion;
+    }
     if (region !== "no-drag" && e.clientY <= 36) {
-      var t = target;
-      var interactive = t && t.closest &&
-        t.closest("button,a,input,select,textarea,[role='button'],[contenteditable]");
-      if (!interactive) cmd("drag");
+      var interactive = target && target.closest &&
+        target.closest("button,a,input,select,textarea,[role='button'],[contenteditable]");
+      return !interactive;
+    }
+    return false;
+  }
+
+  var dragStart = null;
+  document.addEventListener("mousedown", function (e) {
+    if (e.button !== 0) { dragStart = null; return; }
+    dragStart = isDragHit(e) ? { x: e.clientX, y: e.clientY } : null;
+  }, true);
+
+  document.addEventListener("mousemove", function (e) {
+    if (!dragStart) return;
+    if ((e.buttons & 1) === 0) { dragStart = null; return; }
+    if (Math.abs(e.clientX - dragStart.x) >= 4 || Math.abs(e.clientY - dragStart.y) >= 4) {
+      dragStart = null;
+      cmd("drag");
+    }
+  }, true);
+
+  document.addEventListener("mouseup", function () {
+    dragStart = null;
+  }, true);
+
+  document.addEventListener("dblclick", function (e) {
+    if (e.button !== 0) return;
+    if (isDragHit(e)) cmd("maximize");
+  }, true);
+
+  window.addEventListener("keydown", function (e) {
+    if (e.key === "F11" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      cmd("fullscreen");
     }
   }, true);
 
@@ -36,6 +68,8 @@
   var SVG_MAX = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="1.5" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>';
   var SVG_RESTORE = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h5.5v5.5M1.5 3.5h5v5h-5z" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var SVG_CLOSE = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.75 1.75l6.5 6.5M8.25 1.75l-6.5 6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+
+  var hostWindowState = null;
 
   function build() {
     if (document.getElementById("hc-winctl")) return;
@@ -83,12 +117,26 @@
     document.body.appendChild(bar);
 
     function updateMaxIcon() {
-      var isMax = (window.outerWidth >= screen.availWidth && window.outerHeight >= screen.availHeight);
+      var isMax = hostWindowState
+        ? Boolean(hostWindowState.maximized || hostWindowState.fullscreen)
+        : (window.outerWidth >= screen.availWidth - 2 && window.outerHeight >= screen.availHeight - 2);
       btnMax.innerHTML = isMax ? SVG_RESTORE : SVG_MAX;
-      btnMax.title = isMax ? "Geri Yükle" : "Maximize";
+      btnMax.title = isMax ? "Restore" : "Maximize";
       btnMax.setAttribute("aria-label", btnMax.title);
     }
+
+    if (wv && wv.addEventListener) {
+      wv.addEventListener("message", function (e) {
+        var msg = e && e.data;
+        if (msg && msg.type === "event" && msg.channel === "host:windowState" && msg.payload) {
+          hostWindowState = msg.payload;
+          updateMaxIcon();
+        }
+      });
+    }
+
     window.addEventListener("resize", updateMaxIcon);
+    updateMaxIcon();
   }
   if (document.body) build();
   else document.addEventListener("DOMContentLoaded", build);

@@ -378,6 +378,20 @@ const utilityProcess = {
   },
 };
 
+let readyResolved = false;
+let readyResolve = null;
+const readyPromise = new Promise((resolve) => {
+  readyResolve = resolve;
+});
+function markReady() {
+  if (readyResolved) return;
+  readyResolved = true;
+  if (readyResolve) readyResolve();
+}
+function whenReady() {
+  return readyResolved ? Promise.resolve() : readyPromise;
+}
+
 module.exports = {
   app, BrowserWindow, dialog, ipcMain, safeStorage, shell, utilityProcess,
   webContents,
@@ -386,6 +400,8 @@ module.exports = {
 
   __setBridge: setBridge,
   __initSecrets: initSecrets,
+  __markReady: markReady,
+  __whenReady: whenReady,
   __invoke(channel, args) {
     const listener = handlers.get(channel);
     if (!listener) return Promise.reject(new Error('No handler for ' + channel));

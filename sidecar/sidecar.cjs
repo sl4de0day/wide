@@ -99,22 +99,24 @@ async function runInvoke(msg) {
 }
 
 function dispatchInvoke(msg) {
-  const ch = msg.channel;
-  if (ROOT_SOURCES.has(ch)) {
+  const ready = typeof mock.__whenReady === 'function' ? mock.__whenReady() : Promise.resolve();
+  ready.then(() => {
+    const ch = msg.channel;
+    if (ROOT_SOURCES.has(ch)) {
+      const pending = runInvoke(msg);
+      rootGate = pending.then(
+        function () { rootGate = null; },
+        function () { rootGate = null; },
+      );
+      return;
+    }
 
-    const pending = runInvoke(msg);
-    rootGate = pending.then(
-      function () { rootGate = null; },
-      function () { rootGate = null; },
-    );
-    return;
-  }
-
-  if (rootGate && NEEDS_ROOT.test(ch)) {
-    rootGate.then(function () { runInvoke(msg).catch(function () {}); });
-    return;
-  }
-  runInvoke(msg).catch(function () {});
+    if (rootGate && NEEDS_ROOT.test(ch)) {
+      rootGate.then(function () { runInvoke(msg).catch(function () {}); });
+      return;
+    }
+    runInvoke(msg).catch(function () {});
+  });
 }
 
 const rl = readline.createInterface({ input: process.stdin });
