@@ -28,7 +28,7 @@ interface UpdateState {
   dismiss(): void;
 }
 
-const INSTALLER_RE = /^https:\/\/.*\.exe$/i;
+const INSTALLER_RE = /^https:\/\/.*\.(exe|AppImage|tar\.gz|tar\.zst|pkg\.tar\.zst|sh)$/i;
 
 export const useUpdate = create<UpdateState>((set, get) => ({
   checking: false,

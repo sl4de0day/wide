@@ -238,15 +238,57 @@ function ThemePicker({
 function UpdatesSection() {
   const t = useT();
   const current = useUpdate((state) => state.current);
+  const checking = useUpdate((state) => state.checking);
+  const available = useUpdate((state) => state.available);
+  const latest = useUpdate((state) => state.latest);
+  const installing = useUpdate((state) => state.installing);
+  const error = useUpdate((state) => state.error);
+
+  const handleCheckOrInstall = async () => {
+    if (available) {
+      await useUpdate.getState().install();
+    } else {
+      await useUpdate.getState().check();
+    }
+  };
 
   return (
     <>
       <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("Updates")}</h2>
       <Row
         label={t("Automatic updates")}
-        hint={t("Wide checks for updates on startup and installs them automatically from GitHub.")}
+        hint={
+          error
+            ? `${t("Error")}: ${error}`
+            : available
+              ? t("New version {version} is available. Click to install.", { version: latest })
+              : t("Wide checks for updates on startup and installs them automatically from GitHub.")
+        }
       >
-        <span className="font-mono text-[12px] text-fg-dim">{current || "…"}</span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[12px] text-fg-dim">
+            {current ? `v${current}` : "…"}
+            {available && latest && (
+              <span className="ml-2 font-semibold text-accent">→ v{latest}</span>
+            )}
+          </span>
+          <button
+            type="button"
+            disabled={checking || installing !== "idle"}
+            onClick={handleCheckOrInstall}
+            className="rounded px-2.5 py-1 text-[11px] font-medium bg-hover text-fg hover:bg-hover/80 disabled:opacity-50 transition-colors"
+          >
+            {installing === "download"
+              ? t("Downloading...")
+              : installing === "install"
+                ? t("Installing...")
+                : checking
+                  ? t("Checking...")
+                  : available
+                    ? t("Update & Restart")
+                    : t("Check now")}
+          </button>
+        </div>
       </Row>
     </>
   );

@@ -435,13 +435,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Some(code) = msg.get("params").and_then(|p| p.get("code")).and_then(|c| c.as_str()) {
                                     let _ = webview.evaluate_script(code);
                                 }
+                                let rep = json!({
+                                    "t": "hostReply",
+                                    "id": id,
+                                    "result": Value::Null
+                                });
+                                sidecar_main.send(rep.to_string());
+                            } else if method == "app:installUpdate" {
+                                let installer_path = msg.get("params")
+                                    .and_then(|p| p.get("path"))
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let path = PathBuf::from(&installer_path);
+                                if !installer_path.is_empty() && path.exists() {
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": { "ok": true }
+                                    });
+                                    sidecar_main.send(rep.to_string());
+                                    let path_clone = path.clone();
+                                    let sidecar_stop = sidecar_main.clone();
+                                    thread::spawn(move || {
+                                        thread::sleep(std::time::Duration::from_millis(500));
+                                        sidecar_stop.stop();
+                                        #[cfg(windows)]
+                                        {
+                                            use std::os::windows::process::CommandExt;
+                                            const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
+                                            let mut cmd = Command::new(&path_clone);
+                                            cmd.args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL"]);
+                                            cmd.creation_flags(CREATE_BREAKAWAY_FROM_JOB);
+                                            let _ = cmd.spawn();
+                                        }
+                                        #[cfg(not(windows))]
+                                        {
+                                            let _ = Command::new("chmod").args(["+x", path_clone.to_str().unwrap_or("")]).status();
+                                            let _ = Command::new(&path_clone).spawn();
+                                        }
+                                        std::process::exit(0);
+                                    });
+                                } else {
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": { "ok": false, "error": "The installer file could not be found." }
+                                    });
+                                    sidecar_main.send(rep.to_string());
+                                }
+                            } else if method == "shell:openExternal" {
+                                if let Some(url) = msg.get("params").and_then(|p| p.get("url")).and_then(|u| u.as_str()) {
+                                    #[cfg(windows)]
+                                    let _ = Command::new("cmd").args(["/c", "start", "", url]).spawn();
+                                    #[cfg(target_os = "macos")]
+                                    let _ = Command::new("open").arg(url).spawn();
+                                    #[cfg(target_os = "linux")]
+                                    let _ = Command::new("xdg-open").arg(url).spawn();
+                                }
+                                let rep = json!({
+                                    "t": "hostReply",
+                                    "id": id,
+                                    "result": Value::Null
+                                });
+                                sidecar_main.send(rep.to_string());
+                            } else {
+                                let rep = json!({
+                                    "t": "hostReply",
+                                    "id": id,
+                                    "result": Value::Null
+                                });
+                                sidecar_main.send(rep.to_string());
                             }
-                            let rep = json!({
-                                "t": "hostReply",
-                                "id": id,
-                                "result": Value::Null
-                            });
-                            sidecar_main.send(rep.to_string());
                         }
                     }
                 }
