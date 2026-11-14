@@ -84,6 +84,7 @@ const GONE = [
   failed += await checkSca();
   failed += await checkTaintFlow();
   failed += await checkCustomRules();
+  failed += await checkAgentEmojiGuardrail();
   failed += await checkDatabaseLifecycle();
   failed += checkNativeColours();
 
@@ -658,7 +659,7 @@ async function checkDatabaseLifecycle() {
     console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
   };
 
-  const dir = pathSync.join(osSync.tmpdir(), `wide-db-${process.pid}`);
+  const dir = pathSync.join(osSync.tmpdir(), `wide-app-db-${process.pid}`);
   fsSync.mkdirSync(dir, { recursive: true });
   const dbFile = pathSync.join(dir, 'sample.sqlite');
   fsSync.writeFileSync(pathSync.join(dir, '.env'), 'DATABASE_URL=postgres://secret:topsecret@db.internal/prod\n', 'utf8');
@@ -731,5 +732,60 @@ async function checkDatabaseLifecycle() {
   }
 
   try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return failed;
+}
+
+async function checkAgentEmojiGuardrail() {
+  const vm = require('node:vm');
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+  const agentRulesRes = (await invoke('security:loadAgentRules', [])).result;
+  const hasNoEmojis = Boolean(
+    agentRulesRes?.ok &&
+      Array.isArray(agentRulesRes.rules) &&
+      agentRulesRes.rules.some((r) => r.id === 'wide/ai-no-emojis')
+  );
+  report(hasNoEmojis, 'security:loadAgentRules enforces wide/ai-no-emojis even over partial rule caches');
+
+  const agentSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '44-ai-agent.js'), 'utf8');
+  const openCodeSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '50-ai-opencode.js'), 'utf8');
+  const ctx = vm.createContext({
+    node_path: pathSync,
+    node_os: require('node:os'),
+    promises: fsSync.promises,
+    appRoot: () => ROOT,
+  });
+  const s1 = agentSrc.indexOf('function aiCreateStreamFilter');
+  const e1 = agentSrc.indexOf('function aiHasSubstantialCodeBlock');
+  const s2 = agentSrc.indexOf('const AI_EMBEDDED_AGENT_RULES');
+  const e2 = agentSrc.indexOf('async function aiExecuteDependencyCheck');
+  const s3 = openCodeSrc.indexOf('function openCodeCreateStreamFilter');
+  const e3 = openCodeSrc.indexOf('function openCodeBuildPrompt');
+  vm.runInContext(
+    `${agentSrc.slice(s1, e1)}\n${agentSrc.slice(s2, e2)}\n${openCodeSrc.slice(s3, e3)}`,
+    ctx
+  );
+
+  const collected = [];
+  const sanitizer = ctx.aiCreateStreamEmojiSanitizer([]);
+  const filter = ctx.openCodeCreateStreamFilter((ev) => {
+    const clean = sanitizer.sanitizeChunk(`${ev.type}:text`, ev.text);
+    if (clean) collected.push({ type: ev.type, text: clean });
+  });
+  filter.push('Hello \uD83D');
+  filter.push('\uDE00 <think>plan \uD83D');
+  filter.push('\uDE80</think>1\uFE0F');
+  filter.push('\u20E3 \u2139');
+  filter.push('\uFE0F \uD83D\uDC68\u200D\uD83D\uDCBB \u2B50\u23F0 OK');
+  filter.flush();
+  sanitizer.flush((ev) => collected.push(ev));
+  const outText = collected.filter((c) => c.type === 'text').map((c) => c.text).join('');
+  const outThink = collected.filter((c) => c.type === 'thinking').map((c) => c.text).join('');
+  report(outText === 'Hello      OK' && outThink === 'plan ', 'streaming emoji sanitizer strips split surrogates, keycaps, variation icons, and ZWJ clusters');
   return failed;
 }

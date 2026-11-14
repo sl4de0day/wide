@@ -847,6 +847,25 @@ function openCodeExtractMessageText(message) {
   return "";
 }
 
+function openCodeCreateStreamFilter(send, onAnswered) {
+  if (typeof aiCreateStreamFilter === "function") {
+    return aiCreateStreamFilter((ev) => {
+      if (!ev || !ev.text) return;
+      if (ev.type === "text" && onAnswered) onAnswered();
+      send(ev);
+    });
+  }
+  return {
+    push(delta) {
+      if (delta) {
+        if (onAnswered) onAnswered();
+        send({ type: "text", text: delta });
+      }
+    },
+    flush() {},
+  };
+}
+
 function openCodeBuildPrompt({ messages, system, projectInstructions, root, effort }) {
   const sections = [];
   const trimmedSystem = String(system || "").trim();
@@ -896,28 +915,9 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
     const t0 = Date.now();
     const toolNames = new Map();
 
-    const filter =
-      typeof aiCreateStreamFilter === "function"
-        ? aiCreateStreamFilter(
-            (delta) => {
-              if (delta) {
-                answered = true;
-                send({ type: "text", text: delta });
-              }
-            },
-            (thinkDelta) => {
-              if (thinkDelta) send({ type: "thinking", text: thinkDelta });
-            }
-          )
-        : {
-            push(delta) {
-              if (delta) {
-                answered = true;
-                send({ type: "text", text: delta });
-              }
-            },
-            flush() {},
-          };
+    const filter = openCodeCreateStreamFilter(send, () => {
+      answered = true;
+    });
 
     const cleanup = () => {
       signal?.removeEventListener("abort", onAbort);
@@ -1237,28 +1237,9 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, root = "", al
     const t0 = Date.now();
     const dirQuery = openCodeDirQuery(root);
 
-    const filter =
-      typeof aiCreateStreamFilter === "function"
-        ? aiCreateStreamFilter(
-            (delta) => {
-              if (delta) {
-                answered = true;
-                send({ type: "text", text: delta });
-              }
-            },
-            (thinkDelta) => {
-              if (thinkDelta) send({ type: "thinking", text: thinkDelta });
-            }
-          )
-        : {
-            push(delta) {
-              if (delta) {
-                answered = true;
-                send({ type: "text", text: delta });
-              }
-            },
-            flush() {},
-          };
+    const filter = openCodeCreateStreamFilter(send, () => {
+      answered = true;
+    });
 
     const cleanup = () => {
       signal?.removeEventListener("abort", onAbort);
