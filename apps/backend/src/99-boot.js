@@ -13,10 +13,12 @@ function shutdownServices() {
     closeAllGrpc,
     mcpDisposeAll,
     openCodeStop,
+    disposeAiBrowser,
     stopProxy,
     stopOast,
     stopBuiltinOast,
     discordRpcShutdown,
+    disposeDatabases,
     dispose,
   ];
   for (const step of steps) {
@@ -115,6 +117,7 @@ electron.app.whenReady().then(async () => {
   registerAiLocalHandlers();
   registerMcpHandlers();
   registerAiAgentHandlers();
+  registerAiBrowserHandlers();
   registerClaudeCodeHandlers();
   registerOpenCodeHandlers();
   registerBrowserHandlers();
@@ -130,6 +133,7 @@ electron.app.whenReady().then(async () => {
   registerRealtimeHandlers();
   registerGrpcHandlers();
   registerDiscordRpcHandlers();
+  registerDatabaseHandlers();
   createWindow();
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -645,6 +645,37 @@ export interface PickedFile {
 }
 
 
+export interface AiBrowserDetectedInfo {
+  found: boolean;
+  executablePath: string;
+  label: string;
+  source: string;
+}
+
+export interface AiBrowserSessionState {
+  open: boolean;
+  active: boolean;
+  url: string;
+  title: string;
+  loading: boolean;
+  screenshot: string;
+  lastAction: string;
+  actions: { action: string; target?: string; url?: string; timestamp: number }[];
+  domSummary: unknown[];
+  logs: { type: string; text: string; url?: string; status?: number; method?: string; timestamp: number }[];
+  canGoBack: boolean;
+  canGoForward: boolean;
+  proxyPort: number;
+  browserLabel: string;
+  installing: boolean;
+  installStatus: string;
+}
+
+export interface AiBrowserProgressEvent {
+  status: string;
+  installing: boolean;
+}
+
 export type AiEvent =
   | { id: string; type: "text"; text: string }
   | { id: string; type: "thinking"; text: string }
@@ -657,7 +688,67 @@ export type AiEvent =
   | { id: string; type: "file_read"; root?: string; path: string; content: string }
   | { id: string; type: "edit"; root?: string; path: string; oldContent?: string; content: string; existed?: boolean; added?: number; removed?: number }
   | { id: string; type: "open_tool"; tool: string; subtool?: string }
-  | { id: string; type: "browser_action"; action: string; url?: string; frame?: string; target?: string; timestamp?: number };
+  | {
+      id?: string;
+      type: "browser_action";
+      action: string;
+      url?: string;
+      title?: string;
+      frame?: string;
+      screenshot?: string;
+      target?: string;
+      loading?: boolean;
+      canGoBack?: boolean;
+      canGoForward?: boolean;
+      proxyPort?: number;
+      browserLabel?: string;
+      installing?: boolean;
+      status?: string;
+      openPanel?: boolean;
+      timestamp?: number;
+    }
+  | {
+      id?: string;
+      type: "browser_frame";
+      url?: string;
+      title?: string;
+      loading?: boolean;
+      screenshot?: string;
+      canGoBack?: boolean;
+      canGoForward?: boolean;
+      proxyPort?: number;
+      browserLabel?: string;
+      timestamp?: number;
+    }
+  | {
+      id?: string;
+      type: "catcher_sync";
+      action: string;
+      running: boolean;
+      port: number;
+      intercepting: boolean;
+      interceptingResponses?: boolean;
+      scope?: string[];
+      seed?: { method: string; url: string; headers: [string, string][]; body: string };
+      openUi?: boolean;
+    }
+  | {
+      id: string;
+      type: "permission_request";
+      requestId: string;
+      title: string;
+      detail?: string;
+      command?: string;
+      tool?: string;
+    }
+  | {
+      id?: string;
+      type: "tool_sync";
+      target: string;
+      status?: Record<string, unknown>;
+      state?: { environments?: unknown[]; globals?: unknown[]; activeId?: string | null };
+      request?: Record<string, unknown>;
+    };
 
 
 export interface AiSessionMeta {
@@ -1303,8 +1394,15 @@ export interface HostApi {
     messages: AiMessage[];
     system: string;
     effort?: "fast" | "thinking";
+    language?: string;
+    activeFile?: string | null;
     openTabs?: Array<{ name: string; path?: string; kind?: string; active?: boolean }>;
   }): Promise<Ok<{ answered?: boolean }>>;
+  aiCompact(request: {
+    provider: string;
+    model: string;
+    messages: Array<{ role: string; text?: string; content?: string }>;
+  }): Promise<Ok<{ summary?: string; fallback?: boolean }>>;
   aiStop(id: string): Promise<Ok<{ stopped?: boolean }>>;
 
   aiComplete(prefix: string, suffix: string, language: string): Promise<Ok<{ text?: string }>>;
@@ -1370,6 +1468,13 @@ export interface HostApi {
   aiOpenCodeModels(fresh?: boolean): Promise<Ok<OpenCodeModelsReply>>;
   onAiEvent: Subscriber<AiEvent>;
   onAiPull: Subscriber<AiPullEvent>;
+  aiPermissionReply(requestId: string, allowed: boolean, reason?: string): Promise<Ok>;
+  aiBrowser(action: string, params?: Record<string, unknown>): Promise<Ok<{ result?: unknown; session?: AiBrowserSessionState }>>;
+  aiBrowserStatus(): Promise<Ok<{ detected?: AiBrowserDetectedInfo; session?: AiBrowserSessionState }>>;
+  aiBrowserInstall(): Promise<Ok<{ executablePath?: string; label?: string; source?: string }>>;
+  aiBrowserInput(payload: Record<string, unknown>): Promise<Ok>;
+  aiBrowserNav(payload: Record<string, unknown>): Promise<Ok<{ result?: unknown; session?: AiBrowserSessionState }>>;
+  onAiBrowserProgress: Subscriber<AiBrowserProgressEvent>;
   onMcpPending: Subscriber<McpPendingEvent>;
   mcpPending(): Promise<Ok<{ servers?: McpServerOffer[] }>>;
   mcpTrust(signature: string, allow: boolean): Promise<Ok<Record<string, never>>>;
@@ -1416,6 +1521,222 @@ export interface HostApi {
   discordSetActivity(activity: DiscordActivity): Promise<Ok>;
   discordClear(): Promise<Ok>;
   discordStatus(): Promise<Ok<{ connected: boolean; enabled: boolean }>>;
+
+  dbList(): Promise<Ok<{ connections: DbConnectionSummary[] }>>;
+  dbSave(input: DbSaveInput): Promise<Ok<{ connection: DbConnectionSummary }>>;
+  dbDelete(id: string): Promise<Ok>;
+  dbTest(input: DbSaveInput | { id: string }): Promise<Ok<{ latencyMs: number; serverVersion: string }>>;
+  dbDiscover(root: string): Promise<Ok<{ items: DbDiscoveredSource[] }>>;
+  dbConnect(id: string): Promise<Ok<{ connected: boolean; serverVersion: string }>>;
+  dbDisconnect(id: string): Promise<Ok>;
+  dbSchema(id: string, options?: { refresh?: boolean }): Promise<Ok<{ schema: DbSchemaSnapshot }>>;
+  dbQuery(
+    id: string,
+    sql: string,
+    options?: { limit?: number; explain?: boolean; allowDangerous?: boolean; noAutoLimit?: boolean; params?: unknown[] }
+  ): Promise<Ok<{ result?: DbQueryResult; dangerous?: DbDangerInfo; readOnlyBlocked?: boolean }>>;
+  dbApplyChanges(
+    id: string,
+    changes: DbRowChange[]
+  ): Promise<Ok<{ applied?: number; sqlPreview?: string[]; readOnlyBlocked?: boolean }>>;
+  dbExport(
+    id: string,
+    options: { format: "csv" | "json" | "sql"; table?: string; schema?: string; sql?: string; outputPath?: string; root?: string }
+  ): Promise<Ok<{ content?: string; filePath?: string; rowCount?: number }>>;
+  dbAudit(id: string): Promise<Ok<{ findings: DbAuditFinding[]; summary: DbAuditSummary }>>;
+  dbListSavedQueries(root: string): Promise<Ok<{ queries: DbSavedQuery[] }>>;
+  dbSaveQuery(root: string, name: string, sql: string): Promise<Ok<{ path: string; name: string }>>;
+  dbRedisCommand(
+    id: string,
+    action: "scan" | "get" | "info" | "del",
+    params?: { cursor?: string; pattern?: string; count?: number; key?: string }
+  ): Promise<Ok<{ cursor?: string; items?: DbRedisKeyItem[]; key?: string; type?: string; ttl?: number; value?: unknown; info?: string; deleted?: number; readOnlyBlocked?: boolean }>>;
+}
+
+export type DbEngine = "sqlite" | "postgres" | "mysql" | "redis";
+export type DbEnvironment = "dev" | "staging" | "prod";
+export type DbTlsMode = "disable" | "prefer" | "require" | "verify-full";
+
+export interface DbSshTunnelInfo {
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  authMethod: "agent" | "key";
+  privateKeyPath: string;
+  hasPassphrase?: boolean;
+  passphrase?: string;
+}
+
+export interface DbConnectionSummary {
+  id: string;
+  name: string;
+  engine: DbEngine;
+  environment: DbEnvironment;
+  readOnly: boolean;
+  filePath: string;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  tlsMode: DbTlsMode;
+  caPath: string;
+  sshTunnel: DbSshTunnelInfo;
+  hasPassword: boolean;
+  hasConnectionString: boolean;
+  connected: boolean;
+  serverVersion: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DbSaveInput {
+  id?: string;
+  name?: string;
+  engine: DbEngine;
+  environment?: DbEnvironment;
+  readOnly?: boolean;
+  filePath?: string;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  password?: string;
+  connectionString?: string;
+  tlsMode?: DbTlsMode;
+  caPath?: string;
+  sshTunnel?: Partial<DbSshTunnelInfo>;
+}
+
+export interface DbDiscoveredSource {
+  kind: "sqlite-file" | "prisma-schema" | "drizzle-config" | "docker-compose";
+  engine: DbEngine;
+  label: string;
+  relativePath: string;
+  filePath?: string;
+  host?: string;
+  port?: number;
+  hint?: string;
+  autoAddable: boolean;
+}
+
+export interface DbColumnMeta {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  defaultValue: string | null;
+  primaryKey: boolean;
+  unique?: boolean;
+  autoIncrement?: boolean;
+}
+
+export interface DbTableMeta {
+  schema: string;
+  name: string;
+  type: "table" | "view";
+  rowCount?: number;
+  columns: DbColumnMeta[];
+  ddl?: string;
+}
+
+export interface DbIndexMeta {
+  schema: string;
+  table: string;
+  name: string;
+  unique: boolean;
+  definition: string;
+}
+
+export interface DbTriggerMeta {
+  schema: string;
+  table: string;
+  name: string;
+  definition: string;
+}
+
+export interface DbForeignKeyMeta {
+  name?: string;
+  fromSchema: string;
+  fromTable: string;
+  fromColumn: string;
+  toSchema: string;
+  toTable: string;
+  toColumn: string;
+  onUpdate?: string;
+  onDelete?: string;
+}
+
+export interface DbSchemaSnapshot {
+  engine: DbEngine;
+  database: string;
+  serverVersion: string;
+  schemas: string[];
+  tables: DbTableMeta[];
+  views: DbTableMeta[];
+  indexes: DbIndexMeta[];
+  triggers: DbTriggerMeta[];
+  foreignKeys: DbForeignKeyMeta[];
+  dbSize?: number;
+  keyPrefixes?: Array<{ prefix: string; count: number; sampleTypes: string[] }>;
+}
+
+export interface DbQueryColumn {
+  name: string;
+  type?: string;
+}
+
+export interface DbQueryResult {
+  columns: DbQueryColumn[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  affectedRows?: number;
+  durationMs: number;
+  appliedLimit?: number | null;
+  truncated?: boolean;
+  isExplain?: boolean;
+  statementType?: string;
+}
+
+export interface DbDangerInfo {
+  level: "critical" | "high";
+  statementType: string;
+  reason: string;
+}
+
+export type DbRowChange =
+  | { kind: "update"; schema?: string; table: string; key: Record<string, unknown>; set: Record<string, unknown> }
+  | { kind: "insert"; schema?: string; table: string; values: Record<string, unknown> }
+  | { kind: "delete"; schema?: string; table: string; key: Record<string, unknown> };
+
+export interface DbAuditFinding {
+  severity: "critical" | "high" | "medium" | "low" | "info";
+  category: string;
+  title: string;
+  detail: string;
+  table?: string;
+  column?: string;
+}
+
+export interface DbAuditSummary {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+}
+
+export interface DbSavedQuery {
+  name: string;
+  fileName: string;
+  path: string;
+  sql: string;
+  updatedAt: number;
+}
+
+export interface DbRedisKeyItem {
+  key: string;
+  type: string;
+  ttl: number;
 }
 
 
@@ -1691,6 +2012,7 @@ const fallback = {
   aiActiveChat: async () => (warn(), { ok: false, error: "No bridge" }),
   aiDeleteSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSend: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCompact: async () => (warn(), { ok: false, error: "No bridge" }),
   aiComplete: async () => (warn(), { ok: false, error: "No bridge" }),
   aiStop: async () => (warn(), { ok: false, error: "No bridge" }),
   aiCommitFile: async () => (warn(), { ok: false, error: "No bridge" }),
@@ -1715,6 +2037,13 @@ const fallback = {
   aiOpenCodeModels: async () => (warn(), { ok: false, error: "No bridge" }),
   onAiEvent: noSub<AiEvent>(),
   onAiPull: noSub<AiPullEvent>(),
+  aiPermissionReply: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiBrowser: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiBrowserStatus: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiBrowserInstall: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiBrowserInput: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiBrowserNav: async () => (warn(), { ok: false, error: "No bridge" }),
+  onAiBrowserProgress: noSub<AiBrowserProgressEvent>(),
   onMcpPending: noSub<McpPendingEvent>(),
   mcpPending: async () => (warn(), { ok: false, error: "No bridge" }),
   mcpTrust: async () => (warn(), { ok: false, error: "No bridge" }),
@@ -1746,6 +2075,22 @@ const fallback = {
   discordSetActivity: async () => (warn(), { ok: false, error: "No bridge" }),
   discordClear: async () => (warn(), { ok: false, error: "No bridge" }),
   discordStatus: async () => (warn(), { ok: false, connected: false, enabled: false }),
+
+  dbList: async () => (warn(), { ok: false, connections: [] }),
+  dbSave: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbDelete: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbTest: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbDiscover: async () => (warn(), { ok: false, items: [] }),
+  dbConnect: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbDisconnect: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbSchema: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbQuery: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbApplyChanges: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbExport: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbAudit: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbListSavedQueries: async () => (warn(), { ok: false, queries: [] }),
+  dbSaveQuery: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbRedisCommand: async () => (warn(), { ok: false, error: "No bridge" }),
 } as unknown as HostApi;
 
 declare global {

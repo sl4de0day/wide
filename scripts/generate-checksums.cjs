@@ -13,7 +13,7 @@ if (fs.existsSync(oldExe)) {
   fs.unlinkSync(oldExe);
 }
 
-const files = fs.readdirSync(RELEASE).filter((f) => f.includes('1.8101126'));
+const files = fs.readdirSync(RELEASE).filter((f) => f.includes('1.9141126'));
 files.sort();
 
 const sums = [];

@@ -84,6 +84,7 @@ const GONE = [
   failed += await checkSca();
   failed += await checkTaintFlow();
   failed += await checkCustomRules();
+  failed += await checkDatabaseLifecycle();
   failed += checkNativeColours();
 
   console.log(failed === 0 ? '\nAll backend checks passed.' : `\n${failed} check(s) failed.`);
@@ -285,15 +286,23 @@ async function checkCustomRules() {
   fsSync.writeFileSync(
     pathSync.join(dir, '.wide', 'rules.json'),
     JSON.stringify([
-      { id: 'wide/dynamic-sink', pattern: 'dynamicSink\\(', message: 'Dynamic sink detected', severity: 'CRITICAL', languages: ['js'] }
+      {
+        id: 'wide/dynamic-sink',
+        pattern: 'dynamicSink\\(',
+        'not-match': 'safeLiteral',
+        message: 'Dynamic sink detected',
+        severity: 'CRITICAL',
+        languages: ['js']
+      }
     ]),
     'utf8'
   );
-  fsSync.writeFileSync(pathSync.join(dir, 'src', 'dyn.js'), 'dynamicSink(input);\n', 'utf8');
+  fsSync.writeFileSync(pathSync.join(dir, 'src', 'dyn.js'), 'dynamicSink(input);\ndynamicSink(safeLiteral);\n', 'utf8');
 
   const dynScan = await invoke('security:scanProject', [dir]);
   const dynFindings = dynScan.result?.findings ?? [];
-  report(dynFindings.some((f) => f.ruleId === 'wide/dynamic-sink'), 'dynamic rule from rules.json fires');
+  const dynHits = dynFindings.filter((f) => f.ruleId === 'wide/dynamic-sink');
+  report(dynHits.length === 1 && dynHits[0].line === 1, 'dynamic rule from rules.json fires and respects not-match');
 
   const loaded = await invoke('security:loadRules', [dir]);
   report(loaded.result?.ok === true && loaded.result.count >= 1, 'security:loadRules returns workspace rules');
@@ -637,4 +646,90 @@ function checkNativeColours() {
     );
   }
   return bad;
+}
+
+async function checkDatabaseLifecycle() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const dir = pathSync.join(osSync.tmpdir(), `wide-db-${process.pid}`);
+  fsSync.mkdirSync(dir, { recursive: true });
+  const dbFile = pathSync.join(dir, 'sample.sqlite');
+  fsSync.writeFileSync(pathSync.join(dir, '.env'), 'DATABASE_URL=postgres://secret:topsecret@db.internal/prod\n', 'utf8');
+
+  const saved = (await invoke('db:save', [{
+    name: 'smoke-sqlite',
+    engine: 'sqlite',
+    environment: 'dev',
+    readOnly: false,
+    filePath: dbFile,
+    password: 'super-secret-value',
+  }])).result;
+  report(
+    saved?.ok === true && saved.connection?.id && !('password' in saved.connection),
+    'db:save creates SQLite connection without returning plaintext password',
+  );
+
+  const id = saved?.connection?.id;
+  if (id) {
+    const createRes = (await invoke('db:query', [
+      id,
+      'CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, password_hash TEXT)',
+    ])).result;
+    report(createRes?.ok === true, 'db:query creates table in SQLite');
+
+    const insRes = (await invoke('db:applyChanges', [
+      id,
+      [{ kind: 'insert', schema: 'main', table: 'users', values: { email: 'a@b.test', password_hash: '5d41402abc4b2a76b9719d911017c592' } }],
+    ])).result;
+    report(insRes?.ok === true && insRes.applied === 1, 'db:applyChanges inserts row atomically');
+
+    const schemaRes = (await invoke('db:schema', [id])).result;
+    report(
+      schemaRes?.ok === true && schemaRes.schema?.tables?.some((t) => t.name === 'users'),
+      'db:schema introspects users table and columns',
+    );
+
+    const selRes = (await invoke('db:query', [id, 'SELECT id, email FROM users'])).result;
+    report(selRes?.ok === true && selRes.result?.rowCount === 1, 'db:query executes SELECT cleanly');
+
+    const expRes = (await invoke('db:query', [id, 'SELECT * FROM users', { explain: true }])).result;
+    report(expRes?.ok === true && expRes.result?.isExplain === true, 'db:query EXPLAIN returns query plan');
+
+    const dangerBlocked = (await invoke('db:query', [id, 'DROP TABLE users'])).result;
+    report(dangerBlocked?.ok === false && Boolean(dangerBlocked?.dangerous), 'db:query gates dangerous DROP statements without confirmation');
+
+    const auditRes = (await invoke('db:audit', [id])).result;
+    report(
+      auditRes?.ok === true &&
+        Array.isArray(auditRes.findings) &&
+        auditRes.findings.some((f) => f.category === 'crypto' || f.category === 'pii'),
+      'db:audit detects PII columns and weak hash formats without returning secret values',
+    );
+
+    const disc = (await invoke('db:discover', [dir])).result;
+    report(
+      disc?.ok === true &&
+        disc.items?.some((it) => it.engine === 'sqlite') &&
+        !JSON.stringify(disc).includes('topsecret'),
+      'db:discover detects workspace SQLite files while never reading .env',
+    );
+
+    await invoke('db:save', [{ id, readOnly: true }]);
+    const roQueryBlocked = (await invoke('db:query', [id, "DELETE FROM users WHERE id = 1"])).result;
+    report(roQueryBlocked?.ok === false && roQueryBlocked?.readOnlyBlocked === true, 'readOnly connection blocks write SQL');
+    const roDiffBlocked = (await invoke('db:applyChanges', [id, [{ kind: 'delete', table: 'users', key: { id: 1 } }]])).result;
+    report(roDiffBlocked?.ok === false && roDiffBlocked?.readOnlyBlocked === true, 'readOnly connection blocks db:applyChanges');
+
+    await invoke('db:delete', [id]);
+  }
+
+  try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return failed;
 }

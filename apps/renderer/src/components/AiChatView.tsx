@@ -44,7 +44,8 @@ import { diffCounts, lineDiff } from "@/lib/lineDiff";
 import { plainText } from "@/lib/plainText";
 import { basename, cn, copyText } from "@/lib/utils";
 import { toast } from "@/stores/toast";
-import { AI_IMAGE_PROVIDERS, useAi, type AiImage, type AiToolStep, type AiTurn } from "@/stores/ai";
+import { AI_IMAGE_PROVIDERS, openWideToolTab, useAi, type AiImage, type AiToolStep, type AiTurn } from "@/stores/ai";
+import { useAiBrowser } from "@/stores/aiBrowser";
 import { useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
 import { useRun } from "@/stores/run";
@@ -114,7 +115,47 @@ function resolvePath(root: string, path: string): string {
 }
 
 function stepTarget(step: AiToolStep): string {
-  const input = step.input as { path?: string; query?: string; command?: string; tab?: string; operation?: string; url?: string; method?: string; manifest?: string } | null;
+  const input = step.input as {
+    path?: string;
+    file?: string;
+    query?: string;
+    command?: string;
+    tab?: string;
+    operation?: string;
+    url?: string;
+    method?: string;
+    manifest?: string;
+    action?: string;
+    ref?: string;
+    selector?: string;
+    text?: string;
+    key?: string;
+    id?: string;
+    toolId?: string;
+  } | null;
+  if (step.name.startsWith("browser_")) {
+    const labelMap: Record<string, string> = {
+      browser_open: "Browser: Open",
+      browser_navigate: "Browser: Navigate",
+      browser_snapshot: "Browser: Snapshot",
+      browser_click: "Browser: Click",
+      browser_type: "Browser: Type",
+      browser_press: "Browser: Press",
+      browser_hover: "Browser: Hover",
+      browser_select: "Browser: Select",
+      browser_scroll: "Browser: Scroll",
+      browser_wait: "Browser: Wait",
+      browser_extract: "Browser: Extract",
+      browser_console: "Browser: Console",
+      browser_cookies: "Browser: Cookies",
+      browser_eval: "Browser: Eval JS",
+      browser_screenshot: "Browser: Screenshot",
+      browser_close: "Browser: Close",
+    };
+    const head = labelMap[step.name] || step.name;
+    const detail = input?.url || input?.ref || input?.selector || input?.key || input?.text || "";
+    return detail ? `${head} (${String(detail).slice(0, 60)})` : head;
+  }
   if (input?.url) {
     const m = String(input.method || "GET").toUpperCase();
     return `${m} ${input.url}`;
@@ -125,19 +166,23 @@ function stepTarget(step: AiToolStep): string {
   if (step.name === "check_dependencies" && !input?.manifest && !input?.path) {
     return "Project Dependencies";
   }
-  if (step.name === "get_open_tabs") {
-    return "Open Tabs";
+  if (step.name === "get_open_tabs" || step.name === "ui_state_get") {
+    return step.name === "ui_state_get" ? "IDE Live State" : "Open Tabs";
   }
-  if (step.name === "manage_catcher") {
+  if (step.name === "manage_catcher" || step.name === "catcher_control") {
     const cin = step.input as { action?: string; limit?: number; intercept?: boolean } | null;
     const act = String(cin?.action || "status").toLowerCase();
     if (act === "start") return "Catcher: Start Proxy";
     if (act === "stop") return "Catcher: Stop Proxy";
     if (act === "get_traffic" || act === "traffic") return "Catcher: Inspect Traffic";
     if (act === "set_intercept") return `Catcher: Intercept ${cin?.intercept ? "ON" : "OFF"}`;
-    return "Catcher: Proxy Status";
+    return `Catcher: ${act}`;
   }
-  return String(input?.manifest ?? input?.path ?? input?.tab ?? input?.operation ?? input?.query ?? input?.command ?? "");
+  if (input?.action && (step.name.endsWith("_control") || step.name.includes("pitcher_") || step.name.includes("findings_") || step.name.includes("lsp_") || step.name.includes("terminal_session") || step.name.includes("wide_custom") || step.name === "run_tests")) {
+    const suffix = input.path || input.file || input.key || input.toolId || input.id || "";
+    return suffix ? `${step.name}: ${input.action} (${suffix})` : `${step.name}: ${input.action}`;
+  }
+  return String(input?.manifest ?? input?.path ?? input?.file ?? input?.tab ?? input?.operation ?? input?.query ?? input?.command ?? "");
 }
 
 const OPENS_A_FILE = new Set(["read_file", "open_file", "write_file", "edit_file"]);
@@ -436,7 +481,10 @@ function ReactAtomIcon({ className }: { className?: string }) {
   );
 }
 
-function FileTypeBadge({ fileName, isCommand, isHttp, isSecurity }: { fileName: string; isCommand?: boolean; isHttp?: boolean; isSecurity?: boolean }) {
+function FileTypeBadge({ fileName, isCommand, isHttp, isSecurity, isBrowser }: { fileName: string; isCommand?: boolean; isHttp?: boolean; isSecurity?: boolean; isBrowser?: boolean }) {
+  if (isBrowser) {
+    return <Globe className="size-3 text-accent shrink-0" strokeWidth={2} />;
+  }
   if (isSecurity) {
     return <Shield className="size-3 text-fg-dim shrink-0" strokeWidth={2} />;
   }
@@ -916,8 +964,19 @@ interface EnrichedStep {
   lineRange: string;
   commandText: string;
   exitCode: number | null;
+  httpStatus?: number | null;
   isHttp?: boolean;
   isSecurity?: boolean;
+  isBrowser?: boolean;
+}
+
+function parseHttpStatusFromResult(raw: string): number | null {
+  if (!raw) return null;
+  const jsonMatch = raw.match(/"status"\s*:\s*(\d{3})/);
+  if (jsonMatch) return Number(jsonMatch[1]);
+  const lineMatch = raw.match(/\bHTTP\/[\d.]+\s+(\d{3})\b/i);
+  if (lineMatch) return Number(lineMatch[1]);
+  return null;
 }
 
 function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof useT>, turnId: string): EnrichedStep[] {
@@ -946,24 +1005,42 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
       step.name === "run_command" ||
       step.name === "git" ||
       step.name === "send_http_request" ||
-      step.name === "manage_catcher"
+      step.name === "pitcher_send" ||
+      step.name === "repeater_send" ||
+      step.name === "intruder_attack" ||
+      step.name === "manage_catcher" ||
+      step.name === "catcher_control" ||
+      step.name === "terminal_session" ||
+      step.name === "engine_control" ||
+      step.name === "debug_control" ||
+      step.name === "wide_custom_tool_run" ||
+      step.name === "run_tests" ||
+      step.name.startsWith("browser_")
     ) {
       actionLabel = t("Ran");
       actionKind = "command";
-    } else if (step.name === "search" || step.name === "find_relevant") {
+    } else if (step.name === "search" || step.name === "find_relevant" || step.name === "lsp_navigate") {
       actionLabel = t("Searched");
     } else if (
       step.name === "list_dir" ||
       step.name === "create_dir" ||
       step.name === "open_tool_tab" ||
-      step.name === "get_open_tabs"
+      step.name === "get_open_tabs" ||
+      step.name === "ui_state_get" ||
+      step.name === "vault_list_refs" ||
+      step.name === "pitcher_env"
     ) {
       actionLabel = t("Explored");
     } else if (
       step.name === "get_diagnostics" ||
       step.name === "transform_data" ||
       step.name === "run_security_scan" ||
-      step.name === "check_dependencies"
+      step.name === "check_dependencies" ||
+      step.name === "findings_query" ||
+      step.name === "findings_baseline" ||
+      step.name === "oast_control" ||
+      step.name === "oast_poll" ||
+      step.name.startsWith("catcher_")
     ) {
       actionLabel = t("Analyzed");
       actionKind = "analyzed";
@@ -999,11 +1076,17 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
     }
 
     const lineRange = actionKind === "analyzed" ? extractLineRange(step, rawTarget) : "";
-    const isHttp = step.name === "send_http_request";
+    const isBrowser = step.name.startsWith("browser_");
+    const isHttp = step.name === "send_http_request" || step.name === "pitcher_send" || step.name === "repeater_send" || step.name === "intruder_attack";
     const isSecurity =
       step.name === "run_security_scan" ||
       step.name === "check_dependencies" ||
-      step.name === "manage_catcher";
+      step.name === "manage_catcher" ||
+      step.name.startsWith("catcher_") ||
+      step.name.startsWith("findings_") ||
+      step.name.startsWith("oast_") ||
+      step.name === "vault_list_refs";
+    const httpStatus = isHttp ? parseHttpStatusFromResult(step.result) : null;
     const { commandText, exitCode } = extractCommandInfo(step);
 
     return {
@@ -1017,10 +1100,12 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
       added,
       removed,
       lineRange,
-      commandText: isHttp ? rawTarget : commandText,
+      commandText: isHttp || isBrowser ? rawTarget : commandText,
       exitCode,
+      httpStatus,
       isHttp,
       isSecurity,
+      isBrowser,
     };
   });
 }
@@ -1044,6 +1129,8 @@ function AgentProcessStream({
 }) {
   const t = useT();
   const root = useWorkspace((state) => state.root) ?? "";
+  const liveBrowserFrame = useAiBrowser((state) => state.frame);
+  const liveBrowserUrl = useAiBrowser((state) => state.url);
   const enrichedSteps = useMemo(() => enrichSteps(steps, root, t, turnId), [steps, root, t, turnId]);
   const [expandedCommands, setExpandedCommands] = useState<Record<string, boolean>>({});
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
@@ -1175,7 +1262,7 @@ function AgentProcessStream({
                     </span>
                   )}
 
-                  <FileTypeBadge fileName={item.fileName} isCommand={isCommand} isHttp={item.isHttp} isSecurity={item.isSecurity} />
+                  <FileTypeBadge fileName={item.fileName} isCommand={isCommand} isHttp={item.isHttp} isSecurity={item.isSecurity} isBrowser={item.isBrowser} />
 
                   <span
                     className={cn(
@@ -1188,6 +1275,33 @@ function AgentProcessStream({
                   >
                     {isCommand ? item.commandText : item.fileName}
                   </span>
+
+                  {item.httpStatus != null && (
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold shrink-0 select-none",
+                        item.httpStatus >= 200 && item.httpStatus < 300 && "bg-emerald-500/15 text-emerald-400",
+                        item.httpStatus >= 300 && item.httpStatus < 400 && "bg-amber-500/15 text-amber-300",
+                        item.httpStatus >= 400 && "bg-rose-500/15 text-rose-400",
+                      )}
+                    >
+                      {item.httpStatus}
+                    </span>
+                  )}
+
+                  {item.isBrowser && item.step.name !== "browser_close" && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openWideToolTab("browser");
+                      }}
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/15 transition-colors shrink-0"
+                    >
+                      <ExternalLink className="size-2.5" strokeWidth={2} />
+                      <span>{t("Open")}</span>
+                    </button>
+                  )}
 
                   {item.lineRange && (
                     <span className="font-mono text-[11px] text-fg-faint/70 select-none shrink-0">
@@ -1213,8 +1327,28 @@ function AgentProcessStream({
                 </div>
 
                 {isCommand && isCommandExpanded && (
-                  <div className="my-1 ml-6 mr-1 p-2 rounded-md bg-canvas/80 border border-line/60 font-mono text-[11px] text-fg-dim max-h-48 overflow-auto whitespace-pre-wrap select-text wide-enter-fade">
-                    {cleanCommandResult(item.step.result)}
+                  <div className="my-1 ml-6 mr-1 flex flex-col gap-2">
+                    {item.isBrowser && liveBrowserFrame && (
+                      <button
+                        type="button"
+                        onClick={() => openWideToolTab("browser")}
+                        className="group/thumb relative w-fit overflow-hidden rounded-lg border border-line/70 bg-canvas text-left shadow-sm"
+                      >
+                        <img
+                          src={`data:image/jpeg;base64,${liveBrowserFrame}`}
+                          alt={liveBrowserUrl || "Browser"}
+                          className="block max-h-36 w-auto object-cover"
+                        />
+                        {liveBrowserUrl && (
+                          <div className="truncate border-t border-line/60 bg-panel/90 px-2 py-0.5 font-mono text-[10px] text-fg-dim">
+                            {liveBrowserUrl}
+                          </div>
+                        )}
+                      </button>
+                    )}
+                    <div className="p-2 rounded-md bg-canvas/80 border border-line/60 font-mono text-[11px] text-fg-dim max-h-48 overflow-auto whitespace-pre-wrap select-text wide-enter-fade">
+                      {cleanCommandResult(item.step.result)}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1655,6 +1789,55 @@ function PlusMenu({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function PermissionBanner({ sessionId, activeTurn }: { sessionId: string; activeTurn: string | null }) {
+  const t = useT();
+  const pending = useAi((state) => state.pendingPermissions);
+  const replyPermission = useAi((state) => state.replyPermission);
+  const matching = pending.filter(
+    (p) => !p.turnId || p.turnId === activeTurn || p.turnId.startsWith(`${sessionId}#`),
+  );
+  if (matching.length === 0) return null;
+
+  return (
+    <div className="shrink-0 border-t border-amber-500/30 bg-amber-500/10 px-6 py-2.5">
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-2">
+        {matching.map((req) => (
+          <div key={req.requestId} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-500/30 bg-panel/95 px-3 py-2 shadow-sm">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[12px] font-semibold text-amber-300">
+                <Shield className="size-3.5 shrink-0" strokeWidth={2} />
+                <span>{req.title || t("Confirmation required")}</span>
+              </div>
+              {req.detail && <div className="mt-0.5 text-[11.5px] text-fg-dim">{req.detail}</div>}
+              {req.command && (
+                <pre className="mt-1 max-h-24 overflow-auto rounded border border-line/60 bg-canvas px-2 py-1 font-mono text-[11px] text-fg select-text">
+                  {req.command}
+                </pre>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5 self-center">
+              <button
+                type="button"
+                onClick={() => void replyPermission(req.requestId, false, "Denied by user")}
+                className="rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-fg-dim hover:bg-hover hover:text-fg transition-colors"
+              >
+                {t("Deny")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void replyPermission(req.requestId, true)}
+                className="rounded-md bg-amber-500/20 border border-amber-500/40 px-2.5 py-1 text-[11.5px] font-medium text-amber-200 hover:bg-amber-500/30 transition-colors"
+              >
+                {t("Allow")}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2234,6 +2417,8 @@ export function AiChatView({ id }: { id: string }) {
             {t(error)}
           </button>
         )}
+
+        <PermissionBanner sessionId={id} activeTurn={active} />
 
         <div className="shrink-0 border-t border-line px-6 py-4">
           <div className="relative mx-auto w-full max-w-[760px]">

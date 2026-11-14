@@ -8,9 +8,10 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const OUT_DIR = path.join(DIST, 'wide-linux-x64');
 const ELECTRON_DIST = path.join(ROOT, 'node_modules', 'electron', 'dist');
+const LINUX_ZIP = process.env.LINUX_ZIP || 'C:\\Users\\yusuf\\Downloads\\electron-v41.7.1-linux-x64.zip';
 
 console.log('== [1/5] Checks and Preparation ==');
-if (!fs.existsSync(ELECTRON_DIST)) {
+if (!fs.existsSync(LINUX_ZIP) && !fs.existsSync(ELECTRON_DIST)) {
   console.error('Electron distribution not found. Please run "npm install".');
   process.exit(1);
 }
@@ -27,8 +28,12 @@ if (fs.existsSync(OUT_DIR)) {
 }
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-console.log('== [2/5] Copying Electron Runtime ==');
-fs.cpSync(ELECTRON_DIST, OUT_DIR, { recursive: true });
+console.log('== [2/5] Preparing Electron Runtime ==');
+if (fs.existsSync(LINUX_ZIP)) {
+  cp.execSync(`tar -xf "${LINUX_ZIP}" -C "${OUT_DIR}"`, { stdio: 'inherit' });
+} else {
+  fs.cpSync(ELECTRON_DIST, OUT_DIR, { recursive: true });
+}
 
 const origBinary = path.join(OUT_DIR, 'electron');
 const wideBinary = path.join(OUT_DIR, 'wide');
@@ -61,7 +66,7 @@ for (const [src, dest] of copyTargets) {
 }
 
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-const version = rootPkg.version || '1.8101126';
+const version = rootPkg.version || '1.9141126';
 const pkg = {
   name: 'wide',
   version,
@@ -75,6 +80,7 @@ const PROD_MODULES = [
   '@grpc',
   '@lydell',
   'node-forge',
+  'playwright-core',
   'prettier',
   'typescript',
 ];

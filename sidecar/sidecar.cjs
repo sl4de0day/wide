@@ -55,13 +55,15 @@ function logIpc(channel, args, result, err) {
 
 const hostPending = new Map();
 const HOST_REQUEST_TIMEOUT_MS = 30000;
+const HOST_DIALOG_TIMEOUT_MS = 300000;
 let hostSeq = 1;
 function hostRequest(method, params) {
   const id = hostSeq++;
+  const timeoutMs = String(method || '').startsWith('dialog:') ? HOST_DIALOG_TIMEOUT_MS : HOST_REQUEST_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       if (hostPending.delete(id)) reject(new Error('The host did not answer ' + method + ' in time.'));
-    }, HOST_REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
     if (typeof timer.unref === 'function') timer.unref();
     hostPending.set(id, {
       resolve: (value) => { clearTimeout(timer); resolve(value); },

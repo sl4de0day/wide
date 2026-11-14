@@ -718,25 +718,30 @@ function openCodeMapToolName(name) {
   if (key === "edit" || key === "patch" || key === "multiedit") return "edit_file";
   if (key === "list" || key === "ls") return "list_dir";
   if (key === "grep" || key === "glob") return "search";
-  if (key === "shell" || key === "bash") return "run_command";
+  if (key === "shell" || key === "bash" || key === "sh" || key === "execute" || key === "exec" || key === "cmd") return "run_command";
   return clean || name || "tool";
 }
 
-async function openCodeEnsureWideMcp(bridgePort, token, root) {
+function openCodeDirQuery(root) {
+  return root ? `?directory=${encodeURIComponent(root)}` : "";
+}
+
+async function openCodeEnsureWideMcp(bridgePort, token, root, server = null) {
+  const mcpEntry = {
+    type: "local",
+    command: [process.execPath, node_path.join(appRoot(), "sidecar", "ai-mcp.cjs")],
+    environment: {
+      WIDE_AI_PORT: String(bridgePort),
+      WIDE_AI_TOKEN: token,
+      WIDE_AI_ROOT: root || "",
+    },
+    enabled: true,
+  };
+
   try {
     const home = electron.app.getPath("home");
     const globalConfigDir = node_path.join(home, ".config", "opencode");
     const globalConfigFile = node_path.join(globalConfigDir, "opencode.json");
-
-    const mcpEntry = {
-      type: "local",
-      command: [process.execPath, node_path.join(appRoot(), "sidecar", "ai-mcp.cjs")],
-      environment: {
-        WIDE_AI_PORT: String(bridgePort),
-        WIDE_AI_TOKEN: token,
-        WIDE_AI_ROOT: root || "",
-      },
-    };
 
     const updateConfig = async (filePath) => {
       let existing = {};
@@ -746,21 +751,88 @@ async function openCodeEnsureWideMcp(bridgePort, token, root) {
         existing = {};
       }
       if (!existing || typeof existing !== "object") existing = {};
+      delete existing[""];
+      if (!existing.$schema) existing.$schema = "https://opencode.ai/config.json";
       if (!existing.mcp || typeof existing.mcp !== "object") existing.mcp = {};
-      if (!existing.mcp.servers || typeof existing.mcp.servers !== "object") existing.mcp.servers = {};
-      existing.mcp.servers.wide = mcpEntry;
+      if (existing.mcp.servers) delete existing.mcp.servers;
+      existing.mcp.wide = mcpEntry;
       await promises.mkdir(node_path.dirname(filePath), { recursive: true });
       await promises.writeFile(filePath, JSON.stringify(existing, null, 2), "utf8");
     };
 
     await updateConfig(globalConfigFile);
-
     if (root) {
       await updateConfig(node_path.join(root, ".opencode", "opencode.json")).catch(() => {});
     }
   } catch (error) {
-    console.error("[openCodeEnsureWideMcp] Failed to configure MCP:", error);
+    console.error("[openCodeEnsureWideMcp] Failed to write MCP config:", error);
   }
+
+  if (server) {
+    try {
+      await openCodeRequest(
+        server,
+        "POST",
+        `/mcp${openCodeDirQuery(root)}`,
+        { name: "wide", config: mcpEntry },
+        { timeout: 5000 }
+      );
+    } catch {
+      void 0;
+    }
+  }
+}
+
+async function openCodeDecidePermission({ permName, patterns, metadata, allowWrites, send }) {
+  const name = String(permName || "").toLowerCase();
+  const patList = Array.isArray(patterns) ? patterns.map((p) => String(p || "")) : [];
+  if (name === "question") return { allow: false, reason: "Questions are disabled during autonomous execution." };
+  if (name === "read" && patList.some((p) => /(?:^|[\\/])\.env(?:\.|$)/i.test(p))) {
+    return { allow: false, reason: "Reading .env secrets requires manual review." };
+  }
+  if (allowWrites === false && (name === "edit" || name === "write" || name === "patch" || name === "multiedit")) {
+    return { allow: false, reason: "Writes are disabled in read-only mode." };
+  }
+  if (name === "bash" || name === "shell" || name === "execute") {
+    const cmdText = String(metadata?.command || patList.join(" ") || "");
+    if (typeof aiAssessCommandRisk === "function") {
+      const risk = aiAssessCommandRisk(cmdText);
+      if (risk.destructive && typeof aiRequestPermission === "function") {
+        const decision = await aiRequestPermission(send, {
+          title: "Destructive command confirmation",
+          detail: risk.reason,
+          command: cmdText,
+          tool: "run_command",
+        });
+        return { allow: decision.allowed, reason: decision.reason };
+      }
+    }
+  }
+  return { allow: true };
+}
+
+function openCodeBuildUserTranscript(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  const relevant = list.filter((item) => item && (item.role === "user" || item.role === "assistant"));
+  if (relevant.length <= 1) {
+    return openCodeExtractMessageText(relevant[0]);
+  }
+  const sections = [];
+  const historyLines = [];
+  for (let index = 0; index < relevant.length - 1; index += 1) {
+    const item = relevant[index];
+    const text = openCodeExtractMessageText(item).trim();
+    if (!text) continue;
+    historyLines.push(`${item.role === "user" ? "User" : "Assistant"}: ${text}`);
+  }
+  if (historyLines.length > 0) {
+    sections.push(`Conversation History:\n${historyLines.join("\n\n")}`);
+  }
+  const latest = openCodeExtractMessageText(relevant[relevant.length - 1]).trim();
+  if (latest) {
+    sections.push(latest);
+  }
+  return sections.join("\n\n");
 }
 
 function openCodeExtractMessageText(message) {
@@ -825,8 +897,8 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
     const toolNames = new Map();
 
     const filter =
-      typeof aiCreateToolTagFilter === "function"
-        ? aiCreateToolTagFilter(
+      typeof aiCreateStreamFilter === "function"
+        ? aiCreateStreamFilter(
             (delta) => {
               if (delta) {
                 answered = true;
@@ -916,9 +988,9 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
         if (typeof claudeToolBridge === "function") {
           const bridge = await claudeToolBridge();
           if (typeof aiRegisterTurnBridge === "function") {
-            aiRegisterTurnBridge(wideBridgeGlobalToken, root, send);
+            aiRegisterTurnBridge(wideBridgeGlobalToken, root, send, allowWrites);
           }
-          await openCodeEnsureWideMcp(bridge.port, wideBridgeGlobalToken, root);
+          await openCodeEnsureWideMcp(bridge.port, wideBridgeGlobalToken, root, server);
         }
       } catch (err) {
         console.error("[openCodeRunTurnV2] Tool bridge setup error:", err);
@@ -929,7 +1001,6 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
         { action: "read", resource: "*.env", effect: "deny" },
         { action: "read", resource: "*.env.*", effect: "deny" },
         { action: "question", resource: "*", effect: "deny" },
-        { action: "browser", resource: "*", effect: "deny" },
       ];
       if (allowWrites === false) {
         permissions.push({ action: "edit", resource: "*", effect: "deny" });
@@ -1023,13 +1094,21 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
         if (evt.type === "permission.asked") {
           const reqId = String(data.id || data.requestID || "").trim();
           if (reqId) {
-            void openCodeRequest(
-              server,
-              "POST",
-              `/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(reqId)}/reply`,
-              { effect: "deny" },
-              { timeout: 3000 }
-            ).catch(() => {});
+            void openCodeDecidePermission({
+              permName: data.action || data.permission,
+              patterns: data.resources || data.patterns,
+              metadata: data.metadata,
+              allowWrites,
+              send,
+            }).then((dec) =>
+              openCodeRequest(
+                server,
+                "POST",
+                `/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(reqId)}/reply`,
+                { effect: dec.allow ? "allow" : "deny" },
+                { timeout: 3000 }
+              ).catch(() => {})
+            );
           }
           return;
         }
@@ -1146,17 +1225,46 @@ function openCodeRunTurnV2({ server, resolved, promptText, root, allowWrites, si
   });
 }
 
-function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send }) {
+function openCodeRunTurnV1({ server, resolved, promptText, system, root = "", allowWrites = true, signal, send }) {
   return new Promise((resolve) => {
     let settled = false;
     let sessionID = "";
     let sseRequest = null;
     let answered = false;
     const partTypes = new Map();
+    const toolStarted = new Set();
+    const toolEnded = new Set();
     const t0 = Date.now();
+    const dirQuery = openCodeDirQuery(root);
+
+    const filter =
+      typeof aiCreateStreamFilter === "function"
+        ? aiCreateStreamFilter(
+            (delta) => {
+              if (delta) {
+                answered = true;
+                send({ type: "text", text: delta });
+              }
+            },
+            (thinkDelta) => {
+              if (thinkDelta) send({ type: "thinking", text: thinkDelta });
+            }
+          )
+        : {
+            push(delta) {
+              if (delta) {
+                answered = true;
+                send({ type: "text", text: delta });
+              }
+            },
+            flush() {},
+          };
 
     const cleanup = () => {
       signal?.removeEventListener("abort", onAbort);
+      if (typeof aiUnregisterTurnBridge === "function") {
+        aiUnregisterTurnBridge(wideBridgeGlobalToken);
+      }
       if (sseRequest) {
         try {
           sseRequest.destroy();
@@ -1168,7 +1276,7 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send 
       if (sessionID) {
         const target = sessionID;
         sessionID = "";
-        void openCodeRequest(server, "DELETE", `/session/${encodeURIComponent(target)}`, null, {
+        void openCodeRequest(server, "DELETE", `/session/${encodeURIComponent(target)}${dirQuery}`, null, {
           timeout: 4000,
         }).catch(() => {});
       }
@@ -1177,13 +1285,18 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send 
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      try {
+        filter.flush();
+      } catch {
+        void 0;
+      }
       cleanup();
       resolve(result);
     };
 
     const onAbort = () => {
       if (sessionID) {
-        void openCodeRequest(server, "POST", `/session/${encodeURIComponent(sessionID)}/abort`, null, {
+        void openCodeRequest(server, "POST", `/session/${encodeURIComponent(sessionID)}/abort${dirQuery}`, null, {
           timeout: 3000,
         }).catch(() => {});
       }
@@ -1197,9 +1310,38 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send 
     signal?.addEventListener("abort", onAbort, { once: true });
 
     (async () => {
+      try {
+        if (typeof claudeToolBridge === "function") {
+          const bridge = await claudeToolBridge();
+          if (typeof aiRegisterTurnBridge === "function") {
+            aiRegisterTurnBridge(wideBridgeGlobalToken, root, send, allowWrites);
+          }
+          await openCodeEnsureWideMcp(bridge.port, wideBridgeGlobalToken, root, server);
+        }
+      } catch (err) {
+        console.error("[openCodeRunTurnV1] Tool bridge setup error:", err);
+      }
+
+      const permission = [
+        { permission: "*", pattern: "*", action: "allow" },
+        { permission: "read", pattern: "*.env", action: "deny" },
+        { permission: "read", pattern: "*.env.*", action: "deny" },
+        { permission: "question", pattern: "*", action: "deny" },
+      ];
+      if (allowWrites === false) {
+        permission.push({ permission: "edit", pattern: "*", action: "deny" });
+        permission.push({ permission: "write", pattern: "*", action: "deny" });
+      }
+
       let created;
       try {
-        created = await openCodeRequest(server, "POST", "/session", { title: "Wide" }, { timeout: 10000 });
+        created = await openCodeRequest(
+          server,
+          "POST",
+          `/session${dirQuery}`,
+          { title: "Wide", permission },
+          { timeout: 10000 }
+        );
       } catch (error) {
         finish({ ok: false, error: String(error.message || error), answered: false });
         return;
@@ -1220,7 +1362,7 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send 
           host: OPENCODE_HOST,
           port: server.port,
           method: "GET",
-          path: "/event",
+          path: `/event${dirQuery}`,
           headers: {
             accept: "text/event-stream",
             authorization: `Basic ${Buffer.from(`${OPENCODE_USER}:${server.password}`).toString("base64")}`,
@@ -1243,14 +1385,57 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send 
               const props = evt?.properties;
               if (!props || props.sessionID !== sessionID) continue;
               if (evt.type === "message.part.updated" && props.part?.id) {
-                partTypes.set(props.part.id, props.part.type);
+                const part = props.part;
+                partTypes.set(part.id, part.type);
+                if (part.type === "tool") {
+                  const cid = String(part.callID || part.id);
+                  const mapped = openCodeMapToolName(part.tool);
+                  const state = part.state || {};
+                  const status = String(state.status || "");
+                  if ((status === "pending" || status === "running") && !toolStarted.has(cid)) {
+                    toolStarted.add(cid);
+                    send({ type: "tool_start", id: cid, name: mapped, input: state.input ?? {} });
+                  } else if ((status === "completed" || status === "error") && !toolEnded.has(cid)) {
+                    if (!toolStarted.has(cid)) {
+                      toolStarted.add(cid);
+                      send({ type: "tool_start", id: cid, name: mapped, input: state.input ?? {} });
+                    }
+                    toolEnded.add(cid);
+                    const resultText =
+                      status === "error"
+                        ? String(state.error || "Tool failed.")
+                        : String(state.output ?? "");
+                    send({ type: "tool_end", id: cid, name: mapped, result: resultText });
+                  }
+                }
               } else if (evt.type === "message.part.delta" && props.delta) {
                 const kind = partTypes.get(props.partID) || "text";
                 if (kind === "reasoning") {
                   send({ type: "thinking", text: String(props.delta) });
                 } else if (kind === "text") {
-                  answered = true;
-                  send({ type: "text", text: String(props.delta) });
+                  filter.push(String(props.delta));
+                }
+              } else if (evt.type === "permission.asked" || evt.type === "permission.v2.asked") {
+                const reqId = String(props.id || "").trim();
+                if (reqId) {
+                  void openCodeDecidePermission({
+                    permName: props.permission || props.action,
+                    patterns: props.patterns || props.resources,
+                    metadata: props.metadata,
+                    allowWrites,
+                    send,
+                  }).then((dec) =>
+                    openCodeRequest(
+                      server,
+                      "POST",
+                      `/permission/${encodeURIComponent(reqId)}/reply${dirQuery}`,
+                      {
+                        reply: dec.allow ? "always" : "reject",
+                        ...(dec.reason ? { message: dec.reason } : {}),
+                      },
+                      { timeout: 3000 }
+                    ).catch(() => {})
+                  );
                 }
               }
             }
@@ -1264,9 +1449,10 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send 
         const reply = await openCodeRequest(
           server,
           "POST",
-          `/session/${encodeURIComponent(sessionID)}/message`,
+          `/session/${encodeURIComponent(sessionID)}/message${dirQuery}`,
           {
             model: { providerID: resolved.providerID, modelID: resolved.modelID },
+            agent: allowWrites === false ? "plan" : "build",
             ...(system ? { system } : {}),
             parts: [{ type: "text", text: promptText }],
           },
@@ -1277,6 +1463,7 @@ function openCodeRunTurnV1({ server, resolved, promptText, system, signal, send 
           finish({ ok: false, error: detail || "OpenCode request failed.", answered });
           return;
         }
+        filter.flush();
         if (!answered && Array.isArray(reply.json?.parts)) {
           const fullText = reply.json.parts
             .filter((part) => part && part.type === "text" && typeof part.text === "string")
@@ -1345,7 +1532,8 @@ async function aiRunOpenCodeTurn({
     const config = await readAiConfig();
     const wanted = String(model || config.cloudModel?.opencode || "").trim();
     const primary = openCodeResolveModel(wanted, catalog);
-    const promptText = openCodeBuildPrompt({ messages, system, projectInstructions, root, effort });
+    const v2PromptText = openCodeBuildPrompt({ messages, system, projectInstructions, root, effort });
+    const v1PromptText = openCodeBuildUserTranscript(messages);
 
     const candidates = [primary];
     for (const key of OPENCODE_FALLBACK_ORDER) {
@@ -1369,7 +1557,7 @@ async function aiRunOpenCodeTurn({
           ? await openCodeRunTurnV2({
               server: lease.server,
               resolved: candidate,
-              promptText,
+              promptText: v2PromptText,
               root,
               allowWrites,
               signal,
@@ -1378,8 +1566,10 @@ async function aiRunOpenCodeTurn({
           : await openCodeRunTurnV1({
               server: lease.server,
               resolved: candidate,
-              promptText,
+              promptText: v1PromptText,
               system,
+              root,
+              allowWrites,
               signal,
               send,
             });

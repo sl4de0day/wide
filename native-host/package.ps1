@@ -62,10 +62,10 @@ Copy-Item (Join-Path $root "sidecar\workers\*.cjs") (Join-Path $out "sidecar\wor
 New-Item -ItemType Directory -Force -Path (Join-Path $out "resources") | Out-Null
 Copy-Item (Join-Path $root "resources\sssF.include") (Join-Path $out "resources")
 
-Write-Host "== production node_modules (typescript, node-pty, prettier, node-forge, grpc) =="
+Write-Host "== production node_modules (typescript, node-pty, prettier, node-forge, grpc, playwright-core) =="
 $pkg = @'
 { "name":"wide-runtime","version":"0.0.1","private":true,
-  "dependencies":{ "@lydell/node-pty":"^1.2.0-beta.14","typescript":"^5.9.3","prettier":"^3.9.6","node-forge":"^1.3.1","@grpc/grpc-js":"^1.12.5","@grpc/proto-loader":"^0.7.13" } }
+  "dependencies":{ "@lydell/node-pty":"^1.2.0-beta.14","typescript":"^5.9.3","prettier":"^3.9.6","node-forge":"^1.3.1","@grpc/grpc-js":"^1.12.5","@grpc/proto-loader":"^0.7.13","playwright-core":"^1.65.1" } }
 '@
 Set-Content -Path (Join-Path $out "package.json") -Value $pkg -Encoding utf8
 Push-Location $out

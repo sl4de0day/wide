@@ -13,6 +13,7 @@ import {
   Radar,
   Search,
   Send,
+  Database,
   Server,
   Settings,
   StickyNote,
@@ -46,6 +47,7 @@ const AiPanel = lazy(() => import("@/panels/AiPanel").then((m) => ({ default: m.
 const DebugPanel = lazy(() => import("@/panels/DebugPanel").then((m) => ({ default: m.DebugPanel })));
 const FindingsPanel = lazy(() => import("@/panels/FindingsPanel").then((m) => ({ default: m.FindingsPanel })));
 const RemotePanel = lazy(() => import("@/panels/RemotePanel").then((m) => ({ default: m.RemotePanel })));
+const DatabasePanel = lazy(() => import("@/panels/DatabasePanel").then((m) => ({ default: m.DatabasePanel })));
 const SourceControlPanel = lazy(() =>
   import("@/panels/CodebergPanel").then((m) => ({ default: () => <m.CodebergPanel builtin /> })),
 );
@@ -97,6 +99,7 @@ export const PANELS: PanelDef[] = [
   { id: "search", label: "Search", icon: Search, component: SearchPanel, place: "top" },
   { id: "structure", label: "Structure", icon: Boxes, component: StructurePanel, place: "top" },
   { id: "source-control", label: "Source Control", icon: GitBranch, component: SourceControlPanel, place: "top" },
+  { id: "database", label: "Database", icon: Database, component: DatabasePanel, place: "top" },
   { id: "build", label: "Build", icon: Hammer, component: BuildPanel, place: "bottom" },
 
   { id: "tools", label: "Extensions", icon: Puzzle, component: ToolsPanel, place: "top" },

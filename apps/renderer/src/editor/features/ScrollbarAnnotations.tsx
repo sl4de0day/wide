@@ -39,7 +39,6 @@ export function ScrollbarAnnotations({
       className="absolute top-0 right-0 w-[12px] h-full pointer-events-none z-20 select-none"
       aria-hidden="true"
     >
-      {/* Code Diagnostics */}
       {diags.map((d, i) => {
         const pct = Math.min(99, Math.max(1, (d.from / Math.max(1, contentLength)) * 100));
         const isError = d.severity === "error";
@@ -62,7 +61,6 @@ export function ScrollbarAnnotations({
         );
       })}
 
-      {/* Security Scan Findings */}
       {scanFindings.map((f, i) => {
         const pct = Math.min(99, Math.max(1, (f.line / Math.max(1, totalLines)) * 100));
         return (

@@ -24,6 +24,7 @@ import { useDecoder } from "./stores/decoder";
 import { ComparerOverlay } from "./components/ComparerOverlay";
 import { useComparer } from "./stores/comparer";
 import { useCatcher } from "./stores/catcher";
+import { useDatabase } from "./stores/database";
 import { MacrosOverlay } from "./components/MacrosOverlay";
 import { useMacros } from "./stores/macros";
 import { subscribeProjectScan, useProjectScan } from "./stores/projectScan";
@@ -201,7 +202,7 @@ export default function App() {
 
   const hasFileTab = useEditor((state) =>
     state.tabs.some(
-      (tab) => tab.kind === "file" || tab.kind === "catcher" || tab.kind === "pitcher" || tab.kind === "browser" || tab.kind === "ai-browser" || tab.kind === "scratchpad" || tab.kind === "ai-chat",
+      (tab) => tab.kind === "file" || tab.kind === "catcher" || tab.kind === "pitcher" || tab.kind === "browser" || tab.kind === "ai-browser" || tab.kind === "scratchpad" || tab.kind === "ai-chat" || tab.kind === "database",
     ),
   );
   const closeTab = useEditor((state) => state.closeTab);
@@ -821,6 +822,10 @@ export default function App() {
       { id: "catcher.target", title: "Catcher: Target (Site Map)", group: "Catcher", run: () => useCatcher.getState().show("target") },
       { id: "catcher.repeater", title: "Catcher: Repeater", group: "Catcher", run: () => useCatcher.getState().show("repeater") },
       { id: "view.findings", title: "Findings", group: "View", run: () => openPanel("findings") },
+      { id: "database.openConsole", title: "Database: Open SQL Console", group: "Database", run: () => { useDatabase.getState().setSubView("console"); useEditor.getState().openDatabase(); } },
+      { id: "database.newConnection", title: "Database: New Connection", group: "Database", run: () => { openPanel("database"); useDatabase.getState().openModal(null); } },
+      { id: "database.refreshSchemas", title: "Database: Refresh Schemas", group: "Database", run: () => { const id = useDatabase.getState().activeConnectionId; void useDatabase.getState().loadConnections(); if (id) void useDatabase.getState().connectAndLoadSchema(id); } },
+      { id: "database.auditSchema", title: "Database: Security Audit Schema", group: "Database", run: () => { useEditor.getState().openDatabase(); void useDatabase.getState().runAudit(); } },
     ]);
 
 

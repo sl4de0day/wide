@@ -15,6 +15,7 @@ import {
   Plus,
   Radar,
   Rows2,
+  Database,
   Rows3,
   Send,
   Settings,
@@ -66,6 +67,7 @@ import { SettingsView } from "./SettingsView";
 const CodeEditor = lazy(() => import("@/editor/CodeEditor").then((m) => ({ default: m.CodeEditor })));
 
 const HttpResponse = lazy(() => import("@/panels/HttpResponse").then((m) => ({ default: m.HttpResponse })));
+const DatabaseView = lazy(() => import("./DatabaseView").then((m) => ({ default: m.DatabaseView })));
 const AiChatView = lazy(() => import("./AiChatView").then((m) => ({ default: m.AiChatView })));
 const CatcherView = lazy(() => import("./CatcherView").then((m) => ({ default: m.CatcherView })));
 const PitcherView = lazy(() => import("./pitcher/PitcherView").then((m) => ({ default: m.PitcherView })));
@@ -119,6 +121,7 @@ function TabKindIcon({ kind }: { kind: Tab["kind"] }) {
   if (kind === "cyberchef") return <FlaskConical className={iconClass} strokeWidth={1.75} />;
   if (kind === "scratchpad") return <StickyNote className={iconClass} strokeWidth={1.75} />;
   if (kind === "settings") return <Settings className={iconClass} strokeWidth={1.75} />;
+  if (kind === "database") return <Database className={iconClass} strokeWidth={1.75} />;
   if (kind === "policy") return <ShieldAlert className={iconClass} strokeWidth={1.75} />;
   if (kind === "diff") return <Columns2 className={iconClass} strokeWidth={1.75} />;
   if (kind === "markdown-preview") return <Eye className={iconClass} strokeWidth={1.75} />;
@@ -646,6 +649,7 @@ function TabContentRenderer({ tab, paneId }: { tab: Tab | null; paneId: string }
     );
   }
   if (tab.kind === "settings") return <SettingsView />;
+  if (tab.kind === "database") return <DatabaseView />;
   if (tab.kind === "extension") return <ExtensionView id={tab.path.slice(EXTENSION_PATH.length)} />;
   if (tab.kind === "ai-chat") return <AiChatView key={tab.path} id={tab.path.slice(AI_CHAT_PATH.length)} />;
   if (tab.kind === "http") return <HttpResponse />;

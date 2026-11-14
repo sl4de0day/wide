@@ -18,7 +18,12 @@ import { t } from "@/lib/i18n";
 import { basename } from "@/lib/utils";
 import { AI_CHAT_PATH, useEditor } from "./editor";
 import { useCatcher, type CatcherTool } from "./catcher";
+import { useIntruder } from "./intruder";
+import { useProxy } from "./proxy";
 import { useAiBrowser } from "./aiBrowser";
+import { useEngine } from "./engine";
+import { useOast } from "./oast";
+import { usePitcherEnv } from "./pitcherEnv";
 import { applyAiEdit, useAiEdits } from "./aiEdits";
 import { useWorkspace } from "./workspace";
 import { useSettings } from "./settings";
@@ -38,6 +43,16 @@ export interface AiToolStep {
   existed?: boolean;
   added?: number;
   removed?: number;
+}
+
+export interface AiPermissionRequest {
+  requestId: string;
+  turnId: string;
+  title: string;
+  detail?: string;
+  command?: string;
+  tool?: string;
+  timestamp: number;
 }
 
 export interface AiTurn {
@@ -176,100 +191,13 @@ interface AiState {
   ollamaStatusText: string;
   ollamaError: string | null;
   clearOllamaError(): void;
+  pendingPermissions: AiPermissionRequest[];
+  replyPermission(requestId: string, allowed: boolean, reason?: string): Promise<void>;
 }
 
 const root = () => useWorkspace.getState().root ?? "";
 
-const INSTRUCTION_FILES = [".wide/ai-instructions.md", ".wide/ai-instructions"];
-const instructionCache = new Map<string, string>();
-
-async function projectInstructions(projectRoot: string): Promise<string> {
-  if (!projectRoot) return "";
-  try {
-    if (typeof bridge.aiInstructionsGet === "function") {
-      const reply = await bridge.aiInstructionsGet(projectRoot);
-      if (reply?.ok && typeof reply.content === "string") {
-        const trimmed = reply.content.trim();
-        instructionCache.set(projectRoot, trimmed);
-        return trimmed;
-      }
-    }
-  } catch {
-  }
-  const separator = projectRoot.includes("\\") ? "\\" : "/";
-  const base = projectRoot.replace(/[\\/]+$/, "");
-  let found = "";
-  for (const relative of INSTRUCTION_FILES) {
-    const path = `${base}${separator}${separator === "\\" ? relative.replace(/\//g, "\\") : relative}`;
-    try {
-      const file = await bridge.readFile(path);
-      if (file && !file.error && !file.tooLarge && file.content) {
-        found = String(file.content).trim();
-        if (found) break;
-      }
-    } catch {
-    }
-  }
-  instructionCache.set(projectRoot, found);
-  return found;
-}
-
-export function forgetProjectInstructions(projectRoot?: string): void {
-  if (projectRoot) instructionCache.delete(projectRoot);
-  else instructionCache.clear();
-}
-
-function systemPrompt(instructions = "", effort: AiEffort = "fast", activeFile?: string | null): string {
-  const workspace = useWorkspace.getState();
-  const open = activeFile !== undefined ? (activeFile ?? "") : (useEditor.getState().lastFilePath ?? "");
-  const language = useSettings.getState().language;
-
-  const LANGUAGE_NAMES: Record<string, string> = {
-    tr: "Turkish", es: "Spanish", de: "German", fr: "French",
-    it: "Italian", ja: "Japanese", ko: "Korean",
-  };
-  const langLine = language !== "en" && LANGUAGE_NAMES[language]
-    ? `Always respond in ${LANGUAGE_NAMES[language]}. Use ${LANGUAGE_NAMES[language]} for all explanations, summaries, and responses.`
-    : "";
-
-  const openTabs = useEditor.getState().tabs
-    .map((tab) => (tab.path ? basename(tab.path) : tab.name))
-    .filter(Boolean)
-    .slice(0, 20);
-
-  const openTabsLine = openTabs.length > 0
-    ? `Currently open tabs in the editor: ${openTabs.join(", ")}.`
-    : "";
-
-  const effortLine =
-    effort === "thinking"
-      ? "Effort level: THINKING. Think carefully and thoroughly before acting. Enclose your reasoning in <think>...</think>, use tools to inspect the codebase, verify assumptions, write or edit project files directly, and provide a complete response."
-      : "Effort level: FAST. Act directly and efficiently. Immediately use your tools (write_file, edit_file, read_file, list_dir, search, run_command) to create or modify project files as requested, and keep your chat summary brief.";
-
-  return [
-    "You are Wide Agent, an autonomous AI software engineering and security agent built directly into Wide IDE.",
-    "Wide IDE is a specialized development environment unifying full-stack coding with web application security tools (Pitcher API client, Catcher web proxy, Security AST Scanner, CyberChef/Decoder, Git, and Terminal).",
-    workspace.root ? `The open project workspace is at: ${workspace.root}` : "No project workspace is currently open.",
-    open ? `The file currently active in the editor is: ${open}` : "",
-    openTabsLine,
-    "You are an action-oriented coding agent, NOT a passive chatbot.",
-    "You have full programmatic control over Wide's built-in tools via native tool calls:",
-    "- Pitcher: Dispatch HTTP requests with `send_http_request` and reveal the UI with `open_tool_tab({ tab: 'pitcher' })`.",
-    "- Catcher: Control the intercepting proxy, check status, view captured traffic, and toggle intercept with `manage_catcher` and reveal with `open_tool_tab({ tab: 'catcher', subtool: 'proxy' })`.",
-    "- Security: Trigger AST vulnerability scans with `run_security_scan` and CVE audits with `check_dependencies`.",
-    "- Decoder: Encode/decode/hash data with `transform_data` and inspect errors with `get_diagnostics`.",
-    "NEVER tell the user 'I cannot click Pitcher/Catcher in the UI' or . You DO NOT need to click UI buttons; you operate them directly via your tools!",
-    "When the user asks you to write code, test an endpoint, or demonstrate Pitcher and Catcher, actively invoke your tools (send_http_request, manage_catcher, open_tool_tab, write_file, edit_file) instead of giving passive instructions.",
-    "When the user asks you to write a script, create a file, implement code, fix a bug, or modify the project, DO NOT write the code in the chat window as a message. You MUST use write_file or edit_file to create or modify the actual files in the project workspace.",
-    "If the user asks to write a script or code without naming a file, choose a sensible filename in the project and call write_file to create it on disk.",
-    "When modifying an existing file, read it first with read_file, then apply the change with edit_file or write_file.",
-    effortLine,
-    langLine,
-    instructions ? `\nProject instructions from .wide/ai-instructions (follow these):\n${instructions}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
+export function forgetProjectInstructions(_projectRoot?: string): void {}
 
 let turnCounter = 0;
 let imageCounter = 0;
@@ -345,6 +273,7 @@ export const useAi = create<AiState>((set, get) => ({
   ollama: { running: false, installed: true },
   ollamaStatusText: "",
   ollamaError: null,
+  pendingPermissions: [],
   pulls: {},
   error: "",
   busy: false,
@@ -565,6 +494,7 @@ export const useAi = create<AiState>((set, get) => ({
     }));
 
     const editorState = useEditor.getState();
+    const resolvedActiveFile = activeFile !== undefined ? (activeFile ?? null) : (editorState.lastFilePath ?? null);
     const openTabs = (editorState.tabs || []).map((t) => ({
       name: t.name,
       path: t.path,
@@ -579,8 +509,10 @@ export const useAi = create<AiState>((set, get) => ({
         provider,
         model,
         messages: providerMessages,
-        system: systemPrompt(await projectInstructions(projectRoot), get().effort, activeFile),
+        system: "",
         effort: get().effort,
+        language: useSettings.getState().language,
+        activeFile: resolvedActiveFile,
         openTabs,
       })
       .catch(
@@ -708,17 +640,36 @@ export const useAi = create<AiState>((set, get) => ({
     }
     const recent = chat.history.slice(-4);
     const older = chat.history.slice(0, -4);
-    const summarySnippet = older
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content ?? "").slice(0, 150)}...`)
-      .join("\n");
+    const config = get().config;
+    const provider = config ? (config.tab === "local" ? "local" : config.provider) : "";
+    const model = config ? (config.tab === "local" ? config.localModel : config.cloudModel[config.provider] ?? "") : "";
+    let summaryText = "";
+    if (provider && model && typeof bridge.aiCompact === "function") {
+      try {
+        const reply = await bridge.aiCompact({
+          provider,
+          model,
+          messages: older.map((m) => ({ role: m.role, content: m.content ?? "" })),
+        });
+        if (reply?.ok && typeof reply.summary === "string" && reply.summary.trim()) {
+          summaryText = reply.summary.trim();
+        }
+      } catch {
+      }
+    }
+    if (!summaryText) {
+      summaryText = older
+        .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content ?? "").slice(0, 180)}`)
+        .join("\n");
+    }
     const compressed: AiMessage[] = [
       {
         role: "user",
-        content: `[Previous conversation summary]\n${summarySnippet}\n\n[End of summary. Continue assisting based on the above background.]`,
+        content: `[Previous conversation summary]\n${summaryText}\n\n[End of summary. Continue assisting based on the above background.]`,
       },
       {
         role: "assistant",
-        content: "I have the summary of our earlier discussion and will continue from here.",
+        content: "Context summary noted. Ready to continue.",
       },
       ...recent,
     ];
@@ -929,14 +880,20 @@ export const useAi = create<AiState>((set, get) => ({
   },
 
   clearOllamaError: () => set({ ollamaError: null }),
+  replyPermission: async (requestId, allowed, reason) => {
+    set((state) => ({
+      pendingPermissions: state.pendingPermissions.filter((p) => p.requestId !== requestId),
+    }));
+    await bridge.aiPermissionReply(requestId, allowed, reason);
+  },
 }));
 
 export function openWideToolTab(tool: string, subtool?: string): void {
   const norm = (tool || "").toLowerCase().trim();
   if (norm === "pitcher") {
     useEditor.getState().openPitcher();
-  } else if (norm === "browser") {
-    useEditor.getState().openBrowser();
+  } else if (norm === "browser" || norm === "ai-browser") {
+    useEditor.getState().openAiBrowser();
   } else if (norm === "cyberchef" || norm === "decoder") {
     useEditor.getState().openCyberchef();
   } else if (norm === "scratchpad") {
@@ -956,21 +913,112 @@ export function openWideToolTab(tool: string, subtool?: string): void {
     norm === "miner"
   ) {
     const catcherSub = (subtool || (norm !== "catcher" ? norm : "proxy")) as CatcherTool;
-    useCatcher.getState().show(catcherSub);
+    useCatcher.setState({ tool: catcherSub });
+    useEditor.getState().openCatcherToSide();
   } else {
     window.dispatchEvent(new CustomEvent("wide:open-panel", { detail: norm }));
   }
 }
 
 export function subscribeAiEvents(): () => void {
-  return bridge.onAiEvent((event: AiEvent) => {
+  const unsubProgress = bridge.onAiBrowserProgress((ev) => {
+    useAiBrowser.getState().setInstallProgress(ev.status, ev.installing);
+  });
+  const unsubEvents = bridge.onAiEvent((event: AiEvent) => {
     if (event.type === "open_tool") {
       openWideToolTab(event.tool, event.subtool);
       return;
     }
     if (event.type === "browser_action") {
-      useEditor.getState().openAiBrowser();
+      if (event.action === "browser_close") {
+        useAiBrowser.getState().clear();
+        return;
+      }
+      if (event.openPanel !== false) {
+        useEditor.getState().openAiBrowser();
+      }
       useAiBrowser.getState().recordAction(event);
+      return;
+    }
+    if (event.type === "browser_frame") {
+      useAiBrowser.getState().recordFrame(event);
+      return;
+    }
+    if (event.type === "catcher_sync") {
+      useProxy.setState({
+        running: event.running,
+        port: event.port,
+        intercepting: event.intercepting,
+        ...(typeof event.interceptingResponses === "boolean"
+          ? { interceptingResponses: event.interceptingResponses }
+          : {}),
+        ...(Array.isArray(event.scope) ? { scope: event.scope } : {}),
+      });
+      void useProxy.getState().refresh();
+      if (event.action === "repeater_send" && event.seed) {
+        useCatcher.getState().addRepeater({
+          url: event.seed.url,
+          method: event.seed.method,
+          headers: event.seed.headers,
+          body: event.seed.body,
+        });
+        useEditor.getState().openCatcherToSide();
+      } else if (event.action === "intruder_attack") {
+        if (event.seed?.url) {
+          const headerLines = (event.seed.headers || []).map(([k, v]) => `${k}: ${v}`).join("\n");
+          const rawSeed = `${event.seed.method || "GET"} ${event.seed.url}${headerLines ? `\n${headerLines}` : ""}\n\n${event.seed.body || ""}`;
+          useIntruder.getState().openIntruder(rawSeed);
+        } else if (event.openUi) {
+          useCatcher.setState({ tool: "intruder" });
+        }
+        if (event.openUi) {
+          useEditor.getState().openCatcherToSide();
+        }
+      } else if (event.openUi) {
+        useCatcher.setState({ tool: "proxy" });
+        useEditor.getState().openCatcherToSide();
+      }
+      return;
+    }
+    if (event.type === "permission_request") {
+      useAi.setState((state) => ({
+        pendingPermissions: state.pendingPermissions.some((p) => p.requestId === event.requestId)
+          ? state.pendingPermissions
+          : [
+              ...state.pendingPermissions,
+              {
+                requestId: event.requestId,
+                turnId: event.id,
+                title: event.title,
+                detail: event.detail,
+                command: event.command,
+                tool: event.tool,
+                timestamp: Date.now(),
+              },
+            ],
+      }));
+      return;
+    }
+    if (event.type === "tool_sync") {
+      if (event.target === "oast" && event.status) {
+        useOast.getState().applyStatus({
+          running: Boolean(event.status.running),
+          domain: String(event.status.domain || ""),
+          server: String(event.status.server || ""),
+        });
+      } else if (event.target === "engine" && event.status) {
+        useEngine.setState((prev) => ({
+          status: { ...prev.status, ...event.status } as typeof prev.status,
+        }));
+      } else if (event.target === "pitcher_env" && event.state) {
+        const nextEnv = {
+          environments: Array.isArray(event.state.environments) ? (event.state.environments as ReturnType<typeof usePitcherEnv.getState>["environments"]) : [],
+          globals: Array.isArray(event.state.globals) ? (event.state.globals as ReturnType<typeof usePitcherEnv.getState>["globals"]) : [],
+          activeId: typeof event.state.activeId === "string" ? event.state.activeId : null,
+        };
+        usePitcherEnv.setState(nextEnv);
+        try { localStorage.setItem("wide.pitcher.env", JSON.stringify(nextEnv)); } catch {}
+      }
       return;
     }
     if (event.type === "open") {
@@ -986,13 +1034,16 @@ export function subscribeAiEvents(): () => void {
     }
 
     const sessionId = sessionOf(event.id);
-    const settles = event.type === "done";
+    const settles = event.type === "done" || event.type === "error";
     const now = Date.now();
     useAi.setState((state) => ({
+      pendingPermissions: settles
+        ? state.pendingPermissions.filter((p) => p.turnId !== event.id)
+        : state.pendingPermissions,
       chats: patchChat(state.chats, sessionId, (chat) => ({
         ...chat,
-        activeTurn: settles && chat.activeTurn === event.id ? null : chat.activeTurn,
-        stopping: settles && chat.activeTurn === event.id ? false : chat.stopping,
+        activeTurn: event.type === "done" && chat.activeTurn === event.id ? null : chat.activeTurn,
+        stopping: event.type === "done" && chat.activeTurn === event.id ? false : chat.stopping,
         turns: chat.turns.map((turn) => {
           if (turn.id !== event.id) return turn;
           switch (event.type) {
@@ -1084,6 +1135,10 @@ export function subscribeAiEvents(): () => void {
       })),
     }));
   });
+  return () => {
+    unsubProgress();
+    unsubEvents();
+  };
 }
 
 export function subscribeAiPulls(): () => void {

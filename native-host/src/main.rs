@@ -18,6 +18,176 @@ use tao::{
 };
 use wry::WebViewBuilder;
 
+fn b64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(((input.len() + 2) / 3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { TABLE[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn b64_decode(input: &str) -> Option<Vec<u8>> {
+    let mut val = 0u32;
+    let mut valb = -8i32;
+    let mut out = Vec::with_capacity((input.len() * 3) / 4);
+    for byte in input.bytes() {
+        if matches!(byte, b'\n' | b'\r' | b' ' | b'\t') {
+            continue;
+        }
+        if byte == b'=' {
+            break;
+        }
+        let d = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        val = (val << 6) | (d as u32);
+        valb += 6;
+        if valb >= 0 {
+            out.push(((val >> valb) & 0xFF) as u8);
+            valb -= 8;
+        }
+    }
+    Some(out)
+}
+
+#[cfg(windows)]
+mod dpapi {
+    use core::ffi::c_void;
+    use std::ptr::{null, null_mut};
+
+    #[repr(C)]
+    struct DataBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x1;
+
+    #[link(name = "crypt32")]
+    extern "system" {
+        fn CryptProtectData(
+            p_data_in: *const DataBlob,
+            sz_data_descr: *const u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut c_void,
+            p_prompt_struct: *mut c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+        fn CryptUnprotectData(
+            p_data_in: *const DataBlob,
+            ppsz_data_descr: *mut *mut u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut c_void,
+            p_prompt_struct: *mut c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LocalFree(h_mem: *mut c_void) -> *mut c_void;
+    }
+
+    pub fn protect(data: &[u8]) -> Option<Vec<u8>> {
+        let mut input = DataBlob {
+            cb_data: u32::try_from(data.len()).ok()?,
+            pb_data: if data.is_empty() { null_mut() } else { data.as_ptr() as *mut u8 },
+        };
+        let mut output = DataBlob { cb_data: 0, pb_data: null_mut() };
+        let ok = unsafe {
+            CryptProtectData(
+                &mut input,
+                null(),
+                null(),
+                null_mut(),
+                null_mut(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+        };
+        if ok == 0 || output.pb_data.is_null() {
+            return None;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(output.pb_data, output.cb_data as usize) };
+        let copy = slice.to_vec();
+        unsafe {
+            LocalFree(output.pb_data as *mut c_void);
+        }
+        Some(copy)
+    }
+
+    pub fn unprotect(data: &[u8]) -> Option<Vec<u8>> {
+        let mut input = DataBlob {
+            cb_data: u32::try_from(data.len()).ok()?,
+            pb_data: if data.is_empty() { null_mut() } else { data.as_ptr() as *mut u8 },
+        };
+        let mut output = DataBlob { cb_data: 0, pb_data: null_mut() };
+        let ok = unsafe {
+            CryptUnprotectData(
+                &mut input,
+                null_mut(),
+                null(),
+                null_mut(),
+                null_mut(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+        };
+        if ok == 0 || output.pb_data.is_null() {
+            return None;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(output.pb_data, output.cb_data as usize) };
+        let copy = slice.to_vec();
+        unsafe {
+            LocalFree(output.pb_data as *mut c_void);
+        }
+        Some(copy)
+    }
+}
+
+fn handle_crypto_protect(data_b64: &str) -> Value {
+    let Some(raw) = b64_decode(data_b64) else {
+        return json!({ "ok": false });
+    };
+    #[cfg(windows)]
+    {
+        if let Some(enc) = dpapi::protect(&raw) {
+            return json!({ "ok": true, "data": b64_encode(&enc) });
+        }
+    }
+    let _ = raw;
+    json!({ "ok": false })
+}
+
+fn handle_crypto_unprotect(data_b64: &str) -> Value {
+    let Some(enc) = b64_decode(data_b64) else {
+        return json!({ "ok": false });
+    };
+    #[cfg(windows)]
+    {
+        if let Some(plain) = dpapi::unprotect(&enc) {
+            return json!({ "ok": true, "data": b64_encode(&plain) });
+        }
+    }
+    let _ = enc;
+    json!({ "ok": false })
+}
+
 #[derive(Debug)]
 enum UserEvent {
     SidecarLine(String),
@@ -109,6 +279,136 @@ fn resolve_assets_dir(exe_dir: &Path) -> PathBuf {
         }
     }
     direct_assets
+}
+
+fn handle_open_dialog(params: &Value) -> Value {
+    let props: Vec<String> = params
+        .get("properties")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    let is_dir = props.iter().any(|p| p == "openDirectory");
+    let multi = props.iter().any(|p| p == "multiSelections");
+    let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let default_path = params.get("defaultPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let ps_script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+if ($env:WIDE_DLG_DIR -eq '1') {
+  $d = New-Object System.Windows.Forms.FolderBrowserDialog
+  if ($env:WIDE_DLG_TITLE) { $d.Description = $env:WIDE_DLG_TITLE }
+  if ($env:WIDE_DLG_DEFAULT -and (Test-Path $env:WIDE_DLG_DEFAULT)) { $d.SelectedPath = $env:WIDE_DLG_DEFAULT }
+  $r = $d.ShowDialog()
+  if ($r -eq [System.Windows.Forms.DialogResult]::OK -and $d.SelectedPath) {
+    @{ canceled = $false; filePaths = @($d.SelectedPath) } | ConvertTo-Json -Compress
+  } else {
+    '{"canceled":true,"filePaths":[]}'
+  }
+} else {
+  $d = New-Object System.Windows.Forms.OpenFileDialog
+  if ($env:WIDE_DLG_TITLE) { $d.Title = $env:WIDE_DLG_TITLE }
+  if ($env:WIDE_DLG_DEFAULT -and (Test-Path $env:WIDE_DLG_DEFAULT)) { $d.InitialDirectory = $env:WIDE_DLG_DEFAULT }
+  if ($env:WIDE_DLG_MULTI -eq '1') { $d.Multiselect = $true }
+  $r = $d.ShowDialog()
+  if ($r -eq [System.Windows.Forms.DialogResult]::OK -and $d.FileNames.Count -gt 0) {
+    @{ canceled = $false; filePaths = @($d.FileNames) } | ConvertTo-Json -Compress
+  } else {
+    '{"canceled":true,"filePaths":[]}'
+  }
+}
+"#;
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-STA", "-Command", ps_script]);
+        cmd.env("WIDE_DLG_DIR", if is_dir { "1" } else { "0" });
+        cmd.env("WIDE_DLG_MULTI", if multi { "1" } else { "0" });
+        cmd.env("WIDE_DLG_TITLE", title);
+        cmd.env("WIDE_DLG_DEFAULT", default_path);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        if let Ok(out) = cmd.output() {
+            let txt = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if let Ok(parsed) = serde_json::from_str::<Value>(&txt) {
+                return parsed;
+            }
+        }
+        return json!({ "canceled": true, "filePaths": [] });
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (is_dir, multi, title, default_path);
+        json!({ "canceled": true, "filePaths": [] })
+    }
+}
+
+fn handle_show_in_folder(raw_path: &str) {
+    if raw_path.is_empty() {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        let norm = raw_path.replace('/', "\\");
+        let _ = Command::new("explorer.exe").arg(format!("/select,{}", norm)).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").args(["-R", raw_path]).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let target = Path::new(raw_path)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or(raw_path);
+        let _ = Command::new("xdg-open").arg(target).spawn();
+    }
+}
+
+fn handle_trash_item(raw_path: &str) -> Value {
+    if raw_path.is_empty() {
+        return json!({ "ok": false, "error": "Missing path" });
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let norm = raw_path.replace('/', "\\");
+        let ps_script = r#"
+Add-Type -AssemblyName Microsoft.VisualBasic
+$p = $env:WIDE_TRASH_PATH
+if (-not (Test-Path -LiteralPath $p)) { throw 'Path not found' }
+if ((Get-Item -LiteralPath $p).PSIsContainer) {
+  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+} else {
+  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+}
+"#;
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_script]);
+        cmd.env("WIDE_TRASH_PATH", &norm);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        match cmd.output() {
+            Ok(out) if out.status.success() => json!({ "ok": true }),
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                json!({ "ok": false, "error": if err.is_empty() { "Failed to trash item".to_string() } else { err } })
+            }
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let p = Path::new(raw_path);
+        let res = if p.is_dir() { fs::remove_dir_all(p) } else { fs::remove_file(p) };
+        match res {
+            Ok(_) => json!({ "ok": true }),
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        }
+    }
 }
 
 fn resolve_node_exe(exe_dir: &Path) -> PathBuf {
@@ -494,6 +794,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     });
                                     sidecar_main.send(rep.to_string());
                                 }
+                            } else if method == "dialog:showOpenDialog" {
+                                let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
+                                let sidecar_clone = sidecar_main.clone();
+                                thread::spawn(move || {
+                                    let result = handle_open_dialog(&params);
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": result
+                                    });
+                                    sidecar_clone.send(rep.to_string());
+                                });
+                            } else if method == "shell:showItemInFolder" {
+                                if let Some(p) = msg.get("params").and_then(|p| p.get("path")).and_then(|u| u.as_str()) {
+                                    handle_show_in_folder(p);
+                                }
+                                let rep = json!({
+                                    "t": "hostReply",
+                                    "id": id,
+                                    "result": Value::Null
+                                });
+                                sidecar_main.send(rep.to_string());
+                            } else if method == "shell:trashItem" {
+                                let p = msg.get("params").and_then(|p| p.get("path")).and_then(|u| u.as_str()).unwrap_or("").to_string();
+                                let sidecar_clone = sidecar_main.clone();
+                                thread::spawn(move || {
+                                    let result = handle_trash_item(&p);
+                                    let rep = json!({
+                                        "t": "hostReply",
+                                        "id": id,
+                                        "result": result
+                                    });
+                                    sidecar_clone.send(rep.to_string());
+                                });
+                            } else if method == "crypto:protect" {
+                                let raw = msg.get("params").and_then(|p| p.get("data")).and_then(|d| d.as_str()).unwrap_or("");
+                                let result = handle_crypto_protect(raw);
+                                let rep = json!({
+                                    "t": "hostReply",
+                                    "id": id,
+                                    "result": result
+                                });
+                                sidecar_main.send(rep.to_string());
+                            } else if method == "crypto:unprotect" {
+                                let raw = msg.get("params").and_then(|p| p.get("data")).and_then(|d| d.as_str()).unwrap_or("");
+                                let result = handle_crypto_unprotect(raw);
+                                let rep = json!({
+                                    "t": "hostReply",
+                                    "id": id,
+                                    "result": result
+                                });
+                                sidecar_main.send(rep.to_string());
                             } else if method == "shell:openExternal" {
                                 if let Some(url) = msg.get("params").and_then(|p| p.get("url")).and_then(|u| u.as_str()) {
                                     #[cfg(windows)]

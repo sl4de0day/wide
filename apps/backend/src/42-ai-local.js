@@ -472,7 +472,7 @@ function registerAiLocalHandlers() {
   });
 }
 
-async function aiRunLocalTurn({ model, root, system, messages, allowWrites, effort = "fast", signal, send }) {
+async function aiRunLocalTurn({ model, root, system, systemWithXmlCatalog, messages, allowWrites, effort = "fast", signal, send }) {
   const ready = await ollamaEnsure(null, signal);
   if (signal?.aborted) return { ok: false, error: "stopped" };
   if (!ready.ok) {
@@ -483,183 +483,24 @@ async function aiRunLocalTurn({ model, root, system, messages, allowWrites, effo
     send({ type: "error", message: "No local model is selected." });
     return { ok: false, error: "no-model" };
   }
-
-  const isThinking = effort === "thinking";
-  const maxRounds = isThinking ? AI_MAX_TOOL_ROUNDS : 12;
-  const tools = aiToolsFor("deepseek", allowWrites);
-  const history = system ? [{ role: "system", content: system }, ...messages] : [...messages];
-  let supportsNativeTools = true;
-  let supportsThinkParam = true;
-  let nudgedForFileWrite = false;
-
-  for (let round = 0; round < maxRounds; round += 1) {
+  try {
+    return await aiRunUnifiedTurn({
+      provider: "local",
+      model,
+      key: "",
+      root,
+      system,
+      systemWithXmlCatalog: systemWithXmlCatalog || system,
+      messages,
+      allowWrites,
+      effort,
+      signal,
+      send,
+    });
+  } catch (error) {
     if (signal?.aborted) return { ok: false, error: "stopped" };
-    let calls = [];
-    let usedTextCalls = false;
-    let answered = false;
-    let said = "";
-    const filter = aiCreateStreamFilter(send);
-
-    const runChatStream = async (withTools, withThinkParam) => {
-      const payload = {
-        model,
-        messages: history,
-        stream: true,
-        options: {
-          temperature: isThinking ? 0.6 : 0.2,
-          num_predict: isThinking ? 8192 : 4096,
-        },
-      };
-      if (withThinkParam) {
-        payload.think = isThinking;
-      }
-      if (withTools && tools.length > 0) payload.tools = tools;
-      for await (const chunk of ollamaStream("POST", "/api/chat", payload, { signal, timeout: 0 })) {
-        if (chunk.error) {
-          throw new Error(chunk.error);
-        }
-        const message = chunk.message ?? {};
-
-        if (message.thinking) send({ type: "thinking", text: message.thinking });
-        if (message.content) {
-          answered = true;
-          said += message.content;
-          filter.push(message.content);
-        }
-        for (const call of message.tool_calls ?? []) {
-          let rawArgs = call.function?.arguments ?? {};
-          if (typeof rawArgs === "string") {
-            rawArgs = aiParseLenientJson(rawArgs) ?? {};
-          }
-          const norm = aiNormalizeToolCall(call.function?.name ?? "", rawArgs);
-          calls.push({
-            id: call.id ?? `${norm.name}-${calls.length}`,
-            name: norm.name,
-            input: norm.input,
-          });
-        }
-        if (chunk.done) {
-          send({
-            type: "usage",
-            input: chunk.prompt_eval_count ?? 0,
-            output: chunk.eval_count ?? 0,
-            total: (chunk.prompt_eval_count ?? 0) + (chunk.eval_count ?? 0),
-          });
-        }
-      }
-    };
-
-    try {
-      try {
-        await runChatStream(supportsNativeTools, supportsThinkParam);
-      } catch (innerError) {
-        const msg = String(innerError.message || innerError);
-        if (supportsThinkParam && /think|thinking.*not supported|unknown field/i.test(msg)) {
-          supportsThinkParam = false;
-          calls = [];
-          said = "";
-          try {
-            await runChatStream(supportsNativeTools, false);
-          } catch (secondError) {
-            const msg2 = String(secondError.message || secondError);
-            if (supportsNativeTools && /does not support tools|tool.*not supported|template/i.test(msg2)) {
-              supportsNativeTools = false;
-              calls = [];
-              said = "";
-              await runChatStream(false, false);
-            } else {
-              throw secondError;
-            }
-          }
-        } else if (supportsNativeTools && /does not support tools|tool.*not supported|template/i.test(msg)) {
-          supportsNativeTools = false;
-          calls = [];
-          said = "";
-          try {
-            await runChatStream(false, supportsThinkParam);
-          } catch (secondError) {
-            supportsThinkParam = false;
-            calls = [];
-            said = "";
-            await runChatStream(false, false);
-          }
-        } else {
-          throw innerError;
-        }
-      }
-      filter.flush();
-    } catch (error) {
-      if (signal?.aborted) return { ok: false, error: "stopped" };
-      send({ type: "error", message: String(error.message || error) });
-      return { ok: false, error: String(error.message || error) };
-    }
-
-    if (calls.length === 0 && said) {
-      const extracted = aiExtractTextToolCalls(said);
-      if (extracted.length > 0) {
-        calls = extracted;
-        usedTextCalls = true;
-      }
-    }
-
-    if (calls.length === 0) {
-      if (!nudgedForFileWrite && round === 0 && allowWrites && root && aiHasSubstantialCodeBlock(said)) {
-        nudgedForFileWrite = true;
-        history.push({ role: "assistant", content: said });
-        history.push({
-          role: "user",
-          content:
-            "SYSTEM: You wrote code in the chat instead of creating or updating the project file in the workspace. Call write_file or edit_file right now using <tool_call>{\"name\": \"write_file\", \"arguments\": {\"path\": \"...\", \"content\": \"...\"}}</tool_call> to apply the code directly to the workspace.",
-        });
-        continue;
-      }
-      return { ok: true, answered };
-    }
-
-    if (usedTextCalls || !supportsNativeTools) {
-      history.push({
-        role: "assistant",
-        content: said,
-      });
-      const responses = [];
-      for (const call of calls) {
-        send({ type: "tool_start", id: call.id, name: call.name, input: call.input });
-        const result = await aiRunTool(root, call.name, call.input ?? {}, send, allowWrites);
-        send({ type: "tool_end", id: call.id, name: call.name, result });
-        responses.push(`<tool_response name="${call.name}">\n${result}\n</tool_response>`);
-        if (signal?.aborted) return { ok: false, error: "stopped" };
-      }
-      history.push({
-        role: "user",
-        content: `${responses.join("\n\n")}\n\nContinue based on the tool execution results above. If further file changes are needed, call the appropriate tool; otherwise summarize what you did concisely.`,
-      });
-    } else {
-      history.push({
-        role: "assistant",
-        content: said,
-        tool_calls: calls.map((call) => ({
-          id: call.id,
-          type: "function",
-          function: {
-            name: call.name,
-            arguments: call.input && typeof call.input === "object" ? call.input : {},
-          },
-        })),
-      });
-
-      for (const call of calls) {
-        send({ type: "tool_start", id: call.id, name: call.name, input: call.input });
-        const result = await aiRunTool(root, call.name, call.input ?? {}, send, allowWrites);
-        send({ type: "tool_end", id: call.id, name: call.name, result });
-        history.push({ role: "tool", content: result });
-        if (signal?.aborted) return { ok: false, error: "stopped" };
-      }
-    }
+    const message = String(error?.message || error);
+    send({ type: "error", message });
+    return { ok: false, error: message };
   }
-
-  send({
-    type: "error",
-    message: `The assistant used ${AI_MAX_TOOL_ROUNDS} rounds of tools without finishing, and was stopped.`,
-  });
-  return { ok: false, error: "too-many-rounds" };
 }

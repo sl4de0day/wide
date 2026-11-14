@@ -404,6 +404,7 @@ function leafKeys() {
 }
 
 function leafFor(host) {
+  if (!proxyCa || !proxyCa.cert || !proxyCa.key) return null;
   const cached = leafCache.get(host);
   if (cached) return cached;
 
@@ -1171,6 +1172,7 @@ function mitmServerFor(host, secure) {
   let server;
   if (secure) {
     const leaf = leafFor(host);
+    if (!leaf) return null;
     server = node_https.createServer({ key: leaf.key, cert: leaf.cert }, handleRequest);
   } else {
     server = node_http.createServer(handleRequest);
@@ -1183,8 +1185,12 @@ function mitmServerFor(host, secure) {
   return server;
 }
 
-function startProxy() {
+async function startProxy() {
   if (proxyServer) return { ok: true, port: proxyPort };
+  try {
+    await loadOrMakeCa();
+  } catch {
+  }
 
   const server = node_http.createServer((req, res) => {
 
@@ -1235,8 +1241,14 @@ function startProxy() {
           return;
         }
         clientSocket.pause();
+        const mitm = mitmServerFor(host, tls);
+        if (!mitm) {
+          passThrough(true, first);
+          process.nextTick(() => clientSocket.resume());
+          return;
+        }
         if (first && first.length) clientSocket.unshift(first);
-        mitmServerFor(host, tls).emit("connection", clientSocket);
+        mitm.emit("connection", clientSocket);
         process.nextTick(() => clientSocket.resume());
       };
       if (head && head.length) {

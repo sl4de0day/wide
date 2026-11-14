@@ -23,9 +23,10 @@ const claudeToolTurns = new Map();
 let wideBridgeGlobalToken = node_crypto.randomBytes(32).toString("hex");
 let wideActiveTurn = null;
 
-function aiRegisterTurnBridge(token, root, send) {
-  if (token) claudeToolTurns.set(token, { root: root ?? "", send });
-  wideActiveTurn = { root: root ?? "", send };
+function aiRegisterTurnBridge(token, root, send, allowWrites = true) {
+  const entry = { root: root ?? "", send, allowWrites: allowWrites !== false };
+  if (token) claudeToolTurns.set(token, entry);
+  wideActiveTurn = entry;
 }
 
 function aiUnregisterTurnBridge(token) {
@@ -58,10 +59,18 @@ function claudeToolBridge() {
         settled = true;
       });
 
-      if (request.method !== "POST" || request.url !== "/tool") return finish(404, {});
       const offered = String(request.headers.authorization ?? "");
       const token = offered.startsWith("Bearer ") ? offered.slice(7) : "";
       const turn = claudeToolTurns.get(token) || (token === wideBridgeGlobalToken ? wideActiveTurn : null) || wideActiveTurn;
+      const authorized = Boolean(turn || token === wideBridgeGlobalToken || claudeToolTurns.has(token));
+
+      if (request.method === "GET" && request.url === "/tools") {
+        if (!authorized) return finish(403, { error: "Unauthorized" });
+        const tools = typeof aiGetToolCatalog === "function" ? aiGetToolCatalog(turn ? turn.allowWrites : true) : [];
+        return finish(200, { tools });
+      }
+
+      if (request.method !== "POST" || request.url !== "/tool") return finish(404, {});
       if (!turn) return finish(403, {});
 
       const decoder = new StringDecoder("utf8");
@@ -80,7 +89,7 @@ function claudeToolBridge() {
         }
         try {
           const targetRoot = turn.root || call.root || "";
-          const result = await aiRunTool(targetRoot, call.name ?? "", call.input ?? {}, turn.send);
+          const result = await aiRunTool(targetRoot, call.name ?? "", call.input ?? {}, turn.send, turn.allowWrites);
           finish(200, { result });
         } catch (error) {
           finish(200, { result: `That tool failed: ${String(error.message || error)}` });
@@ -170,7 +179,7 @@ async function claudeCodeInstall(track) {
   return at ? { ok: true, path: at } : { ok: false, error: "It installed but could not be found." };
 }
 
-async function aiRunClaudeCodeTurn({ root, model, system, messages, signal, send }) {
+async function aiRunClaudeCodeTurn({ root, model, system, messages, allowWrites = true, signal, send }) {
   const at = await claudeCodePath();
   if (!at) {
     send({ type: "error", message: "The Claude Code CLI is not installed." });
@@ -182,7 +191,7 @@ async function aiRunClaudeCodeTurn({ root, model, system, messages, signal, send
 
   const bridge = await claudeToolBridge();
   const token = node_crypto.randomBytes(32).toString("hex");
-  claudeToolTurns.set(token, { root: root ?? "", send });
+  claudeToolTurns.set(token, { root: root ?? "", send, allowWrites: allowWrites !== false });
 
   let configDir = "";
   const sweep = () => {

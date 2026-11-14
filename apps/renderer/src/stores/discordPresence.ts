@@ -48,7 +48,7 @@ const LANGUAGE_MAP: Record<string, { name: string; icon: string }> = {
   ps1:        { name: "PowerShell",          icon: "https://img.icons8.com/fluency/48/powershell.png" },
   psm1:       { name: "PowerShell Module",   icon: "https://img.icons8.com/fluency/48/powershell.png" },
   vue:        { name: "Vue",                icon: I8  + "vue-js.png" },
-  svelte:     { name: "Svelte",              icon: I8  + "vue-js.png" },  // closest available PNG
+  svelte:     { name: "Svelte",              icon: I8  + "vue-js.png" },
   dart:       { name: "Dart",               icon: I8  + "dart.png" },
   swift:      { name: "Swift",               icon: I8  + "swift.png" },
   yaml:       { name: "YAML",               icon: I8B + "source-code.png" },

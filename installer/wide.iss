@@ -1,5 +1,5 @@
 #define AppName "Wide IDE"
-#define AppVersion "1.8101126"
+#define AppVersion "1.9141126"
 #define AppPublisher "sl4de"
 #define AppRepo "https://github.com/sl4de0day/wide-ide"
 

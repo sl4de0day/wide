@@ -373,6 +373,27 @@ capability lsp.serve {
   audit always
 }
 
+capability db.manage {
+  describe "Database connections, discovery & security audit"
+
+  allow always
+  audit on deny
+}
+
+capability db.read {
+  describe "Database schema & query reads"
+
+  allow always
+  audit on deny
+}
+
+capability db.write {
+  describe "Database writes & saved query mutations"
+
+  allow always
+  audit on deny
+}
+
 capability ipc.default {
   describe "Unbound IPC channel"
 
@@ -515,6 +536,22 @@ bind "extensions:servers" to extensions.manage
 bind "extensions:install" to extensions.manage
 bind "extensions:remove"  to extensions.manage
 
+bind "db:list"             to db.manage
+bind "db:save"             to db.manage
+bind "db:delete"           to db.manage { id = arg 0 }
+bind "db:test"             to db.manage
+bind "db:discover"         to db.manage { root = arg 0 }
+bind "db:connect"          to db.read   { id = arg 0 }
+bind "db:disconnect"       to db.manage { id = arg 0 }
+bind "db:schema"           to db.read   { id = arg 0 }
+bind "db:query"            to db.read   { id = arg 0 }
+bind "db:applyChanges"     to db.write  { id = arg 0 }
+bind "db:export"           to db.read   { id = arg 0 }
+bind "db:audit"            to db.manage { id = arg 0 }
+bind "db:listSavedQueries" to db.read   { root = arg 0 }
+bind "db:saveQuery"        to db.write  { root = arg 0 }
+bind "db:redisCommand"     to db.read   { id = arg 0 }
+
 
 
 audit {
@@ -524,5 +561,5 @@ audit {
 
   retain 5000 records
 
-  redact [ "content", "next", "previous", "apiKey", "key", "token", "old_text", "new_text" ]
+  redact [ "content", "next", "previous", "apiKey", "key", "token", "old_text", "new_text", "password", "connectionString", "dsn", "passphrase", "sslKey" ]
 }

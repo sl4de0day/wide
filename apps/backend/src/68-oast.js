@@ -6,8 +6,23 @@ let oastServer = "";
 
 let builtinOastServer = null;
 let builtinOastDomain = "";
+const oastInteractionsLog = [];
 
 const OAST_DOMAIN_RE = /^[a-z0-9]+\.[a-z0-9.\-]+$/i;
+
+function oastRecordInteraction(entry) {
+  if (!entry || typeof entry !== "object") return;
+  oastInteractionsLog.unshift({ ...entry, recordedAt: entry.timestamp || new Date().toISOString() });
+  if (oastInteractionsLog.length > 200) oastInteractionsLog.length = 200;
+  broadcast("oast:interaction", entry);
+}
+
+function oastPollInteractions(limit = 50, clear = false) {
+  const n = Math.max(1, Math.min(200, Number(limit) || 50));
+  const items = oastInteractionsLog.slice(0, n);
+  if (clear) oastInteractionsLog.length = 0;
+  return items;
+}
 
 function stopBuiltinOast() {
   if (builtinOastServer) {
@@ -38,7 +53,7 @@ function startBuiltinOast() {
         if (size <= 65536) chunks.push(chunk);
       });
       req.on("end", () => {
-        broadcast("oast:interaction", {
+        oastRecordInteraction({
           protocol: "http",
           "unique-id": token,
           "full-id": token,
@@ -130,7 +145,7 @@ function registerOastHandlers() {
         if (!line) continue;
         if (line.startsWith("{")) {
           try {
-            broadcast("oast:interaction", JSON.parse(line));
+            oastRecordInteraction(JSON.parse(line));
           } catch {
 
           }

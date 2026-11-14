@@ -457,7 +457,6 @@ export function CodebergPanel({ builtin, providerId }: { builtin?: boolean; prov
           </div>
         )}
 
-        {/* Commit form */}
         <div className="border-b border-line px-2 py-2">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-wide text-fg-faint">{t("Commit message")}</span>

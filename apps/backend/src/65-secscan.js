@@ -137,7 +137,12 @@ function registerSecScanHandlers() {
 
   const SEC_DEFAULT_CACHE_DIR = node_path.join(node_os.homedir(), ".wide", "rules");
   const SEC_DEFAULT_CACHE_FILE = node_path.join(SEC_DEFAULT_CACHE_DIR, "rules.json");
+  const SEC_DEFAULT_OSV_FILE = node_path.join(SEC_DEFAULT_CACHE_DIR, "osv-bundle.json");
+  const SEC_DEFAULT_META_FILE = node_path.join(SEC_DEFAULT_CACHE_DIR, ".sync-meta.json");
   const SEC_REMOTE_RULES_URL = "https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/rules.json";
+  const SEC_REMOTE_OSV_URL = "https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/osv-bundle.json";
+  const SEC_REMOTE_CHECKSUMS_URL = "https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/SHA256SUMS";
+  let secRemoteOsv = null;
 
   function parseCustomRules(list) {
     if (!list) return [];
@@ -159,6 +164,15 @@ function registerSecScanHandlers() {
       } catch {
         continue;
       }
+      const rawNotMatch = raw["not-match"] || raw.notMatch;
+      let notMatch = null;
+      if (typeof rawNotMatch === "string" && rawNotMatch) {
+        try {
+          notMatch = new RegExp(rawNotMatch, typeof raw.flags === "string" ? raw.flags.replace(/[^gimsuy]/g, "") : "");
+        } catch {
+          notMatch = null;
+        }
+      }
       const rawLangs = raw.languages || raw.langs;
       const langs = Array.isArray(rawLangs) && rawLangs.length
         ? rawLangs.filter((v) => typeof v === "string")
@@ -171,6 +185,7 @@ function registerSecScanHandlers() {
         id: raw.id.startsWith("wide/") || raw.id.startsWith("custom/") ? raw.id : `custom/${raw.id}`,
         langs,
         re,
+        ...(notMatch ? { notMatch } : {}),
         severity: ["info", "warning", "error"].includes(sev) ? sev : "warning",
         confidence: ["low", "medium", "high"].includes(raw.confidence) ? raw.confidence : "medium",
         cwe: typeof raw.cwe === "string" ? raw.cwe : "",
@@ -181,28 +196,100 @@ function registerSecScanHandlers() {
     return out;
   }
 
-  async function updateRulesFromRemote() {
-    await promises.mkdir(SEC_DEFAULT_CACHE_DIR, { recursive: true });
+  function secHttpGetText(url) {
     return new Promise((resolve, reject) => {
-      node_https.get(SEC_REMOTE_RULES_URL, { headers: { "User-Agent": "Wide-IDE/1.8101126" } }, (res) => {
+      node_https.get(url, { headers: { "User-Agent": "Wide-IDE/1.9141126" } }, (res) => {
         if (res.statusCode !== 200) {
-          reject(new Error(`Failed to download rules: HTTP ${res.statusCode}`));
+          res.resume();
+          reject(new Error(`HTTP ${res.statusCode} from ${url}`));
           return;
         }
         let data = "";
         res.on("data", (chunk) => { data += chunk; });
-        res.on("end", async () => {
-          try {
-            const parsed = JSON.parse(data);
-            await writeFileAtomic(SEC_DEFAULT_CACHE_FILE, JSON.stringify(parsed, null, 2), "utf8");
-            const count = Array.isArray(parsed) ? parsed.length : Array.isArray(parsed.rules) ? parsed.rules.length : 0;
-            resolve(count);
-          } catch (err) {
-            reject(err);
-          }
-        });
+        res.on("end", () => resolve(data));
       }).on("error", reject);
     });
+  }
+
+  function parseSecChecksums(text) {
+    const map = new Map();
+    if (!text || typeof text !== "string") return map;
+    for (const line of text.split(/\r?\n/)) {
+      const m = /^([a-fA-F0-9]{64})\s+\*?(.+)$/.exec(line.trim());
+      if (m) map.set(m[2].trim(), m[1].toLowerCase());
+    }
+    return map;
+  }
+
+  async function loadCachedRemoteOsv() {
+    try {
+      const raw = await promises.readFile(SEC_DEFAULT_OSV_FILE, "utf8");
+      secRemoteOsv = parseOsvDoc(JSON.parse(raw));
+    } catch {
+      void 0;
+    }
+  }
+
+  async function updateRulesFromRemote() {
+    await promises.mkdir(SEC_DEFAULT_CACHE_DIR, { recursive: true });
+    let checksums = new Map();
+    try {
+      checksums = parseSecChecksums(await secHttpGetText(SEC_REMOTE_CHECKSUMS_URL));
+    } catch {
+      checksums = new Map();
+    }
+
+    const rulesRaw = await secHttpGetText(SEC_REMOTE_RULES_URL);
+    const expectedRulesSha = checksums.get("rules.json");
+    if (expectedRulesSha) {
+      const actualSha = node_crypto.createHash("sha256").update(rulesRaw).digest("hex");
+      if (actualSha !== expectedRulesSha) {
+        throw new Error(`SHA-256 mismatch for rules.json`);
+      }
+    }
+    const parsed = JSON.parse(rulesRaw);
+    await writeFileAtomic(SEC_DEFAULT_CACHE_FILE, JSON.stringify(parsed, null, 2), "utf8");
+    const count = Array.isArray(parsed) ? parsed.length : Array.isArray(parsed.rules) ? parsed.rules.length : 0;
+
+    let osvCount = 0;
+    try {
+      const osvRaw = await secHttpGetText(SEC_REMOTE_OSV_URL);
+      const expectedOsvSha = checksums.get("osv-bundle.json");
+      if (expectedOsvSha) {
+        const actualOsvSha = node_crypto.createHash("sha256").update(osvRaw).digest("hex");
+        if (actualOsvSha !== expectedOsvSha) {
+          throw new Error(`SHA-256 mismatch for osv-bundle.json`);
+        }
+      }
+      const osvParsed = JSON.parse(osvRaw);
+      await writeFileAtomic(SEC_DEFAULT_OSV_FILE, JSON.stringify(osvParsed, null, 2), "utf8");
+      secRemoteOsv = parseOsvDoc(osvParsed);
+      osvCount = Number(osvParsed?.stats?.total || 0);
+    } catch (err) {
+      if (String(err && err.message ? err.message : "").includes("SHA-256 mismatch")) throw err;
+    }
+
+    await writeFileAtomic(
+      SEC_DEFAULT_META_FILE,
+      JSON.stringify({ syncedAt: new Date().toISOString(), rulesCount: count, osvCount }, null, 2),
+      "utf8"
+    );
+    return count;
+  }
+
+  async function ensureRulesFresh(ttlMs = 24 * 60 * 60 * 1000) {
+    if (process.env.WIDE_NO_AUTO_RULES_SYNC === "1" || process.argv.some((a) => String(a).includes("smoke"))) {
+      return false;
+    }
+    try {
+      const meta = JSON.parse(await promises.readFile(SEC_DEFAULT_META_FILE, "utf8"));
+      const age = Date.now() - Date.parse(meta?.syncedAt || "");
+      if (Number.isFinite(age) && age >= 0 && age < ttlMs) return false;
+    } catch {
+      void 0;
+    }
+    await updateRulesFromRemote();
+    return true;
   }
 
   async function readSecConfig(root) {
@@ -2914,7 +3001,8 @@ function registerSecScanHandlers() {
         if (!rule.langs.includes(lang)) continue;
         rule.re.lastIndex = 0;
         const m = rule.re.exec(line);
-        if (m) emit(i + 1, m.index, rule);
+        if (!m || secRuleSuppressed(rule, line)) continue;
+        emit(i + 1, m.index, rule);
       }
       if (nameRe) {
         for (const sink of TAINT_SINKS) {
@@ -2952,7 +3040,8 @@ function registerSecScanHandlers() {
         if (!rule.langs.includes(lang)) continue;
         rule.re.lastIndex = 0;
         const m = rule.re.exec(text);
-        if (m) emit(span.start + 1, 0, rule);
+        if (!m || secRuleSuppressed(rule, text)) continue;
+        emit(span.start + 1, 0, rule);
       }
       if (nameRe) {
         for (const sink of TAINT_SINKS) {
@@ -3357,6 +3446,7 @@ function registerSecScanHandlers() {
     const out = [];
     if (SEC_VULN_DB[eco]) out.push(...SEC_VULN_DB[eco]);
     if (typeof OSV_SNAPSHOT === "object" && OSV_SNAPSHOT && OSV_SNAPSHOT[eco]) out.push(...OSV_SNAPSHOT[eco]);
+    if (secRemoteOsv && secRemoteOsv[eco]) out.push(...secRemoteOsv[eco]);
     if (secProjectOsv && secProjectOsv[eco]) out.push(...secProjectOsv[eco]);
     return out;
   }
@@ -3947,4 +4037,12 @@ function registerSecScanHandlers() {
       cache: SEC_DEFAULT_CACHE_FILE,
     };
   });
+
+  loadCachedRemoteOsv().catch(() => {});
+  if (process.env.WIDE_NO_AUTO_RULES_SYNC !== "1" && !process.argv.some((a) => String(a).includes("smoke"))) {
+    const timer = setTimeout(() => {
+      ensureRulesFresh().catch(() => {});
+    }, 6000);
+    if (typeof timer.unref === "function") timer.unref();
+  }
 }
