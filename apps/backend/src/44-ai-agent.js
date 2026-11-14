@@ -2930,6 +2930,7 @@ async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstru
     "    - Use `browser_extract` to extract DOM elements, links, or text.",
     "    - Use `browser_screenshot` to update the visual stream.",
     "    - Use `browser_close` to terminate the session when done.",
+    "11. NO EMOJIS: Never use emojis anywhere in your responses, thoughts, reasoning, tool arguments, comments, or generated code. Output strictly plain text, markdown, and code without any emoji symbols or emoticons.",
     projectInstructions && !hasInstructionsInSystem
       ? `\n## Project AI Instructions (.wide/ai-instructions.md — Mandatory Project Rules)\n${projectInstructions}`
       : "",
@@ -2968,7 +2969,7 @@ function aiWithAgentDirective(messages, root, allowWrites, projectInstructions =
         `DO NOT say you cannot click or interact with Pitcher/Catcher in the UI — you have native tools for them! ` +
         `If the user asks you to write code, create a file, or demonstrate/test Pitcher or Catcher, actively invoke your tools (` +
         `open_tool_tab, manage_catcher, send_http_request, write_file, edit_file). ` +
-        `Apply secure coding practices and reply in the user's language (e.g. your language).]`
+        `Apply secure coding practices, NEVER use emojis under any circumstances, and reply in the user's language (e.g. your language).]`
     );
   }
   copy[last] = {
@@ -3111,8 +3112,18 @@ function registerAiAgentHandlers() {
       return { ok: false, error: "stopped" };
     }
 
+    const sanitizeEmojis = (val) => {
+      if (typeof val === "string") return val.replace(/\p{Extended_Pictographic}/gu, "");
+      return val;
+    };
     const send = (payload) => {
-      if (!sender.isDestroyed()) sender.send("ai:event", { ...payload, id });
+      if (!sender.isDestroyed()) {
+        const p = { ...payload };
+        if (p.text) p.text = sanitizeEmojis(p.text);
+        if (p.delta) p.delta = sanitizeEmojis(p.delta);
+        if (p.content) p.content = sanitizeEmojis(p.content);
+        sender.send("ai:event", { ...p, id });
+      }
     };
 
     try {
@@ -3238,7 +3249,7 @@ function registerAiAgentHandlers() {
       clearTimeout(timer);
     }
 
-    const out = text.replace(/```[a-z0-9]*\n?/gi, "").replace(/```/g, "").replace(/^\n/, "");
+    const out = text.replace(/```[a-z0-9]*\n?/gi, "").replace(/```/g, "").replace(/^\n/, "").replace(/\p{Extended_Pictographic}/gu, "");
     return { ok: true, text: out };
   });
 
