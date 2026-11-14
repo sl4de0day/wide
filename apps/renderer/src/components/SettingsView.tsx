@@ -13,7 +13,7 @@ import { toast } from "@/stores/toast";
 import { useUpdate } from "@/stores/update";
 
 const ABOUT_DESCRIPTION =
-  "Wide is an IDE that unifies web development and web security in a single ecosystem. It detects vulnerabilities in real time as you code, enabling secure development from line one, while providing built-in tools to execute full-scale, professional web penetration tests. Whether you are a web pentester, bug bounty hunter, or web developer, Wide is the only tool you need.";
+  "Wide IDE is an IDE that unifies web development and web security in a single ecosystem. It detects vulnerabilities in real time as you code, enabling secure development from line one, while providing built-in tools to execute full-scale, professional web penetration tests. Whether you are a web pentester, bug bounty hunter, or web developer, Wide IDE is the only tool you need.";
 const ABOUT_REPO_URL = "https://github.com/sl4de0day/wide-ide";
 
 const THEME_PREVIEW_LINES: { token: string; width: number }[][] = [
@@ -262,7 +262,7 @@ function UpdatesSection() {
             ? `${t("Error")}: ${error}`
             : available
               ? t("New version {version} is available. Click to install.", { version: latest })
-              : t("Wide checks for updates on startup and installs them automatically from GitHub.")
+              : t("Wide IDE checks for updates on startup and installs them automatically from GitHub.")
         }
       >
         <div className="flex items-center gap-3">
@@ -415,7 +415,7 @@ export function SettingsView() {
         </Row>
         <Row
           label={t("Open dev-server URLs in the built-in browser")}
-          hint={t("When a run task prints a localhost URL, open it automatically in Wide's browser.")}
+          hint={t("When a run task prints a localhost URL, open it automatically in Wide IDE's browser.")}
         >
           <Toggle value={settings.autoOpenDevServer} onChange={(next) => settings.set({ autoOpenDevServer: next })} />
         </Row>
@@ -435,7 +435,7 @@ export function SettingsView() {
         </Row>
         <Row
           label={t("Security policy")}
-          hint={t("What Wide is allowed to touch, and a log of every decision it has made.")}
+          hint={t("What Wide IDE is allowed to touch, and a log of every decision it has made.")}
         >
           <button
             type="button"
@@ -450,7 +450,7 @@ export function SettingsView() {
 
         <h2 className="pt-6 text-[11px] uppercase tracking-wide text-fg-faint">{t("About")}</h2>
         <div className="border-b border-line py-3">
-          <p className="text-[14px] font-semibold text-fg-bright">{t("About Wide")}</p>
+          <p className="text-[14px] font-semibold text-fg-bright">{t("About Wide IDE")}</p>
           <p className="pt-2 text-[12px] leading-relaxed text-fg-dim">{t(ABOUT_DESCRIPTION)}</p>
           <div className="flex flex-col gap-1.5 pt-3">
             <div className="flex items-center justify-between text-[12px]">

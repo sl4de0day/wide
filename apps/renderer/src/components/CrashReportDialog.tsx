@@ -20,7 +20,7 @@ export function CrashReportDialog() {
         </div>
         
         <p className="text-[12px] leading-relaxed text-fg-dim">
-          It appears Wide encountered an unexpected error and closed. You can help improve stability by submitting this anonymous report.
+          It appears Wide IDE encountered an unexpected error and closed. You can help improve stability by submitting this anonymous report.
         </p>
 
         <div className="max-h-40 overflow-y-auto rounded-md bg-canvas p-3 text-[11px] font-mono text-fg-faint">

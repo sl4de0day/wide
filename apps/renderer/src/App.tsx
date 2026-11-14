@@ -173,7 +173,7 @@ function addSecurityFindingsForActiveFile(): number {
 function BootGate() {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas">
-      <img src={logo} alt="Wide" width={432} height={432} className="size-[432px] select-none animate-pulse" draggable={false} />
+      <img src={logo} alt="Wide IDE" width={432} height={432} className="size-[432px] select-none animate-pulse" draggable={false} />
     </div>
   );
 }
@@ -419,7 +419,7 @@ export default function App() {
 
   useEffect(() => {
     const marker = title.dirty ? "● " : "";
-    const parts = [title.name && `${marker}${title.name}`, rootName, "Wide"];
+    const parts = [title.name && `${marker}${title.name}`, rootName, "Wide IDE"];
     void bridge.setTitle(parts.filter(Boolean).join(" — "));
   }, [title, rootName]);
 

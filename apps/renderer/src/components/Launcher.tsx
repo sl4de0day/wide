@@ -146,14 +146,14 @@ export function Launcher() {
         <div className="flex items-center gap-3.5">
           <img
             src={logo}
-            alt="Wide"
+            alt="Wide IDE"
             width={88}
             height={88}
             className="block size-[88px] shrink-0 select-none"
             draggable={false}
           />
           <div className="min-w-0">
-            <h1 className="text-[19px] font-semibold leading-tight text-fg-bright">{t("Welcome to Wide")}</h1>
+            <h1 className="text-[19px] font-semibold leading-tight text-fg-bright">{t("Welcome to Wide IDE")}</h1>
             <p className="text-[13px] italic text-fg-muted">{t("The IDE for building and testing the web")}</p>
           </div>
         </div>

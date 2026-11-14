@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Wide
+Name=Wide IDE
 Comment=Security-first IDE for the web stack
 Exec=/usr/bin/wide %F
 Icon=wide
@@ -7,4 +7,4 @@ Terminal=false
 Type=Application
 Categories=Development;IDE;Security;
 MimeType=text/plain;application/x-zerosize;
-StartupWMClass=Wide
+StartupWMClass=Wide IDE

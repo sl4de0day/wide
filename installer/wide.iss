@@ -1,4 +1,4 @@
-#define AppName "Wide"
+#define AppName "Wide IDE"
 #define AppVersion "1.8101126"
 #define AppPublisher "sl4de"
 #define AppRepo "https://github.com/sl4de0day/wide-ide"
@@ -12,7 +12,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppRepo}
 AppSupportURL={#AppRepo}/issues
 AppUpdatesURL={#AppRepo}/releases
-DefaultDirName={localappdata}\Programs\Wide
+DefaultDirName={localappdata}\Programs\Wide IDE
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=yes
@@ -45,31 +45,31 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 [CustomMessages]
 english.DesktopIcon=Create a desktop shortcut
 english.ShortcutsGroup=Additional shortcuts:
-english.LaunchApp=Launch Wide
+english.LaunchApp=Launch Wide IDE
 english.WideLocale=en
 spanish.DesktopIcon=Crear un acceso directo en el escritorio
 spanish.ShortcutsGroup=Accesos directos adicionales:
-spanish.LaunchApp=Iniciar Wide
+spanish.LaunchApp=Iniciar Wide IDE
 spanish.WideLocale=es
 german.DesktopIcon=Verknüpfung auf dem Desktop erstellen
 german.ShortcutsGroup=Zusätzliche Verknüpfungen:
-german.LaunchApp=Wide starten
+german.LaunchApp=Wide IDE starten
 german.WideLocale=de
 french.DesktopIcon=Créer un raccourci sur le Bureau
 french.ShortcutsGroup=Raccourcis supplémentaires :
-french.LaunchApp=Lancer Wide
+french.LaunchApp=Lancer Wide IDE
 french.WideLocale=fr
 italian.DesktopIcon=Crea un collegamento sul desktop
 italian.ShortcutsGroup=Collegamenti aggiuntivi:
-italian.LaunchApp=Avvia Wide
+italian.LaunchApp=Avvia Wide IDE
 italian.WideLocale=it
 japanese.DesktopIcon=デスクトップにショートカットを作成する
 japanese.ShortcutsGroup=追加のショートカット:
-japanese.LaunchApp=Wide を起動する
+japanese.LaunchApp=Wide IDE を起動する
 japanese.WideLocale=ja
 korean.DesktopIcon=바탕 화면에 바로 가기 만들기
 korean.ShortcutsGroup=추가 바로 가기:
-korean.LaunchApp=Wide 실행
+korean.LaunchApp=Wide IDE 실행
 korean.WideLocale=ko
 
 [INI]
@@ -136,7 +136,7 @@ begin
     RemoveShellIntegration();
     if not UninstallSilent() then
     begin
-      if MsgBox('Remove Wide''s data too (settings, saved keys, proxy CA, extensions, browser data)? Choose No to keep them.', mbConfirmation, MB_YESNO) = IDYES then
+      if MsgBox('Remove Wide IDE''s data too (settings, saved keys, proxy CA, extensions, browser data)? Choose No to keep them.', mbConfirmation, MB_YESNO) = IDYES then
       begin
         DelTree(ExpandConstant('{userappdata}\wide'), True, True, True);
         DelTree(ExpandConstant('{localappdata}\wide'), True, True, True);

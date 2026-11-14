@@ -1,7 +1,8 @@
 {
   "name": "wide",
+  "productName": "Wide IDE",
   "version": "1.8101126",
-  "description": "Wide — a security-first IDE for the web stack. Modern cross-platform native host (Rust + tao + wry), React renderer, Node backend sidecar.",
+  "description": "Wide IDE — a security-first IDE for the web stack. Modern cross-platform native host (Rust + tao + wry), React renderer, Node backend sidecar.",
   "private": true,
   "workspaces": [
     "apps/renderer"

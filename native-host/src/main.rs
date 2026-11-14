@@ -304,7 +304,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = event_loop.create_proxy();
 
     let window = WindowBuilder::new()
-        .with_title("Wide")
+        .with_title("Wide IDE")
         .with_decorations(false)
         .with_inner_size(LogicalSize::new(1440.0, 900.0))
         .with_min_inner_size(LogicalSize::new(720.0, 480.0))
@@ -434,6 +434,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if method == "webview:eval" {
                                 if let Some(code) = msg.get("params").and_then(|p| p.get("code")).and_then(|c| c.as_str()) {
                                     let _ = webview.evaluate_script(code);
+                                }
+                                let rep = json!({
+                                    "t": "hostReply",
+                                    "id": id,
+                                    "result": Value::Null
+                                });
+                                sidecar_main.send(rep.to_string());
+                            } else if method == "window:setTitle" {
+                                if let Some(new_title) = msg.get("params").and_then(|p| p.get("title")).and_then(|s| s.as_str()) {
+                                    window.set_title(new_title);
                                 }
                                 let rep = json!({
                                     "t": "hostReply",
