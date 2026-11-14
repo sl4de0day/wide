@@ -662,7 +662,7 @@ export type AiEvent =
 
 export interface AiSessionMeta {
   id: string;
-
+  root?: string;
   title: string;
   createdAt: number;
   updatedAt: number;

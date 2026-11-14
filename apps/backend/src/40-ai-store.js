@@ -163,21 +163,43 @@ function sessionTitle(messages) {
 async function readAiSession(id) {
   const file = sessionFile(id);
   if (!file) return null;
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, "");
+  const appDataBase = process.env.APPDATA || (process.platform === "win32" ? node_path.join(node_os.homedir(), "AppData", "Roaming") : (process.env.XDG_CONFIG_HOME || node_path.join(node_os.homedir(), ".config")));
+  const candFiles = [
+    file,
+    node_path.join(appDataBase, "wide", "ai-sessions", `${safe}.json`),
+    node_path.join(appDataBase, "wide-app", "ai-sessions", `${safe}.json`),
+    node_path.join(appDataBase, "Wide IDE", "ai-sessions", `${safe}.json`),
+    node_path.join(appDataBase, "Wide", "ai-sessions", `${safe}.json`),
+  ];
   try {
-    const parsed = JSON.parse(await promises.readFile(file, "utf8"));
-    const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
-    return {
-
-      id: typeof parsed.id === "string" && parsed.id ? parsed.id : String(id),
-      root: parsed.root ?? "",
-      title: parsed.title || sessionTitle(messages),
-      createdAt: Number(parsed.createdAt) || 0,
-      updatedAt: Number(parsed.updatedAt) || 0,
-      messages,
-    };
-  } catch {
-    return null;
+    const activeData = JSON.parse(await promises.readFile(AI_ACTIVE_CHAT_FILE(), "utf8"));
+    if (activeData?.root) {
+      candFiles.push(node_path.join(activeData.root, ".wide", "ai-sessions", `${safe}.json`));
+    }
+  } catch {}
+  for (const cand of candFiles) {
+    try {
+      const parsed = JSON.parse(await promises.readFile(cand, "utf8"));
+      const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+      const record = {
+        id: typeof parsed.id === "string" && parsed.id ? parsed.id : String(id),
+        root: parsed.root ?? "",
+        title: parsed.title || sessionTitle(messages),
+        createdAt: Number(parsed.createdAt) || 0,
+        updatedAt: Number(parsed.updatedAt) || 0,
+        messages,
+      };
+      if (cand !== file) {
+        try {
+          await promises.mkdir(AI_SESSION_DIR(), { recursive: true });
+          await writeFileAtomic(file, JSON.stringify(record, null, 2), "utf8");
+        } catch {}
+      }
+      return record;
+    } catch {}
   }
+  return null;
 }
 
 async function writeAiSession(id, root, messages, stamp) {
@@ -334,11 +356,24 @@ function registerAiStoreHandlers() {
         return { ok: false, error: err.message };
       }
     }
-    try {
-      const data = await promises.readFile(file, "utf8");
-      return { ok: true, activeChat: JSON.parse(data) };
-    } catch {
-      return { ok: true, activeChat: null };
+    const appDataBase = process.env.APPDATA || (process.platform === "win32" ? node_path.join(node_os.homedir(), "AppData", "Roaming") : (process.env.XDG_CONFIG_HOME || node_path.join(node_os.homedir(), ".config")));
+    const candFiles = [
+      file,
+      node_path.join(appDataBase, "wide-app", "active-chat.json"),
+      node_path.join(appDataBase, "Wide IDE", "active-chat.json"),
+      node_path.join(appDataBase, "Wide", "active-chat.json"),
+      node_path.join(appDataBase, "wide", "active-chat.json"),
+    ];
+    let best = null;
+    for (const cand of candFiles) {
+      try {
+        const data = await promises.readFile(cand, "utf8");
+        const parsed = JSON.parse(data);
+        if (parsed && parsed.id && (!best || (parsed.timestamp || 0) > (best.timestamp || 0))) {
+          best = parsed;
+        }
+      } catch {}
     }
+    return { ok: true, activeChat: best };
   });
 }

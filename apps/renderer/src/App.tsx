@@ -515,10 +515,12 @@ export default function App() {
     checkActiveChat();
     const t1 = setTimeout(checkActiveChat, 500);
     const t2 = setTimeout(checkActiveChat, 1500);
+    const t3 = setTimeout(checkActiveChat, 3000);
     window.addEventListener("focus", checkActiveChat);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
       window.removeEventListener("focus", checkActiveChat);
     };
   }, [root, t]);
