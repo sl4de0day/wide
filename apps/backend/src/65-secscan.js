@@ -3812,6 +3812,15 @@ function registerSecScanHandlers() {
         void 0;
       }
     }
+        const siblingRules = node_path.resolve(process.cwd(), "../wide-rules/dist/rules.json");
+    try {
+      const raw = JSON.parse(await promises.readFile(siblingRules, "utf8"));
+      const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
+      const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
+      if (filtered.length > 0) return { ok: true, source: siblingRules, count: filtered.length, rules: filtered };
+    } catch {
+      void 0;
+    }
     try {
       const raw = JSON.parse(await promises.readFile(SEC_DEFAULT_CACHE_FILE, "utf8"));
       const rules = parseCustomRules(raw);
@@ -3886,7 +3895,8 @@ function registerSecScanHandlers() {
       void 0;
     }
     const embeddedAgentRules = [
-      { id: "wide/cwe078-ai-unsafe-tool-exec", cwe: "CWE-78", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:exec|execSync|spawn|subprocess\\.run|os\\.system)\\s*\\(\\s*(?:toolCall|tool_call|args|arguments|response\\.command|patch\\.command)", message: "Executing raw system command directly from AI tool call response without argument validation.", remediation: "Whitelist allowed commands and run them in an isolated sandbox with fixed arguments." },
+      { id: "wide/ai-no-emojis", name: "ai-no-emojis", category: "AI_SECURITY", severity: "HIGH", languages: ["all"], pattern: "(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[\\u2600-\\u27BF])", message: "AI agents must not use emojis or emoticons under any circumstances.", remediation: "Strip all emojis from text and outputs, preserving clean technical prose.", instruction: "Do not use emojis anywhere in your responses, thoughts, reasoning, tool arguments, comments, or generated code. Never output emojis under any circumstances." },
+      { id: "wide/cwe078-ai-unsafe-tool-exec", cwe: "CWE-78", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:exec|execSync|spawn|subprocess\\.run|os\\.system)\\s*\\(\\s*(?:toolCall|tool_call|args|arguments|response\\.command|patch\\.command)", message: "Executing raw system command directly from AI tool call response without argument validation.", remediation: "Whitelist allowed commands and run them in an isolated sandbox with fixed arguments.", instruction: "Never execute raw system commands directly from AI tool call responses without argument validation." },
       { id: "wide/cwe079-ai-prompt-injection", cwe: "CWE-79", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:prompt|instruction|query|input)\\s*[:=]\\s*(?:f?[\"'].*?\\{|`.*?\\$\\{).*(?:req\\.|params\\.|body\\.|userInput|user_input|request\\.)", message: "Untrusted user input concatenated directly into LLM prompt template without sanitization.", remediation: "Use structured multi-turn message roles or sanitize prompt inputs before sending to the model." },
       { id: "wide/cwe095-ai-unconstrained-eval", cwe: "CWE-95", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:eval|Function|vm\\.runInContext|compile)\\s*\\(\\s*(?:toolOutput|tool_output|response\\.text|aiResult|ai_output|completion)", message: "Evaluating raw executable code returned by LLM without sandboxing or static verification.", remediation: "Parse responses into structured abstract syntax trees or validate against a strict AST schema before execution." },
       { id: "wide/cwe306-ai-unauthenticated-mcp-registration", cwe: "CWE-306", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:registerMcpServer|addMcpServer|mcpClient\\.connect)\\s*\\(\\s*(?:url|endpoint|serverConfig)\\s*\\)", message: "Model Context Protocol server registered without identity verification or authorization signature.", remediation: "Verify server host authorization and enforce cryptographic signature checks prior to registering external toolsets." },

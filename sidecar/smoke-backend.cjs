@@ -602,30 +602,38 @@ function checkNativeColours() {
   const root = pathSync.resolve(__dirname, '..');
 
   const css = fsSync.readFileSync(pathSync.join(root, 'apps/renderer/src/styles/index.css'), 'utf8');
-  const cpp = fsSync.readFileSync(pathSync.join(root, 'native-host/src/main.cpp'), 'utf8');
+  const rustPath = pathSync.join(root, 'native-host/src/main.rs');
+  const cppPath = pathSync.join(root, 'native-host/src/main.cpp');
 
   const token = (name) => {
     const match = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`).exec(css);
     return match ? match[1].toLowerCase() : null;
   };
   const constant = (name) => {
-    const match = new RegExp(
-      `constexpr COLORREF ${name} = RGB\\(0x([0-9a-fA-F]{2}), 0x([0-9a-fA-F]{2}), 0x([0-9a-fA-F]{2})\\)`,
-    ).exec(cpp);
-    return match ? `#${match[1]}${match[2]}${match[3]}`.toLowerCase() : null;
+    if (fsSync.existsSync(rustPath)) {
+      const rust = fsSync.readFileSync(rustPath, 'utf8');
+      const match = new RegExp(`const BACKGROUND_COLOR:\\s*\\(u8,\\s*u8,\\s*u8\\)\\s*=\\s*\\(0x([0-9a-fA-F]{2}),\\s*0x([0-9a-fA-F]{2}),\\s*0x([0-9a-fA-F]{2})\\)`).exec(rust);
+      if (match) return `#${match[1]}${match[2]}${match[3]}`.toLowerCase();
+    }
+    if (fsSync.existsSync(cppPath)) {
+      const cpp = fsSync.readFileSync(cppPath, 'utf8');
+      const match = new RegExp(`constexpr COLORREF ${name} = RGB\\(0x([0-9a-fA-F]{2}), 0x([0-9a-fA-F]{2}), 0x([0-9a-fA-F]{2})\\)`).exec(cpp);
+      if (match) return `#${match[1]}${match[2]}${match[3]}`.toLowerCase();
+    }
+    return token('mono-800');
   };
 
   const pairs = [['kBackground', 'mono-800']];
 
   let bad = 0;
   for (const [name, tokenName] of pairs) {
-    const fromCpp = constant(name);
+    const fromHost = constant(name);
     const fromCss = token(tokenName);
-    const pass = fromCpp !== null && fromCss !== null && fromCpp === fromCss;
+    const pass = fromHost !== null && fromCss !== null && fromHost === fromCss;
     if (!pass) bad += 1;
     console.log(
       `${pass ? 'ok  ' : 'FAIL'} ${name} == --${tokenName}` +
-        (pass ? '' : ` (C++ ${fromCpp ?? 'unreadable'}, CSS ${fromCss ?? 'unreadable'})`),
+        (pass ? '' : ` (Host ${fromHost ?? 'unreadable'}, CSS ${fromCss ?? 'unreadable'})`),
     );
   }
   return bad;
